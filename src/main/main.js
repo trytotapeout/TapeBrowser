@@ -1,6 +1,6 @@
 // TapeBrowser 主进程：窗口、标签、tape:// 协议、钱包桥接、菜单。
 
-import { app, BrowserWindow, protocol, session as electronSession, ipcMain, dialog, shell, net, Menu, nativeTheme } from 'electron';
+import { app, BrowserWindow, protocol, session as electronSession, ipcMain, dialog, shell, net, Menu, nativeTheme, clipboard } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createSettings } from './settings.js';
@@ -12,7 +12,8 @@ import { createBridgeServer } from './bridge-server.js';
 import { createProviderHost, providerError } from './provider-host.js';
 import { createTabs, originOf, ALLOWED } from './tabs.js';
 import { createLibrary } from './library.js';
-import { parseInput, parseHost, siteLabel } from './address.js';
+import { createContentStore } from './content-store.js';
+import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
 import { describeRequest } from './describe.js';
 import { DEFAULT_RPCS } from './config.js';
 
@@ -30,7 +31,8 @@ const settings = createSettings(join(app.getPath('userData'), 'settings.json'));
 const rpcUrls = () => (settings.get('rpcUrls').length ? settings.get('rpcUrls') : DEFAULT_RPCS);
 // net.fetch 走 Chromium 网络栈，遵守系统代理
 const rpc = createRpcPool(rpcUrls, { fetchImpl: (url, init) => net.fetch(url, init) });
-const sites = createSites(createChain(rpc));
+const contentStore = createContentStore(join(app.getPath('userData'), 'content-cache'));
+const sites = createSites(createChain(rpc), contentStore);
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
@@ -167,6 +169,18 @@ function registerIpc() {
   ui('removeBookmark', (url) => library.removeBookmark(String(url)));
   ui('removeHistory', (url) => library.removeHistory(String(url)));
   ui('clearHistory', () => library.clearHistory());
+  ui('siteInfo', async () => {
+    const t = tabs.active();
+    const m = /^tape:\/\/([^/?#]+)(\/[^?#]*)?/i.exec(t?.url || '');
+    const site = m && parseHost(m[1]);
+    if (!site) return null;
+    let path;
+    try { path = normalizePath(m[2] || '/'); } catch { return null; }
+    try { return await sites.describe(site.tokenId, site.cpu, path); } catch (e) { return { error: String(e?.message || e) }; }
+  });
+  ui('copy', (text) => { clipboard.writeText(String(text).slice(0, 1000)); return true; });
+  ui('cacheUsage', () => contentStore.usage());
+  ui('clearCache', () => contentStore.clear());
   ui('openUrl', (url, opts) => {
     url = String(url || '');
     if (!ALLOWED.test(url)) return;
@@ -401,4 +415,4 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('will-quit', () => { library.flush(); bridge?.stop(); });
+app.on('will-quit', () => { library.flush(); contentStore.flush(); bridge?.stop(); });

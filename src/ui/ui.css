@@ -75,3 +75,18 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 .links .u { flex: none; color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
 .links .remove { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 4px; }
 .links .remove:hover { background: var(--line); color: var(--fg); }
+
+#site-btn { -webkit-app-region: no-drag; height: 24px; padding: 0 8px; border: 1px solid var(--ok); border-radius: 12px; background: transparent; color: var(--ok); cursor: pointer; font-size: 12px; flex: none; }
+#site-btn.stale { border-color: #b7791f; color: #b7791f; }
+#site-btn.bad { border-color: var(--bad); color: var(--bad); }
+#siteinfo { padding: 8px 16px 10px; border-top: 1px solid var(--line); background: var(--tab-active); }
+.si-head { display: flex; align-items: center; gap: 10px; }
+.si-head strong { font-size: 14px; }
+.si-head .icon { margin-left: auto; }
+#si-status.ok { color: var(--ok); }
+#si-status.stale { color: #b7791f; }
+#si-status.bad { color: var(--bad); }
+#si-list { display: grid; grid-template-columns: max-content 1fr; gap: 3px 16px; margin: 6px 0 0; }
+#si-list dt { color: var(--muted); }
+#si-list dd { margin: 0; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+#si-list dd .v { font-family: ui-monospace, Menlo, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

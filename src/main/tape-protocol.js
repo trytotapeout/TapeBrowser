@@ -55,6 +55,8 @@ export function createTapeHandler(sites) {
         'content-length': String(file.bytes.length),
         'cache-control': 'no-cache',
         'x-tape-sha256': file.info.sha256,
+        // chain / cache / stale（读链失败时用的是上次缓存的版本）
+        'x-tape-source': file.source || 'chain',
       };
       return new Response(request.method === 'HEAD' ? null : file.bytes, { status: 200, headers });
     } catch (e) {

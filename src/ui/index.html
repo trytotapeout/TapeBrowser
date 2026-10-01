@@ -16,6 +16,7 @@
       <button id="back" class="icon" type="button" title="后退" aria-label="后退">‹</button>
       <button id="forward" class="icon" type="button" title="前进" aria-label="前进">›</button>
       <button id="reload" class="icon" type="button" title="重新加载" aria-label="重新加载">↻</button>
+      <button id="site-btn" type="button" title="网站信息" aria-label="网站信息" aria-expanded="false" hidden>链上</button>
       <form id="address-form" role="search">
         <input id="address" type="text" spellcheck="false" autocomplete="off" aria-label="地址"
           placeholder="tape://4454-0、4454.0、#4454@0、12330.tape、钱包地址 0x… 或网址">
@@ -26,6 +27,10 @@
       <button id="settings-btn" class="icon" type="button" title="设置 (⌘,)" aria-label="设置">⚙</button>
     </div>
     <div id="notice" role="status" hidden></div>
+    <section id="siteinfo" aria-label="网站信息" hidden>
+      <div class="si-head"><strong id="si-label"></strong><span id="si-status"></span><button id="si-close" class="icon" type="button" aria-label="关闭网站信息">×</button></div>
+      <dl id="si-list"></dl>
+    </section>
     <form id="findbar" role="search" hidden>
       <input id="find-input" type="text" spellcheck="false" autocomplete="off" placeholder="在页面中查找" aria-label="在页面中查找">
       <span id="find-count" class="muted" aria-live="polite"></span>
@@ -70,6 +75,10 @@
 
       <h2>已连接钱包的网站</h2>
       <ul id="origins" class="list"></ul>
+
+      <h2>内容缓存</h2>
+      <p class="muted">访问过的网站文件按 SHA-256 存在本机。每次打开仍会先查链上的最新版本，内容没变才用缓存；读链失败时显示上次缓存的版本。</p>
+      <div class="actions"><span id="cache-usage" class="muted"></span><button id="clear-cache" type="button">清除缓存</button></div>
 
       <h2>RPC 节点</h2>
       <p class="muted">读链用的 BNB Smart Chain 节点，每行一个，按顺序轮换。留空使用内置公共节点。</p>

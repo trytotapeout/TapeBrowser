@@ -7,6 +7,10 @@
   let wallet = {};
   let library = { history: [], bookmarks: [] };
   let findOpen = false;
+  let siteOpen = false;
+  let siteInfo = null;
+  // 上次查询网站信息时的 标签 id + 网址 + 是否在加载，变化时才重新查询
+  let siteKey = '';
   let editing = false;
   let settingsOpen = false;
   let noticeTimer = null;
@@ -75,7 +79,87 @@
     $('bookmark').title = marked ? '移除书签 (⌘D)' : '加入书签 (⌘D)';
     // 新标签页上没有网页可查找
     if (findOpen && !(t && t.url)) setFind(false);
+    refreshSite();
   }
+
+  const isTape = (u) => /^tape:\/\//i.test(u || '');
+  const shortHex = (h) => (h && h.length > 20 ? h.slice(0, 10) + '…' + h.slice(-8) : h || '—');
+  const SOURCE = { chain: '从链上下载', cache: '链上哈希未变，使用本机缓存', stale: '读链失败，显示的是上次缓存的版本' };
+
+  /** 标签网址或加载状态变化时重新读取网站信息 */
+  function refreshSite() {
+    const t = active();
+    const tape = Boolean(t && isTape(t.url));
+    $('site-btn').hidden = !tape;
+    if (!tape) { siteInfo = null; siteKey = ''; if (siteOpen) setSite(false); return; }
+    const key = `${t.id}|${t.url}|${t.loading}`;
+    if (key === siteKey || t.loading) return;
+    siteKey = key;
+    tb.invoke('siteInfo').then((info) => {
+      if (siteKey !== key) return;
+      siteInfo = info;
+      renderSite();
+    }).catch(() => {});
+  }
+
+  function siteState(info) {
+    if (!info || info.error) return { cls: 'bad', text: '读取失败' };
+    if (!info.exists) return { cls: 'bad', text: '电路不存在' };
+    if (!info.opened) return { cls: 'bad', text: '未开通容器' };
+    if (!info.file) return { cls: 'bad', text: '文件不存在' };
+    if (info.stale || info.file.source === 'stale') return { cls: 'stale', text: '离线缓存' };
+    return { cls: 'ok', text: '链上 · 已校验' };
+  }
+
+  function renderSite() {
+    const st = siteState(siteInfo);
+    const b = $('site-btn');
+    b.className = st.cls === 'ok' ? '' : st.cls;
+    b.textContent = st.cls === 'ok' ? '链上' : st.text;
+    b.title = '网站信息：' + st.text;
+    if (!siteOpen) return;
+    const info = siteInfo || {};
+    $('si-label').textContent = info.label || '网站信息';
+    $('si-status').textContent = st.text;
+    $('si-status').className = st.cls;
+    const dl = $('si-list');
+    dl.textContent = '';
+    const row = (name, value, copy) => {
+      const dd = document.createElement('dd');
+      dd.append(Object.assign(document.createElement('span'), { className: 'v', textContent: value ?? '—', title: copy || value || '' }));
+      if (copy) {
+        const c = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: '复制' });
+        c.addEventListener('click', () => tb.invoke('copy', copy).then(() => { c.textContent = '已复制'; setTimeout(() => { c.textContent = '复制'; }, 1200); }));
+        dd.append(c);
+      }
+      dl.append(Object.assign(document.createElement('dt'), { textContent: name }), dd);
+    };
+    if (info.error) { row('错误', info.error); return; }
+    row('电路', `#${info.tokenId}，处理器 ${info.cpu}`);
+    row('持有人', shortHex(info.owner), info.owner);
+    row('容器', shortHex(info.container), info.container);
+    row('电路合约', shortHex(info.circuits), info.circuits);
+    row('当前文件', '/' + (info.path || ''));
+    if (info.file) {
+      row('SHA-256', shortHex(info.file.sha256), info.file.sha256);
+      row('大小', info.file.size >= 1024 ? (info.file.size / 1024).toFixed(1) + ' KB' : info.file.size + ' 字节');
+      row('上链时间', info.file.updatedAt ? new Date(info.file.updatedAt * 1000).toLocaleString() : '—');
+      row('读取方式', SOURCE[info.file.source] || info.file.source);
+    }
+  }
+
+  function setSite(on) {
+    siteOpen = on;
+    $('siteinfo').hidden = !on;
+    $('site-btn').setAttribute('aria-expanded', String(on));
+    if (on) {
+      // 打开面板时重新读一次，显示最新状态
+      siteKey = '';
+      renderSite();
+      refreshSite();
+    }
+  }
+
 
   /** 书签和最近访问列表 */
   function renderLibrary() {
@@ -179,6 +263,8 @@
       ul.append(li);
     }
     renderWallet();
+    const u = await tb.invoke('cacheUsage');
+    $('cache-usage').textContent = `已缓存 ${u.files} 个文件，共 ${(u.bytes / 1024 / 1024).toFixed(1)} MB`;
   }
 
   // 内容区位置交给主进程摆放网页
@@ -262,6 +348,9 @@
   $('zoom').addEventListener('click', () => tb.invoke('zoom', 0));
   $('bookmark').addEventListener('click', () => tb.invoke('toggleBookmark'));
   $('clear-history').addEventListener('click', () => tb.invoke('clearHistory'));
+  $('site-btn').addEventListener('click', () => setSite(!siteOpen));
+  $('si-close').addEventListener('click', () => setSite(false));
+  $('clear-cache').addEventListener('click', async () => { await tb.invoke('clearCache'); loadSettings(); });
 
   renderWallet();
   renderNav();
