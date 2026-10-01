@@ -36,6 +36,8 @@
       el.append(Object.assign(document.createElement('span'), { className: 'title', textContent: t.title }));
       const close = Object.assign(document.createElement('button'), { className: 'close', type: 'button', textContent: '×', title: '关闭标签页' });
       close.setAttribute('aria-label', '关闭标签页 ' + t.title);
+      // 按下 × 时不能触发标签的 mousedown 切换：切换会重绘标签栏，× 被替换后 click 就丢了
+      close.addEventListener('mousedown', (e) => e.stopPropagation());
       close.addEventListener('click', (e) => { e.stopPropagation(); tb.invoke('closeTab', t.id); });
       el.append(close);
       el.addEventListener('mousedown', (e) => { if (e.button === 0) select(t.id); });
