@@ -26,7 +26,7 @@ function fakeChain() {
     st,
     async pinBlock() { return 1; },
     async cpuList() { return ['0xcpu0', '0xcpu1']; },
-    async nextIds() { return [4, 3]; },
+    async nextIds() { return [3, 2]; },
     async openedFlags(pairs, _b, onBatch) { st.multicalls++; await onBatch?.(pairs.length, pairs.length); return pairs.map((p) => st.opened.has(`${p.tokenId}-${p.cpu}`)); },
     async circuitInfos(items) {
       return items.map((s) => ({ exists: true, owner: '0xOwner', container: container(s.tokenId, s.cpu), opened: st.opened.has(`${s.tokenId}-${s.cpu}`) }));

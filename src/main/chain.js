@@ -55,7 +55,7 @@ export function createChain(rpc, net = BSC) {
     return Number(n);
   }
 
-  /** 每个处理器的 nextId（已铸造编号的上界）；处理器地址为空或调用失败时为 0 */
+  /** 每个处理器的 nextId（最后一个已铸造的编号，含）；处理器地址为空或调用失败时为 0 */
   async function nextIds(cpus, block) {
     const idx = [];
     cpus.forEach((c, i) => { if (c) idx.push(i); });

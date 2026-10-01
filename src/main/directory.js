@@ -112,7 +112,8 @@ export function createDirectory({ chain, sites, file, onChange = () => {}, onPro
     const ids = await chain.nextIds(cpus, block);
     const pairs = [];
     ids.forEach((n, cpu) => {
-      for (let tokenId = 1; tokenId < n; tokenId++) pairs.push({ circuits: cpus[cpu], tokenId, cpu });
+      // nextId 是最后一个已铸造的编号（含），不是下一个待铸造的
+      for (let tokenId = 1; tokenId <= n; tokenId++) pairs.push({ circuits: cpus[cpu], tokenId, cpu });
     });
     report({ stage: 'opened', done: 0, total: pairs.length });
     const flags = await chain.openedFlags(pairs, block, async (done, total) => {
