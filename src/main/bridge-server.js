@@ -134,6 +134,13 @@ export function createBridgeServer({ token, port = 0, staticDir }) {
     });
   }
 
+  /** 从 TapeBrowser 断开钱包：本地立即清空地址，并通知桥接页面放弃当前钱包（页面保持连接，可以重新选择） */
+  function disconnect() {
+    failPending(4900, '钱包已断开');
+    if (socket) socket.send(JSON.stringify({ type: 'disconnect' }));
+    setState({ ready: false, wallet: null, accounts: [], chainId: null });
+  }
+
   /** 等待桥接页面选好钱包；超时 reject */
   function waitReady(timeoutMs) {
     if (state.ready) return Promise.resolve(state);
@@ -176,6 +183,7 @@ export function createBridgeServer({ token, port = 0, staticDir }) {
     start,
     stop,
     request,
+    disconnect,
     waitReady,
     on: (name, fn) => ev.on(name, fn),
     get state() { return state; },

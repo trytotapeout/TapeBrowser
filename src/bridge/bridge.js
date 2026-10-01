@@ -110,18 +110,22 @@
     render();
   }, 500);
 
-  $('disconnect').addEventListener('click', () => {
+  function disconnect(fromApp) {
     if (current && current.provider.removeListener) {
       current.provider.removeListener('accountsChanged', onAccounts);
       current.provider.removeListener('chainChanged', onChain);
     }
+    // 尽量撤销扩展里的授权（MetaMask 等支持；不支持的钱包需要在扩展里手动断开站点）
+    current?.provider.request?.({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] }).catch(() => {});
     current = null;
     accounts = [];
     chainId = null;
     localStorage.removeItem(PICK_KEY);
-    log('已断开钱包');
+    log(fromApp ? '已从 TapeBrowser 断开钱包' : '已断开钱包');
     report();
-  });
+  }
+
+  $('disconnect').addEventListener('click', () => disconnect(false));
 
   function safeError(e) {
     return { code: Number(e && e.code) || -32603, message: String((e && e.message) || e || '钱包错误'), data: e && e.data !== undefined ? JSON.parse(JSON.stringify(e.data)) : undefined };
@@ -148,6 +152,7 @@
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
       if (msg.type === 'request') onRequest(msg);
+      else if (msg.type === 'disconnect') disconnect(true);
     };
     ws.onclose = (e) => {
       render();

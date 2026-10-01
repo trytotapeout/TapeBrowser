@@ -147,6 +147,7 @@ function registerIpc() {
   });
   ui('revoke', (origin) => host.revoke(String(origin)));
   ui('openBridge', () => shell.openExternal(bridge.url()));
+  ui('disconnectWallet', () => disconnectWallet());
 }
 /** 一组网站：第一个放进当前空白标签（或新开并切过去），其余在后台标签打开 */
 function openSites(list) {
@@ -245,6 +246,7 @@ function buildMenu() {
       label: '钱包',
       submenu: [
         { label: '打开钱包桥接页面', click: () => shell.openExternal(bridge.url()) },
+        { label: '断开钱包', click: () => disconnectWallet() },
         { label: '设置', accelerator: 'CmdOrCtrl+,', click: ui('settings') },
       ],
     },
@@ -274,6 +276,13 @@ function createWindow() {
     if (pendingExternal.length) for (const u of pendingExternal.splice(0)) openExternalTape(u);
     else tabs.open();
   });
+}
+
+/** 断开钱包：网页收到 accountsChanged([])；网站授权保留，重新连接后不用再确认 */
+function disconnectWallet() {
+  if (!bridge?.state.ready) { notify('没有连接钱包'); return; }
+  bridge.disconnect();
+  notify('已断开钱包', 'ok');
 }
 
 /** 其他程序（访达、终端 open、别的浏览器）点开的 tape:// 链接 */

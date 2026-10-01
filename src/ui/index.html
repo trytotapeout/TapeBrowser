@@ -44,7 +44,10 @@
       <h2>钱包</h2>
       <p id="wallet-status" class="muted"></p>
       <p class="muted">TapeBrowser 不保存私钥。网站的签名和交易会转给你在系统浏览器里打开的「钱包桥接页面」，由那里的钱包扩展（MetaMask 等）确认。使用钱包期间请保持桥接页面打开。</p>
-      <button id="open-bridge" type="button">打开钱包桥接页面</button>
+      <div class="actions">
+        <button id="open-bridge" type="button">打开钱包桥接页面</button>
+        <button id="disconnect-wallet" type="button" hidden>断开钱包</button>
+      </div>
 
       <h2>已连接钱包的网站</h2>
       <ul id="origins" class="list"></ul>

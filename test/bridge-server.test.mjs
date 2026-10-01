@@ -86,6 +86,22 @@ test('新页面接入替换旧页面（关闭码 4000），旧页面未完成请
   });
 });
 
+test('从 TapeBrowser 断开：本地立即清空地址并通知页面，页面连接保留', async () => {
+  await withServer(async (b, port) => {
+    const ws = await connect(port);
+    const st = nextState(b);
+    ws.send(JSON.stringify({ type: 'state', ready: true, wallet: 'OKX Wallet', accounts: [ACC], chainId: '0x38' }));
+    await st;
+    const msg = nextMessage(ws);
+    b.disconnect();
+    assert.deepEqual(await msg, { type: 'disconnect' });
+    assert.equal(b.state.ready, false);
+    assert.deepEqual(b.state.accounts, []);
+    assert.equal(b.state.connected, true);
+    ws.close();
+  });
+});
+
 test('页面关闭后状态复位', async () => {
   await withServer(async (b, port) => {
     const ws = await connect(port);

@@ -82,6 +82,7 @@
     if (wallet.ready && wallet.account) s.textContent = `${wallet.wallet || '钱包'} · ${wallet.account} · 链 ${parseInt(wallet.chainId || '0x38', 16)}`;
     else if (wallet.connected) s.textContent = '桥接页面已打开，还没有选择钱包。';
     else s.textContent = '没有连接钱包。';
+    $('disconnect-wallet').hidden = !(wallet.ready && wallet.account);
   }
 
   function notice(text, level) {
@@ -148,6 +149,7 @@
   $('settings-btn').addEventListener('click', () => setSettings(!settingsOpen));
   $('wallet').addEventListener('click', () => (wallet.ready ? setSettings(true) : tb.invoke('openBridge')));
   $('open-bridge').addEventListener('click', () => tb.invoke('openBridge'));
+  $('disconnect-wallet').addEventListener('click', () => tb.invoke('disconnectWallet'));
   $('save-rpcs').addEventListener('click', async () => {
     const list = $('rpcs').value.split('\n').map((s) => s.trim()).filter(Boolean);
     try { await tb.invoke('saveRpcs', list); $('rpc-msg').textContent = list.length ? '已保存' : '已恢复内置节点'; } catch (e) { $('rpc-msg').textContent = errText(e); }
