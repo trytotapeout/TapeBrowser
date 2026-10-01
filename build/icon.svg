@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS 图标网格：824px 圆角方块，四周留白 100px -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="262" y="352" width="500" height="320" rx="72" fill="none" stroke="#fff" stroke-width="48"/>
+  <circle cx="412" cy="512" r="58" fill="#fff"/>
+  <circle cx="612" cy="512" r="58" fill="#fff"/>
+</svg>
