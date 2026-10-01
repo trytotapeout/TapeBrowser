@@ -308,7 +308,13 @@ app.on('second-instance', (_e, argv) => {
 app.whenReady().then(async () => {
   // 网页标签里不出现 Electron / 应用名，避免被网站当成非常规浏览器
   app.userAgentFallback = app.userAgentFallback.replace(/\s(Electron|tapebrowser|TapeBrowser)\/\S+/g, '');
-  app.setAboutPanelOptions({ applicationName: 'TapeBrowser', applicationVersion: app.getVersion(), version: '', copyright: 'TapeKit DeWEB 浏览器' });
+  app.setAboutPanelOptions({
+    applicationName: 'TapeBrowser',
+    applicationVersion: app.getVersion(),
+    version: '',
+    copyright: 'TapeKit DeWEB 浏览器',
+    credits: '如果你觉得这个产品对你有用，可以支持我继续开发，钱包地址：\n0xdda434fe0281ec6bf4f74ea263504bf878d0ee56',
+  });
   // 开发模式下 Dock 图标可能还是 Launch Services 缓存的 Electron 图标，直接设置一次
   if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(SRC, '../build/icon.png'));
 
