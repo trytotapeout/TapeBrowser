@@ -6,6 +6,10 @@
   let state = { tabs: [], activeId: null };
   let wallet = {};
   let library = { history: [], bookmarks: [] };
+  let dir = { sites: [], status: { count: 0, lastFullScan: 0, running: false, progress: null } };
+  // 用户手动选过的分栏；没选过时有最近访问就显示最近访问，否则显示全部网站
+  let panel = null;
+  let dirLimit = 200;
   let findOpen = false;
   let siteOpen = false;
   let siteInfo = null;
@@ -184,8 +188,83 @@
     };
     fill($('bookmarks'), library.bookmarks, (u) => tb.invoke('removeBookmark', u), '移除书签');
     fill($('history'), library.history.slice(0, 30), (u) => tb.invoke('removeHistory', u), '从最近访问中删除');
-    $('bookmarks-box').hidden = !library.bookmarks.length;
-    $('history-box').hidden = !library.history.length;
+    $('bookmarks-empty').hidden = library.bookmarks.length > 0;
+    $('history-empty').hidden = library.history.length > 0;
+    $('clear-history').hidden = !library.history.length;
+    renderPanels();
+  }
+
+  function renderPanels() {
+    const cur = panel || (library.history.length ? 'history' : 'directory');
+    for (const b of document.querySelectorAll('#lib-tabs [role="tab"]')) {
+      const on = b.dataset.panel === cur;
+      b.setAttribute('aria-selected', String(on));
+      b.tabIndex = on ? 0 : -1;
+      $('panel-' + b.dataset.panel).hidden = !on;
+    }
+  }
+
+  const ago = (ms) => {
+    const s = Math.max(0, (Date.now() - ms) / 1000);
+    if (s < 60) return '刚刚';
+    if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+    if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+    return Math.floor(s / 86400) + ' 天前';
+  };
+  const day = (sec) => {
+    if (!sec) return '';
+    const d = new Date(sec * 1000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  function dirStatusText(st) {
+    const p = st.progress;
+    if (p && p.stage === 'error') return '刷新失败：' + p.message;
+    if (p) {
+      const n = p.total ? `（${p.done} / ${p.total}）` : '';
+      const label = { cpus: '读取处理器', opened: '检查容器开通', index: '读取首页', check: '检查更新', titles: '读取网站标题' }[p.stage] || '刷新中';
+      return `正在${label}${n}…`;
+    }
+    if (!st.lastFullScan) return '还没有扫描过，第一次扫描大约需要两分钟。';
+    return `已收录 ${st.count} 个网站 · ${ago(st.lastFullScan)}更新`;
+  }
+
+  /** 全部网站：按搜索词过滤、排序，只渲染前 dirLimit 条 */
+  function renderDirectory() {
+    const st = dir.status;
+    $('dir-count').textContent = st.count ? String(st.count) : '';
+    $('dir-status').textContent = dirStatusText(st);
+    $('dir-refresh').hidden = Boolean(st.running);
+    const q = $('dir-search').value.trim().toLowerCase();
+    let items = dir.sites;
+    if (q) {
+      items = items.filter((s) => (s.title || '').toLowerCase().includes(q)
+        || s.label.toLowerCase().includes(q)
+        || String(s.tokenId) === q.replace(/^#/, '')
+        || (s.owner || '').toLowerCase().includes(q));
+    }
+    const sort = $('dir-sort').value;
+    items = items.slice().sort(sort === 'id' ? (a, b) => a.tokenId - b.tokenId || a.cpu - b.cpu
+      : sort === 'cpu' ? (a, b) => a.cpu - b.cpu || a.tokenId - b.tokenId
+        : (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || a.tokenId - b.tokenId);
+    const ul = $('directory');
+    ul.textContent = '';
+    for (const it of items.slice(0, dirLimit)) {
+      const li = document.createElement('li');
+      // 标题来自网站自己的 HTML，只用 textContent
+      const a = Object.assign(document.createElement('a'), { href: it.url, title: `${it.url}\n持有人 ${it.owner}` });
+      a.append(
+        Object.assign(document.createElement('span'), { className: 't' + (it.title ? '' : ' untitled'), textContent: it.title || '（没有标题）' }),
+        Object.assign(document.createElement('span'), { className: 'u', textContent: it.label }),
+        Object.assign(document.createElement('span'), { className: 'd', textContent: day(it.updatedAt) }),
+      );
+      a.addEventListener('click', (e) => { e.preventDefault(); tb.invoke('openUrl', it.url, { background: e.metaKey || e.ctrlKey }); });
+      a.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); tb.invoke('openUrl', it.url, { background: true }); } });
+      li.append(a);
+      ul.append(li);
+    }
+    $('dir-more').hidden = items.length <= dirLimit;
+    $('dir-more').textContent = `显示更多（还有 ${items.length - dirLimit} 个）`;
   }
 
   function setFind(on) {
@@ -329,6 +408,29 @@
     }
   });
   tb.on('library', (l) => { library = l || { history: [], bookmarks: [] }; renderLibrary(); renderNav(); });
+  tb.on('directory', (sites) => { dir.sites = sites || []; renderDirectory(); });
+  tb.on('directoryStatus', (st) => { dir.status = st || dir.status; renderDirectory(); });
+  tb.invoke('directory').then((d) => { dir = d; renderDirectory(); }).catch(() => {});
+  renderPanels();
+  for (const b of document.querySelectorAll('#lib-tabs [role="tab"]')) {
+    b.addEventListener('click', () => { panel = b.dataset.panel; renderPanels(); });
+  }
+  // 左右方向键在分栏之间切换
+  $('lib-tabs').addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const all = [...document.querySelectorAll('#lib-tabs [role="tab"]')];
+    const i = all.findIndex((b) => b.getAttribute('aria-selected') === 'true');
+    const next = all[(i + (e.key === 'ArrowRight' ? 1 : all.length - 1)) % all.length];
+    panel = next.dataset.panel;
+    renderPanels();
+    next.focus();
+  });
+  $('dir-search').addEventListener('input', () => { dirLimit = 200; renderDirectory(); });
+  $('dir-sort').addEventListener('change', () => { dirLimit = 200; renderDirectory(); });
+  $('dir-more').addEventListener('click', () => { dirLimit += 200; renderDirectory(); });
+  $('dir-refresh').addEventListener('click', async () => {
+    try { dir.status = await tb.invoke('scanDirectory'); renderDirectory(); } catch (e) { notice(errText(e), 'error'); }
+  });
   tb.on('findResult', (r) => {
     if (!findOpen) return;
     $('find-count').textContent = r.matches ? `${r.active} / ${r.matches}` : '无结果';

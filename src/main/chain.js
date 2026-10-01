@@ -55,6 +55,33 @@ export function createChain(rpc, net = BSC) {
     return Number(n);
   }
 
+  /** 每个处理器的 nextId（已铸造编号的上界）；处理器地址为空或调用失败时为 0 */
+  async function nextIds(cpus, block) {
+    const idx = [];
+    cpus.forEach((c, i) => { if (c) idx.push(i); });
+    const res = await multicall(idx.map((i) => ({ target: cpus[i], callData: SEL.nextId })), block);
+    const out = cpus.map(() => 0);
+    res.forEach((r, k) => { out[idx[k]] = Number(take(r, ['uint'])?.[0] ?? 0); });
+    return out;
+  }
+
+  /**
+   * 批量查容器是否开通：pairs = [{circuits, tokenId}] → bool[]。
+   * 跨处理器打包成每批 MULTICALL_BATCH 个调用；每批之后调用 onBatch(done, total)（可返回 Promise，用来限速）
+   */
+  async function openedFlags(pairs, block, onBatch) {
+    const out = [];
+    for (let i = 0; i < pairs.length; i += MULTICALL_BATCH) {
+      const chunk = pairs.slice(i, i + MULTICALL_BATCH).map(({ circuits, tokenId }) => ({
+        target: net.opener,
+        callData: encodeCall(SEL.isOpened, ['address', 'uint'], [circuits, tokenId]),
+      }));
+      for (const r of await multicall(chunk, block)) out.push(Boolean(take(r, ['bool'])?.[0]));
+      await onBatch?.(out.length, pairs.length);
+    }
+    return out;
+  }
+
   /** 在 [from, to] 编号区间里找出 wallet 持有的电路编号；找够 want 个就提前结束 */
   async function ownedIds(circuits, wallet, from, to, want, block, onProgress) {
     const me = lower(wallet);
@@ -137,5 +164,5 @@ export function createChain(rpc, net = BSC) {
     return out;
   }
 
-  return { pinBlock, multicall, cpuList, holdings, maxTokenId, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
+  return { pinBlock, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
 }

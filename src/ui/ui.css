@@ -92,3 +92,15 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 #si-list dt { color: var(--muted); }
 #si-list dd { margin: 0; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 #si-list dd .v { font-family: ui-monospace, Menlo, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.seg { display: flex; gap: 4px; margin: 32px 0 8px; border-bottom: 1px solid var(--line); }
+.seg button { border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 6px 10px; cursor: pointer; margin-bottom: -1px; }
+.seg button[aria-selected="true"] { border-bottom-color: var(--accent); font-weight: 600; }
+.dir-tools { display: flex; gap: 8px; margin-top: 10px; }
+#dir-search { flex: 1; min-width: 0; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--fg); font: inherit; }
+#dir-sort { height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--fg); font: inherit; }
+.dir-status { margin: 8px 0; font-size: 12px; }
+.links .t.untitled { color: var(--muted); }
+.links .d { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+#dir-more { margin: 10px 0; }
+#directory .t { flex: 1; }

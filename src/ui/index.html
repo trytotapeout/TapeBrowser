@@ -51,14 +51,35 @@
         <li>普通网址：https://… 照常打开</li>
       </ul>
 
-      <section id="bookmarks-box" hidden>
-        <h2>书签</h2>
-        <ul id="bookmarks" class="list links"></ul>
+      <div id="lib-tabs" class="seg" role="tablist" aria-label="网站列表">
+        <button id="tab-history" type="button" role="tab" data-panel="history" aria-controls="panel-history">最近访问</button>
+        <button id="tab-bookmarks" type="button" role="tab" data-panel="bookmarks" aria-controls="panel-bookmarks">书签</button>
+        <button id="tab-directory" type="button" role="tab" data-panel="directory" aria-controls="panel-directory">全部网站 <span id="dir-count" class="muted"></span></button>
+      </div>
+
+      <section id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+        <div class="heading-row"><span></span><button id="clear-history" class="link" type="button">清除</button></div>
+        <ul id="history" class="list links"></ul>
+        <p id="history-empty" class="muted" hidden>还没有访问过电路网站。</p>
       </section>
 
-      <section id="history-box" hidden>
-        <div class="heading-row"><h2>最近访问</h2><button id="clear-history" class="link" type="button">清除</button></div>
-        <ul id="history" class="list links"></ul>
+      <section id="panel-bookmarks" role="tabpanel" aria-labelledby="tab-bookmarks" hidden>
+        <ul id="bookmarks" class="list links"></ul>
+        <p id="bookmarks-empty" class="muted" hidden>还没有书签。打开网站后按 ⌘D 或点地址栏右边的 ☆ 加入。</p>
+      </section>
+
+      <section id="panel-directory" role="tabpanel" aria-labelledby="tab-directory" hidden>
+        <div class="dir-tools">
+          <input id="dir-search" type="search" spellcheck="false" autocomplete="off" placeholder="搜索标题、电路编号或持有人地址" aria-label="搜索网站">
+          <select id="dir-sort" aria-label="排序">
+            <option value="updated">最近更新</option>
+            <option value="id">电路编号</option>
+            <option value="cpu">处理器</option>
+          </select>
+        </div>
+        <p class="muted dir-status"><span id="dir-status" aria-live="polite"></span> <button id="dir-refresh" class="link" type="button">立即刷新</button></p>
+        <ul id="directory" class="list links"></ul>
+        <button id="dir-more" class="link" type="button" hidden>显示更多</button>
       </section>
     </section>
 

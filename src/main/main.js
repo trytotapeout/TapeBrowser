@@ -13,6 +13,7 @@ import { createProviderHost, providerError } from './provider-host.js';
 import { createTabs, originOf, ALLOWED } from './tabs.js';
 import { createLibrary } from './library.js';
 import { createContentStore } from './content-store.js';
+import { createDirectory, QUICK_CHECK_EVERY } from './directory.js';
 import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
 import { describeRequest } from './describe.js';
 import { DEFAULT_RPCS } from './config.js';
@@ -32,7 +33,17 @@ const rpcUrls = () => (settings.get('rpcUrls').length ? settings.get('rpcUrls') 
 // net.fetch 走 Chromium 网络栈，遵守系统代理
 const rpc = createRpcPool(rpcUrls, { fetchImpl: (url, init) => net.fetch(url, init) });
 const contentStore = createContentStore(join(app.getPath('userData'), 'content-cache'));
-const sites = createSites(createChain(rpc), contentStore);
+const chain = createChain(rpc);
+const sites = createSites(chain, contentStore);
+const directory = createDirectory({
+  chain, sites, file: join(app.getPath('userData'), 'directory.json'),
+  onChange: () => send('directory', directory.list()),
+  onProgress: () => send('directoryStatus', directory.status()),
+});
+/** 后台刷新目录：到期才扫（完整扫描每天一次，快速检查每小时一次） */
+function refreshDirectory(force = false) {
+  directory.refresh({ force }).catch(() => { /* 失败状态已经通过 directoryStatus 显示 */ });
+}
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
@@ -180,6 +191,8 @@ function registerIpc() {
   });
   ui('copy', (text) => { clipboard.writeText(String(text).slice(0, 1000)); return true; });
   ui('cacheUsage', () => contentStore.usage());
+  ui('directory', () => ({ sites: directory.list(), status: directory.status() }));
+  ui('scanDirectory', () => { refreshDirectory(true); return directory.status(); });
   ui('clearCache', () => contentStore.clear());
   ui('openUrl', (url, opts) => {
     url = String(url || '');
@@ -412,6 +425,10 @@ app.whenReady().then(async () => {
   createWindow();
 
   app.on('activate', () => { if (!win) createWindow(); });
+
+  // 启动稍等一会再扫，避免和首屏网页抢 RPC
+  setTimeout(() => refreshDirectory(), 5000).unref?.();
+  setInterval(() => refreshDirectory(), QUICK_CHECK_EVERY).unref?.();
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
