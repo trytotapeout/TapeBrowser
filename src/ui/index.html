@@ -20,10 +20,19 @@
         <input id="address" type="text" spellcheck="false" autocomplete="off" aria-label="地址"
           placeholder="tape://4454-0、4454.0、#4454@0、12330.tape、钱包地址 0x… 或网址">
       </form>
+      <button id="zoom" type="button" title="点击恢复实际大小 (⌘0)" hidden></button>
+      <button id="bookmark" class="icon" type="button" title="加入书签 (⌘D)" aria-label="加入书签" aria-pressed="false">☆</button>
       <button id="wallet" type="button" aria-live="polite">连接钱包</button>
       <button id="settings-btn" class="icon" type="button" title="设置 (⌘,)" aria-label="设置">⚙</button>
     </div>
     <div id="notice" role="status" hidden></div>
+    <form id="findbar" role="search" hidden>
+      <input id="find-input" type="text" spellcheck="false" autocomplete="off" placeholder="在页面中查找" aria-label="在页面中查找">
+      <span id="find-count" class="muted" aria-live="polite"></span>
+      <button id="find-prev" class="icon" type="button" title="上一个 (⇧⌘G)" aria-label="上一个">⌃</button>
+      <button id="find-next" class="icon" type="button" title="下一个 (⌘G)" aria-label="下一个">⌄</button>
+      <button id="find-close" class="icon" type="button" title="关闭 (Esc)" aria-label="关闭查找">×</button>
+    </form>
   </header>
 
   <main id="content">
@@ -36,6 +45,16 @@
         <li><code>0x…</code> 钱包地址：扫描这个钱包持有的全部电路，有首页的都打开</li>
         <li>普通网址：https://… 照常打开</li>
       </ul>
+
+      <section id="bookmarks-box" hidden>
+        <h2>书签</h2>
+        <ul id="bookmarks" class="list links"></ul>
+      </section>
+
+      <section id="history-box" hidden>
+        <div class="heading-row"><h2>最近访问</h2><button id="clear-history" class="link" type="button">清除</button></div>
+        <ul id="history" class="list links"></ul>
+      </section>
     </section>
 
     <section id="settings-page" class="page" hidden>

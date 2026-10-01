@@ -57,3 +57,21 @@ textarea { width: 100%; font: 12px/1.5 ui-monospace, Menlo, monospace; padding: 
 .actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .list { list-style: none; padding: 0; margin: 0; }
 .list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+
+#zoom { height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 12px; background: transparent; cursor: pointer; font-size: 12px; flex: none; }
+#bookmark[aria-pressed="true"] { color: #e3a008; }
+
+#findbar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-top: 1px solid var(--line); background: var(--tab-active); }
+#find-input { width: 260px; height: 26px; padding: 0 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--input); color: var(--fg); font: inherit; }
+#find-input.none { border-color: var(--bad); }
+#find-count { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+
+.heading-row { display: flex; align-items: baseline; justify-content: space-between; }
+button.link { border: 0; background: transparent; color: var(--accent); cursor: pointer; padding: 0; }
+.links li { padding: 0; }
+.links a { flex: 1; min-width: 0; display: flex; gap: 10px; align-items: baseline; padding: 6px 0; color: inherit; text-decoration: none; }
+.links a:hover .t { text-decoration: underline; }
+.links .t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.links .u { flex: none; color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.links .remove { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.links .remove:hover { background: var(--line); color: var(--fg); }

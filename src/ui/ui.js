@@ -5,6 +5,8 @@
   const $ = (id) => document.getElementById(id);
   let state = { tabs: [], activeId: null };
   let wallet = {};
+  let library = { history: [], bookmarks: [] };
+  let findOpen = false;
   let editing = false;
   let settingsOpen = false;
   let noticeTimer = null;
@@ -63,6 +65,63 @@
     document.title = t ? t.title + ' - TapeBrowser' : 'TapeBrowser';
     $('newtab-page').hidden = settingsOpen || Boolean(t && t.url);
     $('settings-page').hidden = !settingsOpen;
+    const zoom = t && t.url ? t.zoom : 100;
+    $('zoom').hidden = zoom === 100;
+    $('zoom').textContent = zoom + '%';
+    const marked = Boolean(t && t.url && library.bookmarks.some((b) => b.url === t.url));
+    $('bookmark').disabled = !(t && t.url);
+    $('bookmark').textContent = marked ? '★' : '☆';
+    $('bookmark').setAttribute('aria-pressed', String(marked));
+    $('bookmark').title = marked ? '移除书签 (⌘D)' : '加入书签 (⌘D)';
+    // 新标签页上没有网页可查找
+    if (findOpen && !(t && t.url)) setFind(false);
+  }
+
+  /** 书签和最近访问列表 */
+  function renderLibrary() {
+    const fill = (ul, items, onRemove, removeLabel) => {
+      ul.textContent = '';
+      for (const it of items) {
+        const li = document.createElement('li');
+        const a = Object.assign(document.createElement('a'), { href: it.url, title: it.url });
+        a.append(
+          Object.assign(document.createElement('span'), { className: 't', textContent: it.title || it.label || it.url }),
+          Object.assign(document.createElement('span'), { className: 'u', textContent: it.label || it.url }),
+        );
+        // ⌘ 点击或中键在后台标签打开
+        a.addEventListener('click', (e) => { e.preventDefault(); tb.invoke('openUrl', it.url, { background: e.metaKey || e.ctrlKey }); });
+        a.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); tb.invoke('openUrl', it.url, { background: true }); } });
+        const rm = Object.assign(document.createElement('button'), { type: 'button', className: 'remove', textContent: '×', title: removeLabel });
+        rm.setAttribute('aria-label', removeLabel + ' ' + (it.title || it.url));
+        rm.addEventListener('click', () => onRemove(it.url));
+        li.append(a, rm);
+        ul.append(li);
+      }
+    };
+    fill($('bookmarks'), library.bookmarks, (u) => tb.invoke('removeBookmark', u), '移除书签');
+    fill($('history'), library.history.slice(0, 30), (u) => tb.invoke('removeHistory', u), '从最近访问中删除');
+    $('bookmarks-box').hidden = !library.bookmarks.length;
+    $('history-box').hidden = !library.history.length;
+  }
+
+  function setFind(on) {
+    findOpen = on;
+    $('findbar').hidden = !on;
+    if (on) {
+      $('find-input').focus();
+      $('find-input').select();
+      if ($('find-input').value) runFind(false);
+    } else {
+      $('find-count').textContent = '';
+      $('find-input').classList.remove('none');
+      tb.invoke('stopFind');
+    }
+  }
+
+  function runFind(again, forward = true) {
+    const text = $('find-input').value;
+    if (!text) { $('find-count').textContent = ''; $('find-input').classList.remove('none'); tb.invoke('stopFind'); return; }
+    tb.invoke('find', text, { again, forward });
   }
 
   function renderWallet() {
@@ -164,13 +223,45 @@
     setTimeout(() => { $('address').focus(); $('address').select(); }, 0);
   }
 
-  tb.on('tabs', (s) => { state = s; renderTabs(); renderNav(); });
+  tb.on('tabs', (s) => {
+    const switched = s.activeId !== state.activeId;
+    state = s;
+    renderTabs();
+    renderNav();
+    // 主进程切换标签时会结束旧标签的查找，在新标签上重新查找
+    if (switched && findOpen) runFind(false);
+  });
   tb.on('wallet', (w) => { wallet = w || {}; renderWallet(); });
   tb.on('notice', (n) => notice(n.text, n.level));
   tb.on('command', (name) => {
     if (name === 'focusAddress') focusAddress();
     else if (name === 'settings') setSettings(!settingsOpen);
+    else if (name === 'find') { if (active() && active().url) setFind(true); }
+    else if (name === 'findNext' || name === 'findPrev') {
+      if (!findOpen) { if (active() && active().url) setFind(true); return; }
+      runFind(true, name === 'findNext');
+    }
   });
+  tb.on('library', (l) => { library = l || { history: [], bookmarks: [] }; renderLibrary(); renderNav(); });
+  tb.on('findResult', (r) => {
+    if (!findOpen) return;
+    $('find-count').textContent = r.matches ? `${r.active} / ${r.matches}` : '无结果';
+    $('find-input').classList.toggle('none', !r.matches);
+  });
+
+  $('find-input').addEventListener('input', () => runFind(false));
+  // Enter 下一个，Shift+Enter 上一个，Esc 关闭
+  $('find-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); setFind(false); }
+    else if (e.key === 'Enter') { e.preventDefault(); runFind(true, !e.shiftKey); }
+  });
+  $('findbar').addEventListener('submit', (e) => e.preventDefault());
+  $('find-next').addEventListener('click', () => runFind(true, true));
+  $('find-prev').addEventListener('click', () => runFind(true, false));
+  $('find-close').addEventListener('click', () => setFind(false));
+  $('zoom').addEventListener('click', () => tb.invoke('zoom', 0));
+  $('bookmark').addEventListener('click', () => tb.invoke('toggleBookmark'));
+  $('clear-history').addEventListener('click', () => tb.invoke('clearHistory'));
 
   renderWallet();
   renderNav();

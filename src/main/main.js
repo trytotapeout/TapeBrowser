@@ -10,7 +10,8 @@ import { createSites } from './sites.js';
 import { createTapeHandler } from './tape-protocol.js';
 import { createBridgeServer } from './bridge-server.js';
 import { createProviderHost, providerError } from './provider-host.js';
-import { createTabs, originOf } from './tabs.js';
+import { createTabs, originOf, ALLOWED } from './tabs.js';
+import { createLibrary } from './library.js';
 import { parseInput, parseHost, siteLabel } from './address.js';
 import { describeRequest } from './describe.js';
 import { DEFAULT_RPCS } from './config.js';
@@ -30,6 +31,7 @@ const rpcUrls = () => (settings.get('rpcUrls').length ? settings.get('rpcUrls') 
 // net.fetch 走 Chromium 网络栈，遵守系统代理
 const rpc = createRpcPool(rpcUrls, { fetchImpl: (url, init) => net.fetch(url, init) });
 const sites = createSites(createChain(rpc));
+const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
 let tabs = null;
@@ -43,6 +45,16 @@ const pendingExternal = [];
 
 const send = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send('ui:' + ch, payload); };
 const notify = (text, level = 'info') => send('notice', { text, level });
+const pushLibrary = () => send('library', { history: library.history(), bookmarks: library.bookmarks() });
+
+/** 当前标签加入或移出书签 */
+function toggleBookmark() {
+  const t = tabs?.active();
+  if (!t?.url) return false;
+  const on = library.toggleBookmark(t.url, t.title);
+  notify(on ? `已加入书签：${t.title || t.url}` : '已移除书签', 'ok');
+  return on;
+}
 
 function siteName(origin) {
   const m = /^tape:\/\/(.+)$/.exec(origin || '');
@@ -118,7 +130,7 @@ function registerIpc() {
     if (!win || e.sender !== win.webContents) throw new Error('forbidden');
     return fn(...args);
   });
-  ui('ready', () => { tabs.push(); send('wallet', walletView()); });
+  ui('ready', () => { tabs.push(); send('wallet', walletView()); pushLibrary(); });
   ui('newTab', () => tabs.open());
   ui('closeTab', (id) => tabs.close(id));
   ui('activate', (id) => tabs.activate(id));
@@ -148,6 +160,19 @@ function registerIpc() {
   ui('revoke', (origin) => host.revoke(String(origin)));
   ui('openBridge', () => shell.openExternal(bridge.url()));
   ui('disconnectWallet', () => disconnectWallet());
+  ui('find', (text, opts) => tabs.find(String(text || ''), { forward: opts?.forward !== false, again: Boolean(opts?.again) }));
+  ui('stopFind', () => tabs.stopFind());
+  ui('zoom', (dir) => tabs.zoom(Math.sign(Number(dir) || 0)));
+  ui('toggleBookmark', () => toggleBookmark());
+  ui('removeBookmark', (url) => library.removeBookmark(String(url)));
+  ui('removeHistory', (url) => library.removeHistory(String(url)));
+  ui('clearHistory', () => library.clearHistory());
+  ui('openUrl', (url, opts) => {
+    url = String(url || '');
+    if (!ALLOWED.test(url)) return;
+    if (opts?.background) tabs.open(url, { background: true });
+    else submit(url);
+  });
 }
 /** 一组网站：第一个放进当前空白标签（或新开并切过去），其余在后台标签打开 */
 function openSites(list) {
@@ -226,7 +251,22 @@ function buildMenu() {
         ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit', label: '退出' }]),
       ],
     },
-    { role: 'editMenu', label: '编辑' },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'selectAll', label: '全选' },
+        { type: 'separator' },
+        { label: '查找…', accelerator: 'CmdOrCtrl+F', click: ui('find') },
+        { label: '查找下一个', accelerator: 'CmdOrCtrl+G', click: ui('findNext') },
+        { label: '查找上一个', accelerator: 'CmdOrCtrl+Shift+G', click: ui('findPrev') },
+      ],
+    },
     {
       label: '显示',
       submenu: [
@@ -238,8 +278,23 @@ function buildMenu() {
         { label: '上一个标签页', accelerator: 'Ctrl+Shift+Tab', click: () => tabs.cycle(-1) },
         ...Array.from({ length: 9 }, (_, i) => ({ label: `标签页 ${i + 1}`, accelerator: `CmdOrCtrl+${i + 1}`, visible: false, click: () => tabs.select(i) })),
         { type: 'separator' },
+        { label: '实际大小', accelerator: 'CmdOrCtrl+0', click: () => tabs.zoom(0) },
+        { label: '放大', accelerator: 'CmdOrCtrl+Plus', click: () => tabs.zoom(1) },
+        // 不按 Shift 的 ⌘= 也能放大
+        { label: '放大', accelerator: 'CmdOrCtrl+=', visible: false, click: () => tabs.zoom(1) },
+        { label: '缩小', accelerator: 'CmdOrCtrl+-', click: () => tabs.zoom(-1) },
+        { type: 'separator' },
         { label: '网页开发者工具', accelerator: isMac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I', click: () => tabs.devtools() },
         { role: 'togglefullscreen', label: '全屏' },
+      ],
+    },
+    {
+      label: '书签',
+      submenu: [
+        { label: '为当前网页添加/移除书签', accelerator: 'CmdOrCtrl+D', click: () => toggleBookmark() },
+        { label: '书签与最近访问', accelerator: 'CmdOrCtrl+Shift+B', click: () => { tabs.open(); ui('focusAddress')(); } },
+        { type: 'separator' },
+        { label: '清除历史记录', click: () => { library.clearHistory(); notify('已清除历史记录', 'ok'); } },
       ],
     },
     {
@@ -267,7 +322,11 @@ function createWindow() {
   });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
-  tabs = createTabs({ win, session: tabSession, preload: join(SRC, 'preload/tab.cjs'), send, notify });
+  tabs = createTabs({
+    win, session: tabSession, preload: join(SRC, 'preload/tab.cjs'), send, notify,
+    onVisit: (url) => library.visit(url),
+    onTitle: (url, title) => library.title(url, title),
+  });
   win.on('closed', () => { tabs.closeAll(); tabs = null; win = null; uiLoaded = false; });
   uiLoaded = false;
   win.loadFile(join(SRC, 'ui/index.html'));
@@ -342,4 +401,4 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('will-quit', () => { bridge?.stop(); });
+app.on('will-quit', () => { library.flush(); bridge?.stop(); });

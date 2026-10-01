@@ -14,7 +14,12 @@ export function originOf(url) {
   } catch { return null; }
 }
 
-export function createTabs({ win, session, preload, send, notify }) {
+// Chrome 的缩放档位
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
+
+// onVisit(url)         主框架成功打开一个页面（HTTP 2xx/3xx）
+// onTitle(url, title)  页面标题更新
+export function createTabs({ win, session, preload, send, notify, onVisit = () => {}, onTitle = () => {} }) {
   const tabs = new Map();
   const order = [];
   let activeId = null;
@@ -22,6 +27,8 @@ export function createTabs({ win, session, preload, send, notify }) {
   let bounds = { x: 0, y: 0, width: 0, height: 0 };
   let overlay = false;
   let lastBackground = null;
+  // 正在页内查找的标签
+  let findId = null;
 
   const snapshot = (t) => ({
     id: t.id,
@@ -31,6 +38,7 @@ export function createTabs({ win, session, preload, send, notify }) {
     favicon: t.favicon,
     canGoBack: Boolean(t.view?.webContents.navigationHistory.canGoBack()),
     canGoForward: Boolean(t.view?.webContents.navigationHistory.canGoForward()),
+    zoom: t.view ? Math.round(t.view.webContents.getZoomFactor() * 100) : 100,
   });
 
   function push() {
@@ -90,10 +98,18 @@ export function createTabs({ win, session, preload, send, notify }) {
     wc.on('will-redirect', guard);
     wc.on('did-start-loading', () => { t.loading = true; push(); });
     wc.on('did-stop-loading', () => { t.loading = false; push(); });
-    wc.on('page-title-updated', (_e, title) => { t.title = title; push(); });
+    wc.on('page-title-updated', (_e, title) => { t.title = title; onTitle(wc.getURL(), title); push(); });
     wc.on('page-favicon-updated', (_e, icons) => { t.favicon = icons.find((i) => /^(https?|tape|data):/.test(i)) || null; push(); });
     const onNav = (_e, url) => { t.url = url; t.favicon = t.favicon && originOf(t.favicon) === originOf(url) ? t.favicon : null; push(); };
-    wc.on('did-navigate', onNav);
+    wc.on('did-navigate', (e, url, code) => {
+      onNav(e, url);
+      // 不存在的电路、404 之类的错误页不记入历史
+      if (code >= 200 && code < 400) onVisit(url);
+    });
+    wc.on('zoom-changed', (_e, dir) => zoom(dir === 'in' ? 1 : -1, t.id));
+    wc.on('found-in-page', (_e, r) => {
+      if (r.finalUpdate && findId === t.id) send('findResult', { active: r.activeMatchOrdinal, matches: r.matches });
+    });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => { if (isMainFrame) onNav(_e, url); });
     wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
       if (isMainFrame && code !== -3) notify(`打开失败：${desc}（${url}）`, 'error');
@@ -136,6 +152,7 @@ export function createTabs({ win, session, preload, send, notify }) {
       win.contentView.removeChildView(t.view);
       t.view.webContents.close();
     }
+    if (findId === id) findId = null;
     if (activeId === id) activeId = order[Math.min(i, order.length - 1)] ?? null;
     if (!order.length) { open(); return; }
     layout();
@@ -144,6 +161,7 @@ export function createTabs({ win, session, preload, send, notify }) {
 
   function activate(id) {
     if (!tabs.has(id)) return;
+    if (id !== activeId) stopFind();
     activeId = id;
     lastBackground = null;
     layout();
@@ -153,6 +171,34 @@ export function createTabs({ win, session, preload, send, notify }) {
 
   const active = () => tabs.get(activeId) || null;
   const wcOf = (id) => tabs.get(id ?? activeId)?.view?.webContents || null;
+
+  /** 页内查找：again=true 跳到下一个/上一个匹配，false 表示开始新的查找 */
+  function find(text, { forward = true, again = false } = {}) {
+    const wc = wcOf();
+    if (!wc || !text) { stopFind(); return; }
+    if (findId !== activeId) stopFind();
+    findId = activeId;
+    // Electron 的 findNext=true 表示开始新的查找会话
+    wc.findInPage(String(text).slice(0, 500), { forward, findNext: !again });
+  }
+
+  function stopFind() {
+    const wc = findId !== null ? wcOf(findId) : null;
+    findId = null;
+    if (wc && !wc.isDestroyed()) wc.stopFindInPage('clearSelection');
+  }
+
+  /** dir: 1 放大，-1 缩小，0 恢复 100% */
+  function zoom(dir, id = activeId) {
+    const wc = wcOf(id);
+    if (!wc) return;
+    const cur = wc.getZoomFactor();
+    let f = 1;
+    if (dir > 0) f = ZOOM_STEPS.find((z) => z > cur + 0.001) ?? ZOOM_STEPS.at(-1);
+    else if (dir < 0) f = [...ZOOM_STEPS].reverse().find((z) => z < cur - 0.001) ?? ZOOM_STEPS[0];
+    wc.setZoomFactor(f);
+    push();
+  }
 
   return {
     open,
@@ -166,6 +212,9 @@ export function createTabs({ win, session, preload, send, notify }) {
     reload: () => wcOf()?.reload(),
     stop: () => wcOf()?.stop(),
     devtools: () => wcOf()?.toggleDevTools(),
+    find,
+    stopFind,
+    zoom,
     cycle(step) {
       if (!order.length) return;
       const i = order.indexOf(activeId);
