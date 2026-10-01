@@ -1,0 +1,59 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fff; --chrome: #ececec; --tab: #dedede; --tab-active: #fff; --fg: #222; --muted: #777; --line: #d0d0d0;
+  --input: #fff; --accent: #1f6feb; --ok: #1a7f37; --bad: #c62828; --notice: #eef4ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1e1e1e; --chrome: #2b2b2b; --tab: #333; --tab-active: #1e1e1e; --fg: #ddd; --muted: #999; --line: #444; --input: #1e1e1e; --notice: #24324a; }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { display: flex; flex-direction: column; background: var(--bg); color: var(--fg); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow: hidden; }
+button { font: inherit; color: inherit; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#chrome { background: var(--chrome); border-bottom: 1px solid var(--line); flex: none; }
+#tabstrip { display: flex; align-items: flex-end; height: 38px; padding: 0 8px; -webkit-app-region: drag; }
+body.mac #tabstrip { padding-left: 80px; }
+#tabs { display: flex; gap: 2px; min-width: 0; overflow: hidden; }
+.tab { -webkit-app-region: no-drag; display: flex; align-items: center; gap: 6px; width: 200px; min-width: 60px; flex: 0 1 200px; height: 30px; padding: 0 6px 0 10px; border-radius: 8px 8px 0 0; background: var(--tab); border: 0; cursor: default; text-align: left; }
+.tab[aria-selected="true"] { background: var(--tab-active); }
+.tab img, .tab .dot { width: 14px; height: 14px; flex: none; }
+.tab .dot { border-radius: 50%; background: var(--line); }
+.tab.loading .dot { background: var(--accent); animation: pulse 1s infinite alternate; }
+@keyframes pulse { from { opacity: .3; } to { opacity: 1; } }
+.tab .title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tab .close { -webkit-app-region: no-drag; width: 18px; height: 18px; border: 0; border-radius: 4px; background: transparent; line-height: 16px; padding: 0; cursor: pointer; flex: none; }
+.tab .close:hover { background: var(--line); }
+
+.icon { -webkit-app-region: no-drag; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; font-size: 18px; line-height: 1; cursor: pointer; flex: none; }
+.icon:hover:not(:disabled) { background: var(--line); }
+.icon:disabled { opacity: .35; cursor: default; }
+#newtab { margin: 0 0 2px 4px; }
+
+#navbar { display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 8px; background: var(--tab-active); }
+#address-form { flex: 1; min-width: 0; }
+#address { width: 100%; height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--input); color: var(--fg); font: inherit; }
+#wallet { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 14px; background: transparent; cursor: pointer; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+#wallet.ready { border-color: var(--ok); color: var(--ok); }
+#wallet.warn { border-color: var(--bad); color: var(--bad); }
+
+#notice { padding: 6px 12px; background: var(--notice); border-top: 1px solid var(--line); word-break: break-all; }
+#notice.error { color: var(--bad); }
+#notice.ok { color: var(--ok); }
+
+#content { flex: 1; position: relative; overflow: auto; }
+.page { max-width: 680px; margin: 48px auto; padding: 0 24px; font-size: 14px; }
+.page h1 { font-size: 22px; margin: 0 0 8px; }
+.page h2 { font-size: 15px; margin: 28px 0 8px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; margin-top: 32px; }
+.examples { padding-left: 18px; }
+.examples li { margin: 8px 0; }
+.examples button { border: 1px solid var(--line); border-radius: 6px; background: transparent; padding: 1px 8px; cursor: pointer; font-family: ui-monospace, Menlo, monospace; }
+code { font-family: ui-monospace, Menlo, monospace; }
+.page > button, .actions button, .list button { border: 1px solid var(--line); border-radius: 6px; background: var(--tab); padding: 4px 12px; cursor: pointer; }
+textarea { width: 100%; font: 12px/1.5 ui-monospace, Menlo, monospace; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--fg); }
+.actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.list { list-style: none; padding: 0; margin: 0; }
+.list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }

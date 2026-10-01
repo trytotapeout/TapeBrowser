@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TapeBrowser 钱包桥接</title>
+  <link rel="stylesheet" href="/bridge.css">
+</head>
+<body>
+  <main>
+    <h1>TapeBrowser 钱包桥接</h1>
+    <p class="lead">TapeBrowser 通过这个页面使用你浏览器里的钱包扩展。签名和交易仍然在钱包扩展里确认。使用期间请保持本页面打开。</p>
+
+    <section>
+      <div class="row"><span>与 TapeBrowser 的连接</span><b id="link" class="bad">连接中…</b></div>
+      <div class="row"><span>钱包</span><b id="wallet">未选择</b></div>
+      <div class="row"><span>地址</span><b id="account" class="mono">—</b></div>
+      <div class="row"><span>网络</span><b id="chain">—</b></div>
+    </section>
+
+    <section id="pick">
+      <h2>选择钱包</h2>
+      <p id="pick-hint" class="hint">正在查找浏览器里的钱包扩展…</p>
+      <div id="providers"></div>
+      <button id="disconnect" type="button" hidden>断开钱包</button>
+    </section>
+
+    <section>
+      <h2>请求记录</h2>
+      <ol id="log" reversed></ol>
+    </section>
+  </main>
+  <script src="/bridge.js"></script>
+</body>
+</html>

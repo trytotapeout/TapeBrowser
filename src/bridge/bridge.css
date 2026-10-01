@@ -1,0 +1,22 @@
+:root { color-scheme: light dark; --fg: #222; --muted: #777; --line: #e3e3e3; --ok: #1a7f37; --bad: #c62828; --bg2: #f6f6f6; }
+@media (prefers-color-scheme: dark) { :root { --fg: #ddd; --muted: #999; --line: #3a3a3a; --ok: #4ac26b; --bad: #ff6b6b; --bg2: #2a2a2a; } }
+body { font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--fg); margin: 0; }
+main { max-width: 640px; margin: 48px auto; padding: 0 24px; }
+h1 { font-size: 22px; margin: 0 0 8px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+.lead, .hint { color: var(--muted); margin: 0 0 16px; }
+section { border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin: 16px 0; }
+.row { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; }
+.row span { color: var(--muted); }
+.row b { font-weight: 600; text-align: right; word-break: break-all; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+#providers { display: grid; gap: 8px; }
+button { font: inherit; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg2); color: var(--fg); cursor: pointer; text-align: left; }
+button:hover { border-color: var(--muted); }
+button:focus-visible { outline: 2px solid #4a90e2; outline-offset: 2px; }
+button img { width: 24px; height: 24px; }
+#disconnect { margin-top: 12px; }
+#log { margin: 0; padding-left: 24px; max-height: 280px; overflow: auto; font-size: 13px; }
+#log li { padding: 2px 0; word-break: break-all; }

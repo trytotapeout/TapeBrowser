@@ -1,0 +1,58 @@
+{
+  "name": "tapebrowser",
+  "productName": "TapeBrowser",
+  "version": "0.1.0",
+  "description": "TapeKit DeWEB 桌面浏览器：打开 tape:// 电路网站，桥接浏览器钱包扩展",
+  "type": "module",
+  "main": "src/main/main.js",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.mjs",
+    "live": "node test/live.mjs",
+    "dist:mac": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "build": {
+    "appId": "org.tapekit.tapebrowser",
+    "productName": "TapeBrowser",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "TapeKit DeWEB",
+        "schemes": [
+          "tape"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
+  }
+}

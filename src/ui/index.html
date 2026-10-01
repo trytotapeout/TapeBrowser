@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https: http: tape:">
+  <title>TapeBrowser</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body>
+  <header id="chrome">
+    <div id="tabstrip">
+      <div id="tabs" role="tablist" aria-label="标签页"></div>
+      <button id="newtab" class="icon" type="button" title="新标签页 (⌘T)" aria-label="新标签页">+</button>
+    </div>
+    <div id="navbar">
+      <button id="back" class="icon" type="button" title="后退" aria-label="后退">‹</button>
+      <button id="forward" class="icon" type="button" title="前进" aria-label="前进">›</button>
+      <button id="reload" class="icon" type="button" title="重新加载" aria-label="重新加载">↻</button>
+      <form id="address-form" role="search">
+        <input id="address" type="text" spellcheck="false" autocomplete="off" aria-label="地址"
+          placeholder="tape://4454-0、4454.0、#4454@0、12330.tape、钱包地址 0x… 或网址">
+      </form>
+      <button id="wallet" type="button" aria-live="polite">连接钱包</button>
+      <button id="settings-btn" class="icon" type="button" title="设置 (⌘,)" aria-label="设置">⚙</button>
+    </div>
+    <div id="notice" role="status" hidden></div>
+  </header>
+
+  <main id="content">
+    <section id="newtab-page" class="page" hidden>
+      <h1>TapeBrowser</h1>
+      <p class="muted">浏览 TapeKit 电路容器里的 DeWEB 网站。在上方地址栏输入：</p>
+      <ul class="examples">
+        <li><button type="button" data-q="4454.0">4454.0</button> 打开电路 #4454（处理器 0）的网站，也可以写 tape://4454-0、#4454@0</li>
+        <li><button type="button" data-q="12330.tape">12330.tape</button> 不带分隔符：查找 1.2330、12.330、123.30、1233.0 等所有组合，有首页的都打开</li>
+        <li><code>0x…</code> 钱包地址：扫描这个钱包持有的全部电路，有首页的都打开</li>
+        <li>普通网址：https://… 照常打开</li>
+      </ul>
+    </section>
+
+    <section id="settings-page" class="page" hidden>
+      <h1>设置</h1>
+
+      <h2>钱包</h2>
+      <p id="wallet-status" class="muted"></p>
+      <p class="muted">TapeBrowser 不保存私钥。网站的签名和交易会转给你在系统浏览器里打开的「钱包桥接页面」，由那里的钱包扩展（MetaMask 等）确认。使用钱包期间请保持桥接页面打开。</p>
+      <button id="open-bridge" type="button">打开钱包桥接页面</button>
+
+      <h2>已连接钱包的网站</h2>
+      <ul id="origins" class="list"></ul>
+
+      <h2>RPC 节点</h2>
+      <p class="muted">读链用的 BNB Smart Chain 节点，每行一个，按顺序轮换。留空使用内置公共节点。</p>
+      <textarea id="rpcs" rows="5" spellcheck="false" aria-label="RPC 节点"></textarea>
+      <div class="actions"><button id="save-rpcs" type="button">保存</button><span id="rpc-msg" class="muted" role="status"></span></div>
+
+      <p id="version" class="muted small"></p>
+    </section>
+  </main>
+  <script src="ui.js"></script>
+</body>
+</html>
