@@ -1,8 +1,13 @@
 {
   "name": "tapebrowser",
   "productName": "TapeBrowser",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "TapeKit DeWEB 桌面浏览器：打开 tape:// 电路网站，桥接浏览器钱包扩展",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/trytotapeout/TapeBrowser.git"
+  },
+  "homepage": "https://github.com/trytotapeout/TapeBrowser",
   "author": {
     "name": "boostbob",
     "url": "https://x.com/boostbob"

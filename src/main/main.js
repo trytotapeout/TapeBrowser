@@ -318,8 +318,9 @@ async function scanWallet(address) {
 
 const AUTHOR_URL = 'https://x.com/boostbob';
 const DONATE_ADDRESS = '0xdda434fe0281ec6bf4f74ea263504bf878d0ee56';
+const REPO = 'github.com/trytotapeout/TapeBrowser';
 
-/** 关于：系统的关于面板只能显示纯文本，链接点不了，所以用自己的弹窗，按钮打开作者主页、复制钱包地址 */
+/** 关于：系统的关于面板只能显示纯文本，链接点不了，所以用自己的弹窗，按钮打开作者主页、源代码仓库、复制钱包地址 */
 async function showAbout() {
   const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
     type: 'none',
@@ -327,13 +328,14 @@ async function showAbout() {
     ...(app.isPackaged ? {} : { icon: join(SRC, '../build/icon.png') }),
     title: tr('关于 TapeBrowser'),
     message: `TapeBrowser ${app.getVersion()}`,
-    detail: tr('TapeKit DeWEB 浏览器 · 作者 x.com/boostbob\n\n如果你觉得这个产品对你有用，可以支持我继续开发，钱包地址：\n{DONATE_ADDRESS}', { DONATE_ADDRESS }),
-    buttons: [tr('好'), tr('打开 x.com/boostbob'), tr('复制钱包地址')],
+    detail: tr('TapeKit DeWEB 浏览器 · 作者 x.com/boostbob\n源代码：{REPO}\n\n如果你觉得这个产品对你有用，可以支持我继续开发，钱包地址：\n{DONATE_ADDRESS}', { REPO, DONATE_ADDRESS }),
+    buttons: [tr('好'), tr('打开 x.com/boostbob'), tr('打开 GitHub'), tr('复制钱包地址')],
     defaultId: 0,
     cancelId: 0,
   });
   if (r.response === 1) shell.openExternal(AUTHOR_URL);
-  else if (r.response === 2) { clipboard.writeText(DONATE_ADDRESS); notify(tr('已复制钱包地址'), 'ok'); }
+  else if (r.response === 2) shell.openExternal('https://' + REPO);
+  else if (r.response === 3) { clipboard.writeText(DONATE_ADDRESS); notify(tr('已复制钱包地址'), 'ok'); }
 }
 
 function buildMenu() {
