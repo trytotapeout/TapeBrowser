@@ -81,7 +81,19 @@ npm run live
 npm run dist:mac
 ```
 
-`npm run live` 是主网只读冒烟测试，需要联网。打包产物没有签名，第一次打开时 Gatekeeper 会拦截，需要右键选择「打开」。
+```bash
+npm run dist:win
+```
+
+```bash
+npm run dist:linux
+```
+
+`npm run live` 是主网只读冒烟测试，需要联网。
+
+打包产物都在 `dist/`：mac 是 `.dmg`（按本机架构，Apple 芯片为 arm64），Windows 是 x64 的 `TapeBrowser Setup <版本>.exe` 安装包，Linux 是 x64 的 `.AppImage`。三个平台都可以在 mac 上直接交叉打包，不需要装 Wine；`npm run dist:all` 依次打全部三个。
+
+打包产物都没有签名：mac 第一次打开时 Gatekeeper 会拦截，需要右键选择「打开」；Windows 会弹 SmartScreen 提示，点「更多信息 → 仍要运行」；Linux 的 AppImage 需要先 `chmod +x` 再运行。
 
 ## 代码结构
 

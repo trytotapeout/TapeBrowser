@@ -9,6 +9,7 @@
   },
   "type": "module",
   "main": "src/main/main.js",
+  "desktopName": "tapebrowser.desktop",
   "license": "UNLICENSED",
   "private": true,
   "engines": {
@@ -19,7 +20,10 @@
     "start": "electron .",
     "test": "node --test test/*.test.mjs",
     "live": "node test/live.mjs",
-    "dist:mac": "electron-builder --mac"
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win --x64",
+    "dist:linux": "electron-builder --linux --x64",
+    "dist:all": "npm run dist:mac && npm run dist:win && npm run dist:linux"
   },
   "devDependencies": {
     "electron": "44.5.1",
@@ -60,7 +64,9 @@
       "target": [
         "AppImage"
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "category": "Network",
+      "syncDesktopName": true
     },
     "directories": {
       "buildResources": "build"
