@@ -15,7 +15,7 @@
   let siteInfo = null;
   // 当前页面的多节点交叉校验结果 {url, status, nodes, mismatches}
   let verify = null;
-  // 「他的网站」：下一次显示新标签页时按这个持有人筛选
+  // 「持有的全部网站」：下一次显示新标签页时按这个持有人筛选
   let pendingOwner = null;
   // 上次查询网站信息时的 标签 id + 网址 + 是否在加载，变化时才重新查询
   let siteKey = '';
@@ -213,10 +213,10 @@
       + '。可能是节点数据有问题，或网站刚好在更新，请刷新后再看；签名、交易前请核对。';
   }
 
-  /** 持有人一行后面加「他的网站」：在新标签页的全部网站里按持有人筛选 */
+  /** 持有人一行后面加「持有的全部网站」：在新标签页的全部网站里按持有人筛选 */
   function ownerLink(owner) {
     const dd = $('si-list').lastElementChild;
-    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: '他的网站' });
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: '持有的全部网站' });
     b.title = '在全部网站里查看这个地址持有的网站';
     b.addEventListener('click', () => showOwner(owner));
     dd.append(b);
