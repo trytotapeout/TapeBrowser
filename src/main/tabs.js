@@ -1,5 +1,5 @@
 // 标签管理：每个标签一个 WebContentsView，叠在外壳界面下方的内容区。
-// 空白标签（新标签页）不建 view，由外壳界面画新标签页。
+// 空白标签（新标签页）不建 view，由外壳界面画新标签页；它的缩放记在 blankZoom，外壳界面只缩放新标签页区块。
 
 import { WebContentsView, shell, Menu, clipboard } from 'electron';
 
@@ -38,7 +38,7 @@ export function createTabs({ win, session, preload, send, notify, onVisit = () =
     favicon: t.favicon,
     canGoBack: Boolean(t.view?.webContents.navigationHistory.canGoBack()),
     canGoForward: Boolean(t.view?.webContents.navigationHistory.canGoForward()),
-    zoom: t.view ? Math.round(t.view.webContents.getZoomFactor() * 100) : 100,
+    zoom: Math.round((t.view ? t.view.webContents.getZoomFactor() : t.blankZoom || 1) * 100),
   });
 
   function push() {
@@ -190,13 +190,15 @@ export function createTabs({ win, session, preload, send, notify, onVisit = () =
 
   /** dir: 1 放大，-1 缩小，0 恢复 100% */
   function zoom(dir, id = activeId) {
+    const t = tabs.get(id);
+    if (!t) return;
     const wc = wcOf(id);
-    if (!wc) return;
-    const cur = wc.getZoomFactor();
+    const cur = wc ? wc.getZoomFactor() : t.blankZoom || 1;
     let f = 1;
     if (dir > 0) f = ZOOM_STEPS.find((z) => z > cur + 0.001) ?? ZOOM_STEPS.at(-1);
     else if (dir < 0) f = [...ZOOM_STEPS].reverse().find((z) => z < cur - 0.001) ?? ZOOM_STEPS[0];
-    wc.setZoomFactor(f);
+    // 新标签页：只记比例，外壳界面按它缩放新标签页区块；打开网站后网站从 100% 开始
+    if (wc) wc.setZoomFactor(f); else t.blankZoom = f;
     push();
   }
 

@@ -83,7 +83,9 @@
     document.title = t ? t.title + ' - TapeBrowser' : 'TapeBrowser';
     $('newtab-page').hidden = settingsOpen || Boolean(t && t.url);
     $('settings-page').hidden = !settingsOpen;
-    const zoom = t && t.url ? t.zoom : 100;
+    const zoom = t ? t.zoom : 100;
+    // 新标签页画在外壳界面里，只缩放这一块，标签栏和地址栏不变
+    $('newtab-page').style.zoom = t && !t.url && zoom !== 100 ? String(zoom / 100) : '';
     $('zoom').hidden = zoom === 100;
     $('zoom').textContent = zoom + '%';
     const marked = Boolean(t && t.url && library.bookmarks.some((b) => b.url === t.url));
