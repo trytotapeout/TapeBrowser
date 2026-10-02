@@ -109,6 +109,15 @@
       <p class="muted">访问过的网站文件按 SHA-256 存在本机。每次打开仍会先查链上的最新版本，内容没变才用缓存；读链失败时显示上次缓存的版本。</p>
       <div class="actions"><span id="cache-usage" class="muted"></span><button id="clear-cache" type="button">清除缓存</button></div>
 
+      <h2>语言</h2>
+      <div class="actions">
+        <select id="lang" aria-label="界面语言">
+          <option value="auto">跟随系统</option>
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+
       <h2>RPC 节点</h2>
       <p class="muted">每条链各自的读链节点，每行一个，按顺序轮换。留空使用内置公共节点。</p>
       <div id="rpc-nets"></div>

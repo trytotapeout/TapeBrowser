@@ -19,7 +19,8 @@ const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.
 
 // onVisit(url)         主框架成功打开一个页面（HTTP 2xx/3xx）
 // onTitle(url, title)  页面标题更新
-export function createTabs({ win, session, preload, send, notify, onVisit = () => {}, onTitle = () => {} }) {
+// tr(text, vars) 界面文字翻译（见 i18n/i18n.cjs）
+export function createTabs({ win, session, preload, send, notify, tr = (s) => s, onVisit = () => {}, onTitle = () => {} }) {
   const tabs = new Map();
   const order = [];
   let activeId = null;
@@ -32,7 +33,7 @@ export function createTabs({ win, session, preload, send, notify, onVisit = () =
 
   const snapshot = (t) => ({
     id: t.id,
-    title: t.title || (t.url ? t.url : '新标签页'),
+    title: t.title || (t.url ? t.url : tr('新标签页')),
     url: t.url,
     loading: t.loading,
     favicon: t.favicon,
@@ -58,18 +59,18 @@ export function createTabs({ win, session, preload, send, notify, onVisit = () =
     const wc = t.view.webContents;
     const items = [];
     if (params.linkURL && ALLOWED.test(params.linkURL)) {
-      items.push({ label: '在新标签页打开链接', click: () => open(params.linkURL, { background: true }) });
-      items.push({ label: '复制链接', click: () => clipboard.writeText(params.linkURL) });
+      items.push({ label: tr('在新标签页打开链接'), click: () => open(params.linkURL, { background: true }) });
+      items.push({ label: tr('复制链接'), click: () => clipboard.writeText(params.linkURL) });
       items.push({ type: 'separator' });
     }
-    if (params.isEditable) items.push({ role: 'cut', label: '剪切' }, { role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' }, { type: 'separator' });
-    else if (params.selectionText) items.push({ role: 'copy', label: '复制' }, { type: 'separator' });
+    if (params.isEditable) items.push({ role: 'cut', label: tr('剪切') }, { role: 'copy', label: tr('复制') }, { role: 'paste', label: tr('粘贴') }, { type: 'separator' });
+    else if (params.selectionText) items.push({ role: 'copy', label: tr('复制') }, { type: 'separator' });
     items.push(
-      { label: '后退', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
-      { label: '前进', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
-      { label: '重新加载', click: () => wc.reload() },
+      { label: tr('后退'), enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+      { label: tr('前进'), enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
+      { label: tr('重新加载'), click: () => wc.reload() },
       { type: 'separator' },
-      { label: '检查元素', click: () => wc.inspectElement(params.x, params.y) },
+      { label: tr('检查元素'), click: () => wc.inspectElement(params.x, params.y) },
     );
     Menu.buildFromTemplate(items).popup({ window: win });
   }
@@ -112,7 +113,7 @@ export function createTabs({ win, session, preload, send, notify, onVisit = () =
     });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => { if (isMainFrame) onNav(_e, url); });
     wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
-      if (isMainFrame && code !== -3) notify(`打开失败：${desc}（${url}）`, 'error');
+      if (isMainFrame && code !== -3) notify(tr('打开失败：{desc}（{url}）', { desc, url }), 'error');
     });
     wc.on('context-menu', (_e, params) => contextMenu(t, params));
     return view;

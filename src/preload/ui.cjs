@@ -4,8 +4,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const NAME = /^[a-zA-Z]+$/;
 
+// 界面语言和英文字典（中文写在界面代码里，作为字典的 key）
+const i18n = ipcRenderer.sendSync('ui:i18n') || { lang: 'zh', en: {} };
+
 contextBridge.exposeInMainWorld('tb', {
   platform: process.platform,
+  lang: i18n.lang,
+  en: i18n.en,
   invoke: (name, ...args) => {
     if (!NAME.test(name)) return Promise.reject(new Error('bad channel'));
     return ipcRenderer.invoke('ui:' + name, ...args);

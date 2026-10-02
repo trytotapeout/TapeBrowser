@@ -17,6 +17,8 @@ import { createDirectory, QUICK_CHECK_EVERY } from './directory.js';
 import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
 import { describeRequest } from './describe.js';
 import { NETWORKS, BSC, networkByArea, networkByKey } from './config.js';
+import { createRequire } from 'node:module';
+const i18n = createRequire(import.meta.url)('../i18n/i18n.cjs');
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PARTITION = 'persist:tape';
@@ -29,6 +31,9 @@ protocol.registerSchemesAsPrivileged([{
 if (!app.requestSingleInstanceLock()) app.quit();
 
 const settings = createSettings(join(app.getPath('userData'), 'settings.json'));
+// 界面语言：设置里选的，或者跟随系统（app.getLocale 要等 ready 之后才准，先用环境变量猜，ready 后再定）
+let lang = i18n.pick(settings.get('lang'), Intl.DateTimeFormat().resolvedOptions().locale);
+let tr = i18n.create(lang);
 // 每条链一个节点池：自定义节点为空时用内置节点。net.fetch 走 Chromium 网络栈，遵守系统代理
 const rpcUrls = (n) => (settings.rpcsOf(n.key).length ? settings.rpcsOf(n.key) : n.rpcs);
 const rpcs = Object.fromEntries(NETWORKS.map((n) => [n.key, createRpcPool(() => rpcUrls(n), { fetchImpl: (url, init) => net.fetch(url, init) })]));
@@ -70,7 +75,7 @@ async function observeSite(url) {
   let info;
   try { info = await sites.indexInfo(s.tokenId, s.cpu, s.area); } catch { return; }
   const change = library.observe(url, info);
-  if (change) notify(`${siteLabel(s.tokenId, s.cpu, s.area)} 的持有人变了：${short(change.from)} → ${short(change.to)}。网站内容现在由新持有人控制，连接钱包、签名前请留意。`, 'error');
+  if (change) notify(tr('{0} 的持有人变了：{1} → {2}。网站内容现在由新持有人控制，连接钱包、签名前请留意。', { 0: siteLabel(s.tokenId, s.cpu, s.area), 1: short(change.from), 2: short(change.to) }), 'error');
 }
 
 /** 当前标签加入或移出书签 */
@@ -78,7 +83,7 @@ function toggleBookmark() {
   const t = tabs?.active();
   if (!t?.url) return false;
   const on = library.toggleBookmark(t.url, t.title);
-  notify(on ? `已加入书签：${t.title || t.url}` : '已移除书签', 'ok');
+  notify(on ? tr('已加入书签：{0}', { 0: t.title || t.url }) : tr('已移除书签'), 'ok');
   return on;
 }
 
@@ -100,23 +105,23 @@ async function confirm(req) {
   if (req.kind === 'connect') {
     const r = await dialog.showMessageBox(win, {
       type: 'question',
-      buttons: ['连接', '拒绝'],
+      buttons: [tr('连接'), tr('拒绝')],
       defaultId: 0,
       cancelId: 1,
-      message: `${name} 想连接你的钱包`,
-      detail: `网站将看到地址 ${req.account}。\n之后每次签名或交易都会再次询问，并且需要在浏览器的钱包扩展里确认。\n\n来源：${req.origin}`,
+      message: tr('{name} 想连接你的钱包', { name }),
+      detail: tr('网站将看到地址 {account}。\n之后每次签名或交易都会再次询问，并且需要在浏览器的钱包扩展里确认。\n\n来源：{origin}', { account: req.account, origin: req.origin }),
     });
     return { ok: r.response === 0, remember: false };
   }
   const d = describeRequest(req.method, req.params);
   const r = await dialog.showMessageBox(win, {
     type: 'warning',
-    buttons: ['去钱包确认', '拒绝'],
+    buttons: [tr('去钱包确认'), tr('拒绝')],
     defaultId: 0,
     cancelId: 1,
-    message: `${name} 请求：${d.title}`,
-    detail: `${d.body}\n\n来源：${req.origin}\n继续后请切换到浏览器，在钱包扩展里核对并确认。`,
-    checkboxLabel: '本次运行期间不再询问这个网站（仍需在钱包里确认）',
+    message: tr('{name} 请求：{title}', { name, title: d.title }),
+    detail: tr('{body}\n\n来源：{origin}\n继续后请切换到浏览器，在钱包扩展里核对并确认。', { body: d.body, origin: req.origin }),
+    checkboxLabel: tr('本次运行期间不再询问这个网站（仍需在钱包里确认）'),
     checkboxChecked: false,
   });
   return { ok: r.response === 0, remember: r.checkboxChecked };
@@ -142,7 +147,7 @@ function registerIpc() {
   const tabOrigin = (e) => (tabs?.owns(e.sender) && e.senderFrame === e.sender.mainFrame ? originOf(e.senderFrame.url) : null);
   ipcMain.handle('eth:request', async (e, method, params) => {
     const origin = tabOrigin(e);
-    if (!origin) return { ok: false, error: providerError(4100, '这个页面不能使用钱包') };
+    if (!origin) return { ok: false, error: providerError(4100, tr('这个页面不能使用钱包')) };
     try {
       return { ok: true, result: await host.handle(origin, method, params) };
     } catch (err) {
@@ -154,6 +159,8 @@ function registerIpc() {
     return origin ? host.initial(origin) : { chainId: BSC.chainIdHex, accounts: [] };
   });
 
+  // 外壳界面：启动时同步取语言和英文字典（界面第一次渲染前就要用）
+  ipcMain.on('ui:i18n', (e) => { e.returnValue = win && e.sender === win.webContents ? { lang, en: lang === 'en' ? i18n.en : {} } : { lang: 'zh', en: {} }; });
   // 外壳界面
   const ui = (name, fn) => ipcMain.handle('ui:' + name, (e, ...args) => {
     if (!win || e.sender !== win.webContents) throw new Error('forbidden');
@@ -177,13 +184,24 @@ function registerIpc() {
     networks: NETWORKS.map((n) => ({ key: n.key, name: n.name, rpcUrls: settings.rpcsOf(n.key), defaultRpcs: [...n.rpcs] })),
     origins: settings.permittedOrigins().map((o) => ({ origin: o, name: siteName(o) })),
     version: app.getVersion(),
+    lang: settings.get('lang') || 'auto',
   }));
+  // 切换界面语言：重建菜单、重新加载外壳界面（网页标签不受影响）
+  ui('setLang', (value) => {
+    const v = ['zh', 'en'].includes(value) ? value : 'auto';
+    settings.set('lang', v === 'auto' ? null : v);
+    lang = i18n.pick(settings.get('lang'), app.getLocale());
+    tr = i18n.create(lang);
+    buildMenu();
+    win?.webContents.reload();
+    return lang;
+  });
   ui('saveRpcs', (key, list) => {
     const n = networkByKey(key);
-    if (!n) throw new Error('未知的网络');
+    if (!n) throw new Error(tr('未知的网络'));
     const urls = (Array.isArray(list) ? list : []).map((s) => String(s).trim()).filter(Boolean);
     const bad = urls.filter((u) => !validRpc(u));
-    if (bad.length) throw new Error('RPC 地址必须是 https://（本机节点可以用 http://127.0.0.1）：' + bad.join(', '));
+    if (bad.length) throw new Error(tr('RPC 地址必须是 https://（本机节点可以用 http://127.0.0.1）：') + bad.join(', '));
     settings.setRpcs(n.key, urls.slice(0, 10));
     return true;
   });
@@ -248,51 +266,51 @@ async function submit(text) {
       if (active) tabs.navigate(active.id, q.url); else tabs.open(q.url);
       return;
     case 'digits': {
-      notify(`正在查找 ${q.digits} 的所有电路组合…`);
+      notify(tr('正在查找 {digits} 的所有电路组合…', { digits: q.digits }));
       try {
         const r = await sites.enumerateDigits(q.digits);
         const failed = failedText(r.failed);
         if (!r.sites.length) {
-          notify((r.candidates.length ? `没有找到有首页的网站（检查了 ${r.candidates.join('、')}）` : `${q.digits} 没有合法的电路组合`) + failed, 'error');
+          notify((r.candidates.length ? tr('没有找到有首页的网站（检查了 {0}）', { 0: r.candidates.join(tr('、')) }) : tr('{digits} 没有合法的电路组合', { digits: q.digits })) + failed, 'error');
           return;
         }
         if (r.sites.length === 1 && active) tabs.navigate(active.id, r.sites[0].url);
         else openSites(r.sites);
-        notify(`找到 ${r.sites.length} 个网站：${r.sites.map((s) => s.label).join('、')}${failed}`, 'ok');
+        notify(tr('找到 {length} 个网站：{0}{failed}', { length: r.sites.length, 0: r.sites.map((s) => s.label).join(tr('、')), failed }), 'ok');
       } catch (e) {
-        notify('查询失败：' + (e?.message || e), 'error');
+        notify(tr('查询失败：') + (e?.message || e), 'error');
       }
       return;
     }
     case 'wallet': return scanWallet(q.address);
     case 'bad': notify(q.message, 'error'); return;
     default:
-      notify('无法识别。可以输入 42460、1888、4454.0、#4454@0、1.2.248（X Layer）、1.3.5（Base）、8888.tape、钱包地址 0x… 或网址', 'error');
+      notify(tr('无法识别。可以输入 42460、1888、4454.0、#4454@0、1.2.248（X Layer）、1.3.5（Base）、8888.tape、钱包地址 0x… 或网址'), 'error');
   }
 }
 
 /** 部分链读取失败时附在提示后面 */
-const failedText = (failed) => (failed?.length ? `；${failed.map((f) => `${f.network} 读取失败（${f.message}）`).join('，')}` : '');
+const failedText = (failed) => (failed?.length ? tr('；{0}', { 0: failed.map((f) => tr('{network} 读取失败（{message}）', { network: f.network, message: f.message })).join(tr('，')) }) : '');
 
 async function scanWallet(address) {
-  if (scanning) { notify('已经在扫描钱包，请稍候', 'error'); return; }
+  if (scanning) { notify(tr('已经在扫描钱包，请稍候'), 'error'); return; }
   scanning = true;
   try {
     // 三条链并行扫描，进度提示里带上链名
     const r = await sites.scanWallet(address, (p) => {
-      const on = p.network ? `${p.network}：` : '';
-      if (p.stage === 'cpus') notify(`${on}正在读取处理器列表…`);
-      else if (p.stage === 'balances') notify(`${on}正在查询 ${p.total} 台处理器上的持有数量…`);
-      else if (p.stage === 'ids') notify(`${on}处理器 ${p.cpu}：已扫描 ${p.done} / ${p.total} 个编号`);
-      else if (p.stage === 'index') notify(`${on}找到 ${p.total} 枚电路，正在检查网站首页…`);
+      const on = p.network ? tr('{network}：', { network: p.network }) : '';
+      if (p.stage === 'cpus') notify(tr('{on}正在读取处理器列表…', { on }));
+      else if (p.stage === 'balances') notify(tr('{on}正在查询 {total} 台处理器上的持有数量…', { on, total: p.total }));
+      else if (p.stage === 'ids') notify(tr('{on}处理器 {cpu}：已扫描 {done} / {total} 个编号', { on, cpu: p.cpu, done: p.done, total: p.total }));
+      else if (p.stage === 'index') notify(tr('{on}找到 {total} 枚电路，正在检查网站首页…', { on, total: p.total }));
     });
     if (r.sites.length) openSites(r.sites);
-    const skipped = r.skipped.length ? `；${r.skipped.map((s) => `${s.network} 处理器 ${s.cpu} 编号太多未扫描`).join('，')}` : '';
+    const skipped = r.skipped.length ? tr('；{0}', { 0: r.skipped.map((s) => tr('{network} 处理器 {cpu} 编号太多未扫描', { network: s.network, cpu: s.cpu })).join(tr('，')) }) : '';
     const tail = skipped + failedText(r.failed);
-    if (r.sites.length) notify(`钱包持有 ${r.circuits} 枚电路，打开了 ${r.sites.length} 个网站${tail}`, 'ok');
-    else notify(`钱包持有 ${r.circuits} 枚电路，没有带 index.html 的网站${tail}`, 'error');
+    if (r.sites.length) notify(tr('钱包持有 {circuits} 枚电路，打开了 {length} 个网站{tail}', { circuits: r.circuits, length: r.sites.length, tail }), 'ok');
+    else notify(tr('钱包持有 {circuits} 枚电路，没有带 index.html 的网站{tail}', { circuits: r.circuits, tail }), 'error');
   } catch (e) {
-    notify('扫描失败：' + (e?.message || e), 'error');
+    notify(tr('扫描失败：') + (e?.message || e), 'error');
   } finally {
     scanning = false;
   }
@@ -307,15 +325,15 @@ async function showAbout() {
     type: 'none',
     // 打包后 build/ 不在应用里，mac 会自动用应用图标；开发模式下用仓库里的图标
     ...(app.isPackaged ? {} : { icon: join(SRC, '../build/icon.png') }),
-    title: '关于 TapeBrowser',
+    title: tr('关于 TapeBrowser'),
     message: `TapeBrowser ${app.getVersion()}`,
-    detail: `TapeKit DeWEB 浏览器 · 作者 x.com/boostbob\n\n如果你觉得这个产品对你有用，可以支持我继续开发，钱包地址：\n${DONATE_ADDRESS}`,
-    buttons: ['好', '打开 x.com/boostbob', '复制钱包地址'],
+    detail: tr('TapeKit DeWEB 浏览器 · 作者 x.com/boostbob\n\n如果你觉得这个产品对你有用，可以支持我继续开发，钱包地址：\n{DONATE_ADDRESS}', { DONATE_ADDRESS }),
+    buttons: [tr('好'), tr('打开 x.com/boostbob'), tr('复制钱包地址')],
     defaultId: 0,
     cancelId: 0,
   });
   if (r.response === 1) shell.openExternal(AUTHOR_URL);
-  else if (r.response === 2) { clipboard.writeText(DONATE_ADDRESS); notify('已复制钱包地址', 'ok'); }
+  else if (r.response === 2) { clipboard.writeText(DONATE_ADDRESS); notify(tr('已复制钱包地址'), 'ok'); }
 }
 
 function buildMenu() {
@@ -326,83 +344,83 @@ function buildMenu() {
     ...(isMac ? [{
       label: 'TapeBrowser',
       submenu: [
-        { label: '关于 TapeBrowser', click: () => showAbout() },
+        { label: tr('关于 TapeBrowser'), click: () => showAbout() },
         { type: 'separator' },
-        { role: 'services', label: '服务' },
+        { role: 'services', label: tr('服务') },
         { type: 'separator' },
-        { role: 'hide', label: '隐藏 TapeBrowser' },
-        { role: 'hideOthers', label: '隐藏其他' },
-        { role: 'unhide', label: '全部显示' },
+        { role: 'hide', label: tr('隐藏 TapeBrowser') },
+        { role: 'hideOthers', label: tr('隐藏其他') },
+        { role: 'unhide', label: tr('全部显示') },
         { type: 'separator' },
-        { role: 'quit', label: '退出 TapeBrowser' },
+        { role: 'quit', label: tr('退出 TapeBrowser') },
       ],
     }] : []),
     {
-      label: '文件',
+      label: tr('文件'),
       submenu: [
-        { label: '新标签页', accelerator: 'CmdOrCtrl+T', click: () => { tabs.open(); ui('focusAddress')(); } },
-        { label: '打开地址', accelerator: 'CmdOrCtrl+L', click: ui('focusAddress') },
-        { label: '关闭标签页', accelerator: 'CmdOrCtrl+W', click: () => { const t = tabs.active(); if (t) tabs.close(t.id); } },
-        ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit', label: '退出' }]),
+        { label: tr('新标签页'), accelerator: 'CmdOrCtrl+T', click: () => { tabs.open(); ui('focusAddress')(); } },
+        { label: tr('打开地址'), accelerator: 'CmdOrCtrl+L', click: ui('focusAddress') },
+        { label: tr('关闭标签页'), accelerator: 'CmdOrCtrl+W', click: () => { const t = tabs.active(); if (t) tabs.close(t.id); } },
+        ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit', label: tr('退出') }]),
       ],
     },
     {
-      label: '编辑',
+      label: tr('编辑'),
       submenu: [
-        { role: 'undo', label: '撤销' },
-        { role: 'redo', label: '重做' },
+        { role: 'undo', label: tr('撤销') },
+        { role: 'redo', label: tr('重做') },
         { type: 'separator' },
-        { role: 'cut', label: '剪切' },
-        { role: 'copy', label: '复制' },
-        { role: 'paste', label: '粘贴' },
-        { role: 'selectAll', label: '全选' },
+        { role: 'cut', label: tr('剪切') },
+        { role: 'copy', label: tr('复制') },
+        { role: 'paste', label: tr('粘贴') },
+        { role: 'selectAll', label: tr('全选') },
         { type: 'separator' },
-        { label: '查找…', accelerator: 'CmdOrCtrl+F', click: ui('find') },
-        { label: '查找下一个', accelerator: 'CmdOrCtrl+G', click: ui('findNext') },
-        { label: '查找上一个', accelerator: 'CmdOrCtrl+Shift+G', click: ui('findPrev') },
+        { label: tr('查找…'), accelerator: 'CmdOrCtrl+F', click: ui('find') },
+        { label: tr('查找下一个'), accelerator: 'CmdOrCtrl+G', click: ui('findNext') },
+        { label: tr('查找上一个'), accelerator: 'CmdOrCtrl+Shift+G', click: ui('findPrev') },
       ],
     },
     {
-      label: '显示',
+      label: tr('显示'),
       submenu: [
-        { label: '重新加载', accelerator: 'CmdOrCtrl+R', click: () => tabs.reload() },
-        { label: '后退', accelerator: 'CmdOrCtrl+[', click: () => tabs.back() },
-        { label: '前进', accelerator: 'CmdOrCtrl+]', click: () => tabs.forward() },
+        { label: tr('重新加载'), accelerator: 'CmdOrCtrl+R', click: () => tabs.reload() },
+        { label: tr('后退'), accelerator: 'CmdOrCtrl+[', click: () => tabs.back() },
+        { label: tr('前进'), accelerator: 'CmdOrCtrl+]', click: () => tabs.forward() },
         { type: 'separator' },
-        { label: '下一个标签页', accelerator: 'Ctrl+Tab', click: () => tabs.cycle(1) },
-        { label: '上一个标签页', accelerator: 'Ctrl+Shift+Tab', click: () => tabs.cycle(-1) },
-        ...Array.from({ length: 9 }, (_, i) => ({ label: `标签页 ${i + 1}`, accelerator: `CmdOrCtrl+${i + 1}`, visible: false, click: () => tabs.select(i) })),
+        { label: tr('下一个标签页'), accelerator: 'Ctrl+Tab', click: () => tabs.cycle(1) },
+        { label: tr('上一个标签页'), accelerator: 'Ctrl+Shift+Tab', click: () => tabs.cycle(-1) },
+        ...Array.from({ length: 9 }, (_, i) => ({ label: tr('标签页 {0}', { 0: i + 1 }), accelerator: `CmdOrCtrl+${i + 1}`, visible: false, click: () => tabs.select(i) })),
         { type: 'separator' },
-        { label: '实际大小', accelerator: 'CmdOrCtrl+0', click: () => tabs.zoom(0) },
-        { label: '放大', accelerator: 'CmdOrCtrl+Plus', click: () => tabs.zoom(1) },
+        { label: tr('实际大小'), accelerator: 'CmdOrCtrl+0', click: () => tabs.zoom(0) },
+        { label: tr('放大'), accelerator: 'CmdOrCtrl+Plus', click: () => tabs.zoom(1) },
         // 不按 Shift 的 ⌘= 也能放大
-        { label: '放大', accelerator: 'CmdOrCtrl+=', visible: false, click: () => tabs.zoom(1) },
-        { label: '缩小', accelerator: 'CmdOrCtrl+-', click: () => tabs.zoom(-1) },
+        { label: tr('放大'), accelerator: 'CmdOrCtrl+=', visible: false, click: () => tabs.zoom(1) },
+        { label: tr('缩小'), accelerator: 'CmdOrCtrl+-', click: () => tabs.zoom(-1) },
         { type: 'separator' },
-        { label: '网页开发者工具', accelerator: isMac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I', click: () => tabs.devtools() },
-        { role: 'togglefullscreen', label: '全屏' },
+        { label: tr('网页开发者工具'), accelerator: isMac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I', click: () => tabs.devtools() },
+        { role: 'togglefullscreen', label: tr('全屏') },
       ],
     },
     {
-      label: '书签',
+      label: tr('书签'),
       submenu: [
-        { label: '为当前网页添加/移除书签', accelerator: 'CmdOrCtrl+D', click: () => toggleBookmark() },
-        { label: '书签与最近访问', accelerator: 'CmdOrCtrl+Shift+B', click: () => { tabs.open(); ui('focusAddress')(); } },
+        { label: tr('为当前网页添加/移除书签'), accelerator: 'CmdOrCtrl+D', click: () => toggleBookmark() },
+        { label: tr('书签与最近访问'), accelerator: 'CmdOrCtrl+Shift+B', click: () => { tabs.open(); ui('focusAddress')(); } },
         { type: 'separator' },
-        { label: '清除历史记录', click: () => { library.clearHistory(); notify('已清除历史记录', 'ok'); } },
+        { label: tr('清除历史记录'), click: () => { library.clearHistory(); notify(tr('已清除历史记录'), 'ok'); } },
       ],
     },
     {
-      label: '钱包',
+      label: tr('钱包'),
       submenu: [
-        { label: '打开钱包桥接页面', click: () => shell.openExternal(bridge.url()) },
-        { label: '断开钱包', click: () => disconnectWallet() },
-        { label: '设置', accelerator: 'CmdOrCtrl+,', click: ui('settings') },
+        { label: tr('打开钱包桥接页面'), click: () => shell.openExternal(bridge.url()) },
+        { label: tr('断开钱包'), click: () => disconnectWallet() },
+        { label: tr('设置'), accelerator: 'CmdOrCtrl+,', click: ui('settings') },
       ],
     },
-    { role: 'windowMenu', label: '窗口' },
+    { role: 'windowMenu', label: tr('窗口') },
     // Windows、Linux 没有应用菜单，关于放在帮助里
-    ...(isMac ? [] : [{ label: '帮助', submenu: [{ label: '关于 TapeBrowser', click: () => showAbout() }] }]),
+    ...(isMac ? [] : [{ label: tr('帮助'), submenu: [{ label: tr('关于 TapeBrowser'), click: () => showAbout() }] }]),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -420,7 +438,7 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   tabs = createTabs({
-    win, session: tabSession, preload: join(SRC, 'preload/tab.cjs'), send, notify,
+    win, session: tabSession, preload: join(SRC, 'preload/tab.cjs'), send, notify, tr: (...a) => tr(...a),
     onVisit: (url) => { library.visit(url); observeSite(url); },
     onTitle: (url, title) => library.title(url, title),
   });
@@ -436,9 +454,9 @@ function createWindow() {
 
 /** 断开钱包：网页收到 accountsChanged([])；网站授权保留，重新连接后不用再确认 */
 function disconnectWallet() {
-  if (!bridge?.state.ready) { notify('没有连接钱包'); return; }
+  if (!bridge?.state.ready) { notify(tr('没有连接钱包')); return; }
   bridge.disconnect();
-  notify('已断开钱包', 'ok');
+  notify(tr('已断开钱包'), 'ok');
 }
 
 /** 其他程序（访达、终端 open、别的浏览器）点开的 tape:// 链接 */
@@ -480,6 +498,9 @@ app.whenReady().then(async () => {
   bridge.on('state', () => send('wallet', walletView()));
 
   registerIpc();
+  // ready 之后系统语言才准
+  lang = i18n.pick(settings.get('lang'), app.getLocale());
+  tr = i18n.create(lang);
   buildMenu();
   if (app.isPackaged) app.setAsDefaultProtocolClient('tape');
   // Windows/Linux 双击链接时 URL 在 argv 里；mac 走 open-url（开发调试时也可以从命令行传）

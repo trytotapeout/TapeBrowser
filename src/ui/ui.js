@@ -2,6 +2,31 @@
 'use strict';
 (function () {
   const tb = window.tb;
+  // 界面文字：中文是 key，英文界面查 tb.en，没有翻译的原样显示；{name} 是占位符
+  const EN = tb.lang === 'en' ? tb.en || {} : null;
+  const tr = (text, vars) => {
+    let s = (EN && EN[text]) ?? text;
+    if (vars) s = s.replace(/\{(\w+)\}/g, (all, k) => (Object.hasOwn(vars, k) ? String(vars[k]) : all));
+    return s;
+  };
+  /** 翻译 index.html 里写死的中文：文字节点和 title / aria-label / placeholder */
+  function localize(root) {
+    document.documentElement.lang = tb.lang === 'en' ? 'en' : 'zh';
+    if (!EN) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const raw = n.nodeValue;
+      const key = raw.trim();
+      if (key && EN[key]) n.nodeValue = raw.replace(key, EN[key]);
+    }
+    for (const el of root.querySelectorAll('[title], [aria-label], [placeholder]')) {
+      for (const a of ['title', 'aria-label', 'placeholder']) {
+        const v = el.getAttribute(a);
+        if (v && EN[v]) el.setAttribute(a, EN[v]);
+      }
+    }
+  }
+  localize(document.body);
   const $ = (id) => document.getElementById(id);
   let state = { tabs: [], activeId: null };
   let wallet = {};
@@ -58,8 +83,8 @@
         el.append(Object.assign(document.createElement('span'), { className: 'dot' }));
       }
       el.append(Object.assign(document.createElement('span'), { className: 'title', textContent: t.title }));
-      const close = Object.assign(document.createElement('button'), { className: 'close', type: 'button', textContent: '×', title: '关闭标签页' });
-      close.setAttribute('aria-label', '关闭标签页 ' + t.title);
+      const close = Object.assign(document.createElement('button'), { className: 'close', type: 'button', textContent: '×', title: tr('关闭标签页') });
+      close.setAttribute('aria-label', tr('关闭标签页 ') + t.title);
       // 按下 × 时不能触发标签的 mousedown 切换：切换会重绘标签栏，× 被替换后 click 就丢了
       close.addEventListener('mousedown', (e) => e.stopPropagation());
       close.addEventListener('click', (e) => { e.stopPropagation(); tb.invoke('closeTab', t.id); });
@@ -82,7 +107,7 @@
     $('back').disabled = !t || !t.canGoBack;
     $('forward').disabled = !t || !t.canGoForward;
     $('reload').textContent = t && t.loading ? '×' : '↻';
-    $('reload').title = t && t.loading ? '停止' : '重新加载';
+    $('reload').title = t && t.loading ? tr('停止') : tr('重新加载');
     if (!editing) $('address').value = t && t.url ? t.url : '';
     document.title = t ? t.title + ' - TapeBrowser' : 'TapeBrowser';
     $('newtab-page').hidden = settingsOpen || Boolean(t && t.url);
@@ -105,7 +130,7 @@
     $('bookmark').disabled = !(t && t.url);
     $('bookmark').textContent = marked ? '★' : '☆';
     $('bookmark').setAttribute('aria-pressed', String(marked));
-    $('bookmark').title = marked ? '移除书签 (⌘D)' : '加入书签 (⌘D)';
+    $('bookmark').title = marked ? tr('移除书签 (⌘D)') : tr('加入书签 (⌘D)');
     // 新标签页上没有网页可查找
     if (findOpen && !(t && t.url)) setFind(false);
     refreshSite();
@@ -113,7 +138,7 @@
 
   const isTape = (u) => /^tape:\/\//i.test(u || '');
   const shortHex = (h) => (h && h.length > 20 ? h.slice(0, 10) + '…' + h.slice(-8) : h || '—');
-  const SOURCE = { chain: '从链上下载', cache: '链上哈希未变，使用本机缓存', stale: '读链失败，显示的是上次缓存的版本' };
+  const SOURCE = { chain: tr('从链上下载'), cache: tr('链上哈希未变，使用本机缓存'), stale: tr('读链失败，显示的是上次缓存的版本') };
 
   /** 标签网址或加载状态变化时重新读取网站信息 */
   function refreshSite() {
@@ -127,8 +152,8 @@
     if (chain) {
       tag.textContent = CHAINS[chain];
       tag.dataset.chain = chain;
-      tag.title = '这个网站在 ' + CHAINS[chain] + ' 上';
-      tag.setAttribute('aria-label', '所在的链：' + CHAINS[chain]);
+      tag.title = tr('这个网站在 ') + CHAINS[chain] + tr(' 上');
+      tag.setAttribute('aria-label', tr('所在的链：') + CHAINS[chain]);
     }
     if (!tape) { siteInfo = null; verify = null; siteKey = ''; if (siteOpen) setSite(false); return; }
     const key = `${t.id}|${t.url}|${t.loading}`;
@@ -149,24 +174,24 @@
   }
 
   function siteState(info) {
-    if (!info || info.error) return { cls: 'bad', text: '读取失败' };
-    if (!info.exists) return { cls: 'bad', text: '电路不存在' };
-    if (!info.opened) return { cls: 'bad', text: '未开通容器' };
-    if (!info.file) return { cls: 'bad', text: '文件不存在' };
-    if (info.stale || info.file.source === 'stale') return { cls: 'stale', text: '离线缓存' };
-    if (verify && verify.status === 'mismatch') return { cls: 'bad', text: '节点结果不一致' };
-    return { cls: 'ok', text: '链上 · 已校验' };
+    if (!info || info.error) return { cls: 'bad', text: tr('读取失败') };
+    if (!info.exists) return { cls: 'bad', text: tr('电路不存在') };
+    if (!info.opened) return { cls: 'bad', text: tr('未开通容器') };
+    if (!info.file) return { cls: 'bad', text: tr('文件不存在') };
+    if (info.stale || info.file.source === 'stale') return { cls: 'stale', text: tr('离线缓存') };
+    if (verify && verify.status === 'mismatch') return { cls: 'bad', text: tr('节点结果不一致') };
+    return { cls: 'ok', text: tr('链上 · 已校验') };
   }
 
   function renderSite() {
     const st = siteState(siteInfo);
     const b = $('site-btn');
     b.className = st.cls === 'ok' ? '' : st.cls;
-    b.textContent = st.cls === 'ok' ? '链上' : st.text;
-    b.title = '网站信息：' + st.text;
+    b.textContent = st.cls === 'ok' ? tr('链上') : st.text;
+    b.title = tr('网站信息：') + st.text;
     if (!siteOpen) return;
     const info = siteInfo || {};
-    $('si-label').textContent = info.label || '网站信息';
+    $('si-label').textContent = info.label || tr('网站信息');
     $('si-status').textContent = st.text;
     $('si-status').className = st.cls;
     const dl = $('si-list');
@@ -175,49 +200,49 @@
       const dd = document.createElement('dd');
       dd.append(Object.assign(document.createElement('span'), { className: 'v', textContent: value ?? '—', title: copy || value || '' }));
       if (copy) {
-        const c = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: '复制' });
-        c.addEventListener('click', () => tb.invoke('copy', copy).then(() => { c.textContent = '已复制'; setTimeout(() => { c.textContent = '复制'; }, 1200); }));
+        const c = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('复制') });
+        c.addEventListener('click', () => tb.invoke('copy', copy).then(() => { c.textContent = tr('已复制'); setTimeout(() => { c.textContent = tr('复制'); }, 1200); }));
         dd.append(c);
       }
       dl.append(Object.assign(document.createElement('dt'), { textContent: name }), dd);
     };
-    if (info.error) { row('错误', info.error); return; }
-    row('链', info.network || 'BNB Chain');
-    row('电路', `#${info.tokenId}，处理器 ${info.cpu}${info.area ? `（区号 ${info.area}）` : ''}`);
-    row('持有人', shortHex(info.owner), info.owner);
+    if (info.error) { row(tr('错误'), info.error); return; }
+    row(tr('链'), info.network || 'BNB Chain');
+    row(tr('电路'), tr('#{tokenId}，处理器 {cpu}{0}', { tokenId: info.tokenId, cpu: info.cpu, 0: info.area ? tr('（区号 {area}）', { area: info.area }) : '' }));
+    row(tr('持有人'), shortHex(info.owner), info.owner);
     if (info.owner) ownerLink(info.owner);
     const seen = info.seen || {};
-    if (seen.prevOwner) row('上一任持有人', shortHex(seen.prevOwner) + (seen.ownerChangedAt ? `（${ago(seen.ownerChangedAt)}发现变更）` : ''), seen.prevOwner);
-    row('容器', shortHex(info.container), info.container);
-    row('电路合约', shortHex(info.circuits), info.circuits);
-    row('当前文件', '/' + (info.path || ''));
+    if (seen.prevOwner) row(tr('上一任持有人'), shortHex(seen.prevOwner) + (seen.ownerChangedAt ? tr('（{0}发现变更）', { 0: ago(seen.ownerChangedAt) }) : ''), seen.prevOwner);
+    row(tr('容器'), shortHex(info.container), info.container);
+    row(tr('电路合约'), shortHex(info.circuits), info.circuits);
+    row(tr('当前文件'), '/' + (info.path || ''));
     if (info.file) {
       row('SHA-256', shortHex(info.file.sha256), info.file.sha256);
-      row('大小', info.file.size >= 1024 ? (info.file.size / 1024).toFixed(1) + ' KB' : info.file.size + ' 字节');
-      row('上链时间', info.file.updatedAt ? new Date(info.file.updatedAt * 1000).toLocaleString() : '—');
-      row('读取方式', SOURCE[info.file.source] || info.file.source);
+      row(tr('大小'), info.file.size >= 1024 ? (info.file.size / 1024).toFixed(1) + ' KB' : info.file.size + tr(' 字节'));
+      row(tr('上链时间'), info.file.updatedAt ? new Date(info.file.updatedAt * 1000).toLocaleString() : '—');
+      row(tr('读取方式'), SOURCE[info.file.source] || info.file.source);
     }
-    row('交叉校验', verifyText());
+    row(tr('交叉校验'), verifyText());
   }
 
   /** 多节点交叉校验的说明 */
   function verifyText() {
     const v = verify;
-    if (!v) return '正在向另外两个节点核对…';
-    if (v.status === 'ok') return `${v.nodes.join('、')} 读到的容器和文件哈希一致`;
-    if (v.status === 'single') return v.nodes.length ? `只有 ${v.nodes[0]} 可用，没有第二个节点可以核对` : '没有其他可用节点，无法核对';
-    if (v.status === 'skip') return '这个页面不是从链上读到的，不核对';
-    if (v.status === 'error') return '核对失败：' + v.message;
-    const what = { container: '容器地址', sha256: '文件哈希' };
-    return '不一致：' + v.mismatches.map((m) => `${m.node} 读到的${what[m.field]}是 ${shortHex(m.got) || '空'}`).join('；')
-      + '。可能是节点数据有问题，或网站刚好在更新，请刷新后再看；签名、交易前请核对。';
+    if (!v) return tr('正在向另外两个节点核对…');
+    if (v.status === 'ok') return tr('{0} 读到的容器和文件哈希一致', { 0: v.nodes.join(tr('、')) });
+    if (v.status === 'single') return v.nodes.length ? tr('只有 {0} 可用，没有第二个节点可以核对', { 0: v.nodes[0] }) : tr('没有其他可用节点，无法核对');
+    if (v.status === 'skip') return tr('这个页面不是从链上读到的，不核对');
+    if (v.status === 'error') return tr('核对失败：') + v.message;
+    const what = { container: tr('容器地址'), sha256: tr('文件哈希') };
+    return tr('不一致：') + v.mismatches.map((m) => tr('{node} 读到的{0}是 {1}', { node: m.node, 0: what[m.field], 1: shortHex(m.got) || tr('空') })).join(tr('；'))
+      + tr('。可能是节点数据有问题，或网站刚好在更新，请刷新后再看；签名、交易前请核对。');
   }
 
   /** 持有人一行后面加「持有的全部网站」：在新标签页的全部网站里按持有人筛选 */
   function ownerLink(owner) {
     const dd = $('si-list').lastElementChild;
-    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: '持有的全部网站' });
-    b.title = '在全部网站里查看这个地址持有的网站';
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('持有的全部网站') });
+    b.title = tr('在全部网站里查看这个地址持有的网站');
     b.addEventListener('click', () => showOwner(owner));
     dd.append(b);
   }
@@ -252,11 +277,11 @@
         a.append(Object.assign(document.createElement('span'), { className: 't', textContent: it.title || it.label || it.url }));
         // 上次访问之后首页更新了 / 持有人变了
         if (it.ownerChange) {
-          const b = Object.assign(document.createElement('span'), { className: 'badge warn', textContent: '持有人已变' });
-          b.title = `持有人 ${it.ownerChange.from} → ${it.ownerChange.to}`;
+          const b = Object.assign(document.createElement('span'), { className: 'badge warn', textContent: tr('持有人已变') });
+          b.title = tr('持有人 {from} → {to}', { from: it.ownerChange.from, to: it.ownerChange.to });
           a.append(b);
         } else if (it.updated) {
-          a.append(Object.assign(document.createElement('span'), { className: 'badge', textContent: '有更新', title: '上次访问之后首页更新了' }));
+          a.append(Object.assign(document.createElement('span'), { className: 'badge', textContent: tr('有更新'), title: tr('上次访问之后首页更新了') }));
         }
         a.append(Object.assign(document.createElement('span'), { className: 'u', textContent: it.label || it.url }));
         // ⌘ 点击或中键在后台标签打开
@@ -269,8 +294,8 @@
         ul.append(li);
       }
     };
-    fill($('bookmarks'), library.bookmarks, (u) => tb.invoke('removeBookmark', u), '移除书签');
-    fill($('history'), library.history.slice(0, 30), (u) => tb.invoke('removeHistory', u), '从最近访问中删除');
+    fill($('bookmarks'), library.bookmarks, (u) => tb.invoke('removeBookmark', u), tr('移除书签'));
+    fill($('history'), library.history.slice(0, 30), (u) => tb.invoke('removeHistory', u), tr('从最近访问中删除'));
     $('bookmarks-empty').hidden = library.bookmarks.length > 0;
     $('history-empty').hidden = library.history.length > 0;
     $('clear-history').hidden = !library.history.length;
@@ -289,10 +314,10 @@
 
   const ago = (ms) => {
     const s = Math.max(0, (Date.now() - ms) / 1000);
-    if (s < 60) return '刚刚';
-    if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
-    if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
-    return Math.floor(s / 86400) + ' 天前';
+    if (s < 60) return tr('刚刚');
+    if (s < 3600) return Math.floor(s / 60) + tr(' 分钟前');
+    if (s < 86400) return Math.floor(s / 3600) + tr(' 小时前');
+    return Math.floor(s / 86400) + tr(' 天前');
   };
   const day = (sec) => {
     if (!sec) return '';
@@ -303,18 +328,18 @@
   /** 状态行：各链的进度或错误，扫完后显示总数和各链数量 */
   function dirStatusText(st) {
     const nets = st.networks || [];
-    const LABEL = { cpus: '读取处理器', opened: '检查容器开通', index: '读取首页', check: '检查更新', titles: '读取网站标题' };
+    const LABEL = { cpus: tr('读取处理器'), opened: tr('检查容器开通'), index: tr('读取首页'), check: tr('检查更新'), titles: tr('读取网站标题') };
     const busy = nets.filter((n) => n.progress && n.progress.stage !== 'error');
     const bad = nets.filter((n) => n.progress && n.progress.stage === 'error');
     const parts = busy.map((n) => {
       const p = n.progress;
-      return `${n.name} 正在${LABEL[p.stage] || '刷新'}${p.total ? `（${p.done} / ${p.total}）` : ''}`;
+      return tr('{name} 正在{0}{1}', { name: n.name, 0: LABEL[p.stage] || tr('刷新'), 1: p.total ? tr('（{done} / {total}）', { done: p.done, total: p.total }) : '' });
     });
-    for (const n of bad) parts.push(`${n.name} 刷新失败：${n.progress.message}`);
+    for (const n of bad) parts.push(tr('{name} 刷新失败：{message}', { name: n.name, message: n.progress.message }));
     if (parts.length) return parts.join(' · ') + (busy.length ? '…' : '');
-    if (!st.lastFullScan) return '还没有扫描过，第一次扫描大约需要三分钟。';
-    const per = nets.filter((n) => n.count).map((n) => `${NET_SHORT[n.key] || n.name} ${n.count}`).join('，');
-    return `已收录 ${st.count} 个网站${per ? `（${per}）` : ''} · ${ago(st.lastUpdate || st.lastFullScan)}更新`;
+    if (!st.lastFullScan) return tr('还没有扫描过，第一次扫描大约需要三分钟。');
+    const per = nets.filter((n) => n.count).map((n) => `${NET_SHORT[n.key] || n.name} ${n.count}`).join(tr('，'));
+    return tr('已收录 {count} 个网站{0} · {1}更新', { count: st.count, 0: per ? tr('（{per}）', { per }) : '', 1: ago(st.lastUpdate || st.lastFullScan) });
   }
 
   /** 全部网站：按搜索词过滤、排序，只渲染前 dirLimit 条 */
@@ -342,9 +367,9 @@
     for (const it of items.slice(0, dirLimit)) {
       const li = document.createElement('li');
       // 标题来自网站自己的 HTML，只用 textContent
-      const a = Object.assign(document.createElement('a'), { href: it.url, title: `${it.url}\n持有人 ${it.owner}` });
+      const a = Object.assign(document.createElement('a'), { href: it.url, title: tr('{url}\n持有人 {owner}', { url: it.url, owner: it.owner }) });
       a.append(
-        Object.assign(document.createElement('span'), { className: 't' + (it.title ? '' : ' untitled'), textContent: it.title || '（没有标题）' }),
+        Object.assign(document.createElement('span'), { className: 't' + (it.title ? '' : ' untitled'), textContent: it.title || tr('（没有标题）') }),
         Object.assign(document.createElement('span'), { className: 'net ' + (it.network || 'bnb'), textContent: NET_SHORT[it.network || 'bnb'] }),
         Object.assign(document.createElement('span'), { className: 'u', textContent: it.label }),
         Object.assign(document.createElement('span'), { className: 'd', textContent: day(it.updatedAt) }),
@@ -355,7 +380,7 @@
       ul.append(li);
     }
     $('dir-more').hidden = items.length <= dirLimit;
-    $('dir-more').textContent = `显示更多（还有 ${items.length - dirLimit} 个）`;
+    $('dir-more').textContent = tr('显示更多（还有 {0} 个）', { 0: items.length - dirLimit });
   }
 
   function setFind(on) {
@@ -378,7 +403,7 @@
     tb.invoke('find', text, { again, forward });
   }
 
-  const chainName = (id) => (id ? CHAINS[id] || '链 ' + parseInt(id, 16) : '未知链');
+  const chainName = (id) => (id ? CHAINS[id] || tr('链 ') + parseInt(id, 16) : tr('未知链'));
 
   function renderWallet() {
     const b = $('wallet');
@@ -388,20 +413,20 @@
       const want = tabChain(active());
       const wrongChain = Boolean(wallet.chainId && (want ? wallet.chainId !== want : !CHAINS[wallet.chainId]));
       b.textContent = (wrongChain ? '⚠ ' : '') + wallet.account.slice(0, 6) + '…' + wallet.account.slice(-4);
-      b.title = (wallet.wallet || '钱包') + '：' + chainName(wallet.chainId)
-        + (wrongChain ? (want ? `，这个网站在 ${CHAINS[want]} 上，请在钱包里切换` : '，不是 TapeKit 支持的链') : '');
+      b.title = (wallet.wallet || tr('钱包')) + tr('：') + chainName(wallet.chainId)
+        + (wrongChain ? (want ? tr('，这个网站在 {0} 上，请在钱包里切换', { 0: CHAINS[want] }) : tr('，不是 TapeKit 支持的链')) : '');
       b.classList.add(wrongChain ? 'warn' : 'ready');
     } else if (wallet.connected) {
-      b.textContent = '在浏览器里选择钱包…';
-      b.title = '桥接页面已打开，请在页面里选择钱包';
+      b.textContent = tr('在浏览器里选择钱包…');
+      b.title = tr('桥接页面已打开，请在页面里选择钱包');
     } else {
-      b.textContent = '连接钱包';
-      b.title = '在系统浏览器里打开钱包桥接页面';
+      b.textContent = tr('连接钱包');
+      b.title = tr('在系统浏览器里打开钱包桥接页面');
     }
     const s = $('wallet-status');
-    if (wallet.ready && wallet.account) s.textContent = `${wallet.wallet || '钱包'} · ${wallet.account} · ${chainName(wallet.chainId)}`;
-    else if (wallet.connected) s.textContent = '桥接页面已打开，还没有选择钱包。';
-    else s.textContent = '没有连接钱包。';
+    if (wallet.ready && wallet.account) s.textContent = `${wallet.wallet || tr('钱包')} · ${wallet.account} · ${chainName(wallet.chainId)}`;
+    else if (wallet.connected) s.textContent = tr('桥接页面已打开，还没有选择钱包。');
+    else s.textContent = tr('没有连接钱包。');
     $('disconnect-wallet').hidden = !(wallet.ready && wallet.account);
   }
 
@@ -425,20 +450,21 @@
     const s = await tb.invoke('settings');
     renderRpcs(s.networks);
     $('version').textContent = 'TapeBrowser v' + s.version;
+    $('lang').value = s.lang;
     const ul = $('origins');
     ul.textContent = '';
-    if (!s.origins.length) ul.append(Object.assign(document.createElement('li'), { className: 'muted', textContent: '还没有网站连接过钱包。' }));
+    if (!s.origins.length) ul.append(Object.assign(document.createElement('li'), { className: 'muted', textContent: tr('还没有网站连接过钱包。') }));
     for (const o of s.origins) {
       const li = document.createElement('li');
-      li.append(Object.assign(document.createElement('span'), { textContent: o.name === o.origin ? o.origin : `${o.name}（${o.origin}）` }));
-      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: '取消授权' });
+      li.append(Object.assign(document.createElement('span'), { textContent: o.name === o.origin ? o.origin : tr('{name}（{origin}）', { name: o.name, origin: o.origin }) }));
+      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: tr('取消授权') });
       b.addEventListener('click', async () => { await tb.invoke('revoke', o.origin); loadSettings(); });
       li.append(b);
       ul.append(li);
     }
     renderWallet();
     const u = await tb.invoke('cacheUsage');
-    $('cache-usage').textContent = `已缓存 ${u.files} 个文件，共 ${(u.bytes / 1024 / 1024).toFixed(1)} MB`;
+    $('cache-usage').textContent = tr('已缓存 {files} 个文件，共 {0} MB', { files: u.files, 0: (u.bytes / 1024 / 1024).toFixed(1) });
   }
 
   // 内容区位置交给主进程摆放网页
@@ -478,13 +504,13 @@
     for (const n of networks) {
       const sec = Object.assign(document.createElement('section'), { className: 'rpc-net' });
       const ta = Object.assign(document.createElement('textarea'), { rows: 4, spellcheck: false, value: n.rpcUrls.join('\n'), placeholder: n.defaultRpcs.join('\n') });
-      ta.setAttribute('aria-label', n.name + ' RPC 节点');
+      ta.setAttribute('aria-label', n.name + tr(' RPC 节点'));
       const msg = Object.assign(document.createElement('span'), { className: 'muted' });
       msg.setAttribute('role', 'status');
-      const save = Object.assign(document.createElement('button'), { type: 'button', textContent: '保存' });
+      const save = Object.assign(document.createElement('button'), { type: 'button', textContent: tr('保存') });
       save.addEventListener('click', async () => {
         const list = ta.value.split('\n').map((x) => x.trim()).filter(Boolean);
-        try { await tb.invoke('saveRpcs', n.key, list); msg.textContent = list.length ? '已保存' : '已恢复内置节点'; } catch (e) { msg.textContent = errText(e); }
+        try { await tb.invoke('saveRpcs', n.key, list); msg.textContent = list.length ? tr('已保存') : tr('已恢复内置节点'); } catch (e) { msg.textContent = errText(e); }
       });
       const actions = Object.assign(document.createElement('div'), { className: 'actions' });
       actions.append(save, msg);
@@ -548,7 +574,7 @@
   });
   tb.on('findResult', (r) => {
     if (!findOpen) return;
-    $('find-count').textContent = r.matches ? `${r.active} / ${r.matches}` : '无结果';
+    $('find-count').textContent = r.matches ? `${r.active} / ${r.matches}` : tr('无结果');
     $('find-input').classList.toggle('none', !r.matches);
   });
 
@@ -568,6 +594,7 @@
   $('site-btn').addEventListener('click', () => setSite(!siteOpen));
   $('si-close').addEventListener('click', () => setSite(false));
   $('clear-cache').addEventListener('click', async () => { await tb.invoke('clearCache'); loadSettings(); });
+  $('lang').addEventListener('change', () => tb.invoke('setLang', $('lang').value));
 
   renderWallet();
   renderNav();
