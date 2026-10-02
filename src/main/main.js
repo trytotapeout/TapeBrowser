@@ -298,12 +298,45 @@ async function scanWallet(address) {
   }
 }
 
+const AUTHOR_URL = 'https://x.com/boostbob';
+const DONATE_ADDRESS = '0xdda434fe0281ec6bf4f74ea263504bf878d0ee56';
+
+/** 关于：系统的关于面板只能显示纯文本，链接点不了，所以用自己的弹窗，按钮打开作者主页、复制钱包地址 */
+async function showAbout() {
+  const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+    type: 'none',
+    // 打包后 build/ 不在应用里，mac 会自动用应用图标；开发模式下用仓库里的图标
+    ...(app.isPackaged ? {} : { icon: join(SRC, '../build/icon.png') }),
+    title: '关于 TapeBrowser',
+    message: `TapeBrowser ${app.getVersion()}`,
+    detail: `TapeKit DeWEB 浏览器 · 作者 x.com/boostbob\n\n如果你觉得这个产品对你有用，可以支持我继续开发，钱包地址：\n${DONATE_ADDRESS}`,
+    buttons: ['好', '打开 x.com/boostbob', '复制钱包地址'],
+    defaultId: 0,
+    cancelId: 0,
+  });
+  if (r.response === 1) shell.openExternal(AUTHOR_URL);
+  else if (r.response === 2) { clipboard.writeText(DONATE_ADDRESS); notify('已复制钱包地址', 'ok'); }
+}
+
 function buildMenu() {
   const isMac = process.platform === 'darwin';
   // 键盘焦点可能在网页里，先把焦点拉回外壳界面
   const ui = (name) => () => { win?.webContents.focus(); send('command', name); };
   const template = [
-    ...(isMac ? [{ role: 'appMenu', label: 'TapeBrowser' }] : []),
+    ...(isMac ? [{
+      label: 'TapeBrowser',
+      submenu: [
+        { label: '关于 TapeBrowser', click: () => showAbout() },
+        { type: 'separator' },
+        { role: 'services', label: '服务' },
+        { type: 'separator' },
+        { role: 'hide', label: '隐藏 TapeBrowser' },
+        { role: 'hideOthers', label: '隐藏其他' },
+        { role: 'unhide', label: '全部显示' },
+        { type: 'separator' },
+        { role: 'quit', label: '退出 TapeBrowser' },
+      ],
+    }] : []),
     {
       label: '文件',
       submenu: [
@@ -368,6 +401,8 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu', label: '窗口' },
+    // Windows、Linux 没有应用菜单，关于放在帮助里
+    ...(isMac ? [] : [{ label: '帮助', submenu: [{ label: '关于 TapeBrowser', click: () => showAbout() }] }]),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -429,13 +464,6 @@ app.on('second-instance', (_e, argv) => {
 app.whenReady().then(async () => {
   // 网页标签里不出现 Electron / 应用名，避免被网站当成非常规浏览器
   app.userAgentFallback = app.userAgentFallback.replace(/\s(Electron|tapebrowser|TapeBrowser)\/\S+/g, '');
-  app.setAboutPanelOptions({
-    applicationName: 'TapeBrowser',
-    applicationVersion: app.getVersion(),
-    version: '',
-    copyright: 'TapeKit DeWEB 浏览器 · 作者 x.com/boostbob',
-    credits: '如果你觉得这个产品对你有用，可以支持我继续开发，钱包地址：\n0xdda434fe0281ec6bf4f74ea263504bf878d0ee56',
-  });
   // 开发模式下 Dock 图标可能还是 Launch Services 缓存的 Electron 图标，直接设置一次
   if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(SRC, '../build/icon.png'));
 
