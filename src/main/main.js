@@ -40,7 +40,7 @@ const directory = createDirectory({
   onChange: () => send('directory', directory.list()),
   onProgress: () => send('directoryStatus', directory.status()),
 });
-/** 后台刷新目录：到期才扫（完整扫描每天一次，快速检查每小时一次） */
+/** 后台刷新目录：到期才扫（完整扫描每周一次，增量检查每小时一次） */
 function refreshDirectory(force = false) {
   directory.refresh({ force }).catch(() => { /* 失败状态已经通过 directoryStatus 显示 */ });
 }

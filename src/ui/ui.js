@@ -252,7 +252,7 @@
     if (parts.length) return parts.join(' · ') + (busy.length ? '…' : '');
     if (!st.lastFullScan) return '还没有扫描过，第一次扫描大约需要三分钟。';
     const per = nets.filter((n) => n.count).map((n) => `${NET_SHORT[n.key] || n.name} ${n.count}`).join('，');
-    return `已收录 ${st.count} 个网站${per ? `（${per}）` : ''} · ${ago(st.lastFullScan)}更新`;
+    return `已收录 ${st.count} 个网站${per ? `（${per}）` : ''} · ${ago(st.lastUpdate || st.lastFullScan)}更新`;
   }
 
   /** 全部网站：按搜索词过滤、排序，只渲染前 dirLimit 条 */

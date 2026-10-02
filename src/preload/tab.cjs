@@ -99,7 +99,7 @@ function installProvider(api, icon) {
   const detail = Object.freeze({
     info: Object.freeze({
       uuid: crypto.randomUUID(),
-      name: 'TapeBrowser（浏览器钱包桥接）',
+      name: 'TapeBrowser',
       icon,
       rdns: 'org.tapekit.tapebrowser',
     }),

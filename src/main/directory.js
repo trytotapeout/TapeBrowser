@@ -2,11 +2,17 @@
 //
 // 每条链（BNB、X Layer、Base）独立扫描、并行进行，各自记录上次扫描时间；一条链的节点出问题不影响其他链。
 //
-// 完整扫描（每天一次，BNB 约三分钟，X Layer、Base 几秒）
+// 完整扫描（第一次启动、之后每周一次，BNB 约三分钟，X Layer、Base 几秒；也可以手动「立即刷新」）
 //   1. 每个处理器的 nextId → 全部已铸造编号
 //   2. 所有编号的 isOpened（跨处理器打包，每批 400 个，批间限速）
 //   3. 已开通的：持有人 + 容器，再查 index.html 的文件信息
-// 快速检查（每小时）：只对已收录网站重查持有人、容器、首页信息，发现首页更新、网站下线
+//   扫完记下每个处理器扫到的编号（seen），以及容器已开通、还没有首页的电路（watch）
+// 增量检查（每小时，几秒）
+//   1. 每个处理器的 nextId，比 seen 大的就是上次之后新铸造的，加进 watch
+//   2. watch 里的电路查是否开通、有没有首页，有了就收录
+//   3. 已收录的网站重查持有人、容器、首页，发现首页更新、网站下线（删掉首页的放回 watch）
+//   新铸造但一直没开通的电路留在 watch 里每小时查，直到下一次完整扫描；早就铸造、很久以后才开通容器的，
+//   要等下一次完整扫描（最多一周）才会收录
 // 标题：下载 index.html 取 <title>，按首页 sha256 缓存，内容没变不重新下载
 //
 // 标题来自网站自己的 HTML，界面只按纯文本显示。
@@ -16,7 +22,7 @@ import { dirname } from 'node:path';
 import { siteLabel, siteUrl, siteHost } from './address.js';
 import { NETWORKS } from './config.js';
 
-export const FULL_SCAN_EVERY = 24 * 60 * 60 * 1000;
+export const FULL_SCAN_EVERY = 7 * 24 * 60 * 60 * 1000;
 export const QUICK_CHECK_EVERY = 60 * 60 * 1000;
 const TITLE_MAX_BYTES = 256 * 1024;
 const TITLE_CONCURRENCY = 2;
@@ -75,7 +81,7 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
     onProgress();
   }
 
-  /** 查持有人、容器和首页，返回收录条目；不再符合条件的返回 null */
+  /** 查持有人、容器和首页：found 是 key → 收录条目（不符合条件的为 null）；waiting 是容器已开通但还没有首页的 */
   async function inspect(net, items, block) {
     const chain = chains[net.key];
     const infos = await chain.circuitInfos(items, block);
@@ -85,9 +91,10 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
     });
     const files = live.length ? await chain.fileInfos(live.map((s) => ({ container: s.container, path: 'index.html' })), block) : [];
     const out = new Map(items.map((s) => [siteHost(s.tokenId, s.cpu, net.area), null]));
+    const waiting = [];
     live.forEach((s, i) => {
       const f = files[i];
-      if (!f) return;
+      if (!f) { waiting.push(s); return; }
       const key = siteHost(s.tokenId, s.cpu, net.area);
       const prev = data.sites[key];
       out.set(key, {
@@ -101,7 +108,24 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
         firstSeen: prev?.firstSeen ?? now(),
       });
     });
-    return out;
+    return { found: out, waiting };
+  }
+
+  const pick = (s) => ({ tokenId: s.tokenId, cpu: s.cpu, circuits: s.circuits });
+
+  /** 每批 100 个电路 inspect，批间限速，汇总结果 */
+  async function inspectAll(net, items, block, stage) {
+    const found = new Map();
+    const waiting = [];
+    if (items.length) report(net, { stage, done: 0, total: items.length });
+    for (let i = 0; i < items.length; i += 100) {
+      const r = await inspect(net, items.slice(i, i + 100), block);
+      for (const [k, v] of r.found) found.set(k, v);
+      waiting.push(...r.waiting);
+      report(net, { stage, done: Math.min(i + 100, items.length), total: items.length });
+      await sleep(pause);
+    }
+    return { found, waiting };
   }
 
   function apply(results) {
@@ -137,37 +161,53 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
       await sleep(pause);
     });
     const opened = pairs.filter((_, i) => flags[i]);
-    report(net, { stage: 'index', done: 0, total: opened.length });
-    const results = new Map();
-    const step = 100;
-    for (let i = 0; i < opened.length; i += step) {
-      for (const [k, v] of await inspect(net, opened.slice(i, i + step), block)) results.set(k, v);
-      report(net, { stage: 'index', done: Math.min(i + step, opened.length), total: opened.length });
-      await sleep(pause);
-    }
+    const { found, waiting } = await inspectAll(net, opened, block, 'index');
     // 这条链上这次没扫到的旧条目（容器关闭、电路销毁）一并移除
-    for (const [key] of ofNet(net)) if (!results.has(key)) results.set(key, null);
-    apply(results);
-    scanOf(net).lastFullScan = now();
-    scanOf(net).lastQuickCheck = now();
+    for (const [key] of ofNet(net)) if (!found.has(key)) found.set(key, null);
+    apply(found);
+    const sc = scanOf(net);
+    sc.seen = Object.fromEntries(cpus.map((c, i) => [c, ids[i]]).filter(([c]) => c));
+    sc.watch = Object.fromEntries(waiting.map((x) => [siteHost(x.tokenId, x.cpu, net.area), pick(x)]));
+    sc.lastFullScan = now();
+    sc.lastQuickCheck = now();
     save();
     onChange();
   }
 
-  async function quickCheck(net) {
-    const list = ofNet(net).map(([, s]) => s);
-    scanOf(net).lastQuickCheck = now();
-    if (!list.length) { save(); return; }
-    report(net, { stage: 'check', done: 0, total: list.length });
+  async function incremental(net) {
+    const chain = chains[net.key];
+    const sc = scanOf(net);
     const block = 'latest';
-    const results = new Map();
-    const step = 100;
-    for (let i = 0; i < list.length; i += step) {
-      for (const [k, v] of await inspect(net, list.slice(i, i + step), block)) results.set(k, v);
-      report(net, { stage: 'check', done: Math.min(i + step, list.length), total: list.length });
+    report(net, { stage: 'cpus' });
+    const cpus = await chain.cpuList(block);
+    const ids = await chain.nextIds(cpus, block);
+    const seen = { ...sc.seen };
+    const watch = { ...sc.watch };
+    // 上次之后新铸造的编号（新处理器从 1 开始）
+    ids.forEach((n, cpu) => {
+      const c = cpus[cpu];
+      if (!c) return;
+      for (let tokenId = (seen[c] || 0) + 1; tokenId <= n; tokenId++) watch[siteHost(tokenId, cpu, net.area)] = { tokenId, cpu, circuits: c };
+      if (n > (seen[c] || 0)) seen[c] = n;
+    });
+    // watch 里的：先查是否开通，开通的再查首页
+    const pend = Object.values(watch);
+    if (pend.length) report(net, { stage: 'opened', done: 0, total: pend.length });
+    const flags = pend.length ? await chain.openedFlags(pend, block, async (done, total) => {
+      report(net, { stage: 'opened', done, total });
       await sleep(pause);
-    }
-    const changed = apply(results);
+    }) : [];
+    const fresh = await inspectAll(net, pend.filter((_, i) => flags[i]), block, 'index');
+    // 已收录的：首页更新、网站下线
+    const known = await inspectAll(net, ofNet(net).map(([, x]) => x), block, 'check');
+    // watch 里的 key 不在目录里，known 的结果放后面，同一个 key 以已收录网站的检查结果为准
+    const found = new Map([...fresh.found, ...known.found]);
+    for (const [k, v] of found) if (v) delete watch[k];
+    for (const x of known.waiting) watch[siteHost(x.tokenId, x.cpu, net.area)] = pick(x);
+    const changed = apply(found);
+    sc.seen = seen;
+    sc.watch = watch;
+    sc.lastQuickCheck = now();
     save();
     if (changed) onChange();
   }
@@ -208,8 +248,9 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
     try {
       const t = now();
       const sc = scanOf(net);
-      if (force || !sc.lastFullScan || t - sc.lastFullScan >= FULL_SCAN_EVERY) await fullScan(net);
-      else if (t - sc.lastQuickCheck >= QUICK_CHECK_EVERY) await quickCheck(net);
+      // 没有 seen（第一次、或旧版目录文件）只能完整扫描
+      if (force || !sc.lastFullScan || !sc.seen || t - sc.lastFullScan >= FULL_SCAN_EVERY) await fullScan(net);
+      else if (t - sc.lastQuickCheck >= QUICK_CHECK_EVERY) await incremental(net);
       await fetchTitles(net);
       delete progress[net.key];
     } catch (e) {
@@ -239,10 +280,14 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
     const counts = {};
     for (const s of Object.values(data.sites)) counts[s.network || 'bnb'] = (counts[s.network || 'bnb'] || 0) + 1;
     const scanned = nets.map((n) => scanOf(n).lastFullScan).filter(Boolean);
+    const checked = nets.map((n) => scanOf(n).lastQuickCheck).filter(Boolean);
+    const all = scanned.length === nets.length;
     return {
       count: Object.keys(data.sites).length,
       // 最早完成的那条链的时间：所有链都扫过才算「更新于」
-      lastFullScan: scanned.length === nets.length ? Math.min(...scanned) : 0,
+      lastFullScan: all ? Math.min(...scanned) : 0,
+      // 最近一次检查（完整扫描或增量检查）
+      lastUpdate: all && checked.length === nets.length ? Math.min(...checked) : 0,
       running: Boolean(running),
       networks: nets.map((n) => ({ key: n.key, name: n.name, count: counts[n.key] || 0, lastFullScan: scanOf(n).lastFullScan, progress: progress[n.key] ?? null })),
     };
