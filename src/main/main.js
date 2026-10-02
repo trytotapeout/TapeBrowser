@@ -410,7 +410,7 @@ app.whenReady().then(async () => {
     applicationName: 'TapeBrowser',
     applicationVersion: app.getVersion(),
     version: '',
-    copyright: 'TapeKit DeWEB 浏览器',
+    copyright: 'TapeKit DeWEB 浏览器 · 作者 x.com/boostbob',
     credits: '如果你觉得这个产品对你有用，可以支持我继续开发，钱包地址：\n0xdda434fe0281ec6bf4f74ea263504bf878d0ee56',
   });
   // 开发模式下 Dock 图标可能还是 Launch Services 缓存的 Electron 图标，直接设置一次
