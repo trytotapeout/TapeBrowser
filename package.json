@@ -3,6 +3,10 @@
   "productName": "TapeBrowser",
   "version": "0.5.3",
   "description": "TapeKit DeWEB 桌面浏览器：打开 tape:// 电路网站，桥接浏览器钱包扩展",
+  "author": {
+    "name": "boostbob",
+    "url": "https://x.com/boostbob"
+  },
   "type": "module",
   "main": "src/main/main.js",
   "license": "UNLICENSED",
