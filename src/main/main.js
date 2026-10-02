@@ -16,7 +16,7 @@ import { createContentStore } from './content-store.js';
 import { createDirectory, QUICK_CHECK_EVERY } from './directory.js';
 import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
 import { describeRequest } from './describe.js';
-import { DEFAULT_RPCS } from './config.js';
+import { NETWORKS, BSC, networkByArea, networkByKey } from './config.js';
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PARTITION = 'persist:tape';
@@ -29,14 +29,14 @@ protocol.registerSchemesAsPrivileged([{
 if (!app.requestSingleInstanceLock()) app.quit();
 
 const settings = createSettings(join(app.getPath('userData'), 'settings.json'));
-const rpcUrls = () => (settings.get('rpcUrls').length ? settings.get('rpcUrls') : DEFAULT_RPCS);
-// net.fetch 走 Chromium 网络栈，遵守系统代理
-const rpc = createRpcPool(rpcUrls, { fetchImpl: (url, init) => net.fetch(url, init) });
+// 每条链一个节点池：自定义节点为空时用内置节点。net.fetch 走 Chromium 网络栈，遵守系统代理
+const rpcUrls = (n) => (settings.rpcsOf(n.key).length ? settings.rpcsOf(n.key) : n.rpcs);
+const rpcs = Object.fromEntries(NETWORKS.map((n) => [n.key, createRpcPool(() => rpcUrls(n), { fetchImpl: (url, init) => net.fetch(url, init) })]));
 const contentStore = createContentStore(join(app.getPath('userData'), 'content-cache'));
-const chain = createChain(rpc);
-const sites = createSites(chain, contentStore);
+const chains = Object.fromEntries(NETWORKS.map((n) => [n.key, createChain(rpcs[n.key], n)]));
+const sites = createSites(chains, contentStore);
 const directory = createDirectory({
-  chain, sites, file: join(app.getPath('userData'), 'directory.json'),
+  chains, sites, file: join(app.getPath('userData'), 'directory.json'),
   onChange: () => send('directory', directory.list()),
   onProgress: () => send('directoryStatus', directory.status()),
 });
@@ -72,7 +72,7 @@ function toggleBookmark() {
 function siteName(origin) {
   const m = /^tape:\/\/(.+)$/.exec(origin || '');
   const s = m && parseHost(m[1]);
-  return s ? siteLabel(s.tokenId, s.cpu) : origin;
+  return s ? siteLabel(s.tokenId, s.cpu, s.area) : origin;
 }
 function walletView() {
   const s = bridge?.state || {};
@@ -111,7 +111,10 @@ async function confirm(req) {
 
 function emit(origin, event, payload) {
   if (!tabs) return;
-  for (const wc of tabs.byOrigin(origin)) wc.send('eth:event', event, payload);
+  for (const wc of tabs.byOrigin(origin)) {
+    // payload 是函数时按网页自己的来源计算（chainChanged：每个网站所在的链可能不同）
+    wc.send('eth:event', event, typeof payload === 'function' ? payload(originOf(wc.getURL())) : payload);
+  }
 }
 
 const validRpc = (u) => {
@@ -135,7 +138,7 @@ function registerIpc() {
   });
   ipcMain.handle('eth:initial', (e) => {
     const origin = tabOrigin(e);
-    return origin ? host.initial(origin) : { chainId: '0x38', accounts: [] };
+    return origin ? host.initial(origin) : { chainId: BSC.chainIdHex, accounts: [] };
   });
 
   // 外壳界面
@@ -158,16 +161,17 @@ function registerIpc() {
   });
   ui('overlay', (on) => tabs.setOverlay(on));
   ui('settings', () => ({
-    rpcUrls: settings.get('rpcUrls'),
-    defaultRpcs: [...DEFAULT_RPCS],
+    networks: NETWORKS.map((n) => ({ key: n.key, name: n.name, rpcUrls: settings.rpcsOf(n.key), defaultRpcs: [...n.rpcs] })),
     origins: settings.permittedOrigins().map((o) => ({ origin: o, name: siteName(o) })),
     version: app.getVersion(),
   }));
-  ui('saveRpcs', (list) => {
+  ui('saveRpcs', (key, list) => {
+    const n = networkByKey(key);
+    if (!n) throw new Error('未知的网络');
     const urls = (Array.isArray(list) ? list : []).map((s) => String(s).trim()).filter(Boolean);
     const bad = urls.filter((u) => !validRpc(u));
     if (bad.length) throw new Error('RPC 地址必须是 https://（本机节点可以用 http://127.0.0.1）：' + bad.join(', '));
-    settings.set('rpcUrls', urls.slice(0, 10));
+    settings.setRpcs(n.key, urls.slice(0, 10));
     return true;
   });
   ui('revoke', (origin) => host.revoke(String(origin)));
@@ -187,7 +191,7 @@ function registerIpc() {
     if (!site) return null;
     let path;
     try { path = normalizePath(m[2] || '/'); } catch { return null; }
-    try { return await sites.describe(site.tokenId, site.cpu, path); } catch (e) { return { error: String(e?.message || e) }; }
+    try { return await sites.describe(site.tokenId, site.cpu, path, site.area); } catch (e) { return { error: String(e?.message || e) }; }
   });
   ui('copy', (text) => { clipboard.writeText(String(text).slice(0, 1000)); return true; });
   ui('cacheUsage', () => contentStore.usage());
@@ -224,38 +228,46 @@ async function submit(text) {
       notify(`正在查找 ${q.digits} 的所有电路组合…`);
       try {
         const r = await sites.enumerateDigits(q.digits);
+        const failed = failedText(r.failed);
         if (!r.sites.length) {
-          notify(r.candidates.length ? `没有找到有首页的网站（检查了 ${r.candidates.join('、')}）` : `${q.digits} 没有合法的电路组合`, 'error');
+          notify((r.candidates.length ? `没有找到有首页的网站（检查了 ${r.candidates.join('、')}）` : `${q.digits} 没有合法的电路组合`) + failed, 'error');
           return;
         }
         if (r.sites.length === 1 && active) tabs.navigate(active.id, r.sites[0].url);
         else openSites(r.sites);
-        notify(`找到 ${r.sites.length} 个网站：${r.sites.map((s) => s.label).join('、')}`, 'ok');
+        notify(`找到 ${r.sites.length} 个网站：${r.sites.map((s) => s.label).join('、')}${failed}`, 'ok');
       } catch (e) {
         notify('查询失败：' + (e?.message || e), 'error');
       }
       return;
     }
     case 'wallet': return scanWallet(q.address);
+    case 'bad': notify(q.message, 'error'); return;
     default:
-      notify('无法识别。可以输入 tape://4454-0、4454.0、#4454@0、12330.tape、钱包地址 0x… 或网址', 'error');
+      notify('无法识别。可以输入 4454.0、#4454@0、1.2.344（X Layer）、1.3.5（Base）、12330.tape、钱包地址 0x… 或网址', 'error');
   }
 }
+
+/** 部分链读取失败时附在提示后面 */
+const failedText = (failed) => (failed?.length ? `；${failed.map((f) => `${f.network} 读取失败（${f.message}）`).join('，')}` : '');
 
 async function scanWallet(address) {
   if (scanning) { notify('已经在扫描钱包，请稍候', 'error'); return; }
   scanning = true;
   try {
+    // 三条链并行扫描，进度提示里带上链名
     const r = await sites.scanWallet(address, (p) => {
-      if (p.stage === 'cpus') notify('正在读取处理器列表…');
-      else if (p.stage === 'balances') notify(`正在查询 ${p.total} 台处理器上的持有数量…`);
-      else if (p.stage === 'ids') notify(`处理器 ${p.cpu}：已扫描 ${p.done} / ${p.total} 个编号`);
-      else if (p.stage === 'index') notify(`找到 ${p.total} 枚电路，正在检查网站首页…`);
+      const on = p.network ? `${p.network}：` : '';
+      if (p.stage === 'cpus') notify(`${on}正在读取处理器列表…`);
+      else if (p.stage === 'balances') notify(`${on}正在查询 ${p.total} 台处理器上的持有数量…`);
+      else if (p.stage === 'ids') notify(`${on}处理器 ${p.cpu}：已扫描 ${p.done} / ${p.total} 个编号`);
+      else if (p.stage === 'index') notify(`${on}找到 ${p.total} 枚电路，正在检查网站首页…`);
     });
     if (r.sites.length) openSites(r.sites);
-    const skipped = r.skipped.length ? `；${r.skipped.map((s) => `处理器 ${s.cpu} 编号太多未扫描`).join('，')}` : '';
-    if (r.sites.length) notify(`钱包持有 ${r.circuits} 枚电路，打开了 ${r.sites.length} 个网站${skipped}`, 'ok');
-    else notify(`钱包持有 ${r.circuits} 枚电路，没有带 index.html 的网站${skipped}`, 'error');
+    const skipped = r.skipped.length ? `；${r.skipped.map((s) => `${s.network} 处理器 ${s.cpu} 编号太多未扫描`).join('，')}` : '';
+    const tail = skipped + failedText(r.failed);
+    if (r.sites.length) notify(`钱包持有 ${r.circuits} 枚电路，打开了 ${r.sites.length} 个网站${tail}`, 'ok');
+    else notify(`钱包持有 ${r.circuits} 枚电路，没有带 index.html 的网站${tail}`, 'error');
   } catch (e) {
     notify('扫描失败：' + (e?.message || e), 'error');
   } finally {
@@ -413,7 +425,7 @@ app.whenReady().then(async () => {
   bridge = createBridgeServer({ token: settings.get('bridgeToken'), port: settings.get('bridgePort'), staticDir: join(SRC, 'bridge') });
   const port = await bridge.start();
   if (port !== settings.get('bridgePort')) settings.set('bridgePort', port);
-  host = createProviderHost({ bridge, rpc, settings, openBridge: () => shell.openExternal(bridge.url()), confirm, emit });
+  host = createProviderHost({ bridge, rpcs, settings, openBridge: () => shell.openExternal(bridge.url()), confirm, emit });
   bridge.on('state', () => send('wallet', walletView()));
 
   registerIpc();

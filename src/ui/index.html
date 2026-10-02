@@ -19,7 +19,7 @@
       <button id="site-btn" type="button" title="网站信息" aria-label="网站信息" aria-expanded="false" hidden>链上</button>
       <form id="address-form" role="search">
         <input id="address" type="text" spellcheck="false" autocomplete="off" aria-label="地址"
-          placeholder="tape://4454-0、4454.0、#4454@0、12330.tape、钱包地址 0x… 或网址">
+          placeholder="4454.0、#4454@0、1.2.344（X Layer）、12330.tape、钱包地址 0x… 或网址">
       </form>
       <button id="zoom" type="button" title="点击恢复实际大小 (⌘0)" hidden></button>
       <button id="bookmark" class="icon" type="button" title="加入书签 (⌘D)" aria-label="加入书签" aria-pressed="false">☆</button>
@@ -45,9 +45,10 @@
       <h1>TapeBrowser</h1>
       <p class="muted">浏览 TapeKit 电路容器里的 DeWEB 网站。在上方地址栏输入：</p>
       <ul class="examples">
-        <li><button type="button" data-q="4454.0">4454.0</button> 打开电路 #4454（处理器 0）的网站，也可以写 tape://4454-0、#4454@0</li>
-        <li><button type="button" data-q="12330.tape">12330.tape</button> 不带分隔符：查找 1.2330、12.330、123.30、1233.0 等所有组合，有首页的都打开</li>
-        <li><code>0x…</code> 钱包地址：扫描这个钱包持有的全部电路，有首页的都打开</li>
+        <li><button type="button" data-q="4454.0">4454.0</button> 打开 BNB Chain 上电路 #4454（处理器 0）的网站，也可以写 tape://4454-0、#4454@0</li>
+        <li><button type="button" data-q="1.2.230">1.2.230</button> X Layer 和 Base 的网站在处理器编号前加区号：X Layer 是 2，Base 是 3。1.2.230 就是 X Layer 上 230 号处理器的 #1，也可以写 #1@2.230</li>
+        <li><button type="button" data-q="12330.tape">12330.tape</button> 不带分隔符：查找 1.2330、12.330、1233.0、1.2.330（X Layer）、12.3.30（Base）等所有组合，有首页的都打开</li>
+        <li><code>0x…</code> 钱包地址：在三条链上扫描这个钱包持有的全部电路，有首页的都打开</li>
         <li>普通网址：https://… 照常打开</li>
       </ul>
 
@@ -71,6 +72,12 @@
       <section id="panel-directory" role="tabpanel" aria-labelledby="tab-directory" hidden>
         <div class="dir-tools">
           <input id="dir-search" type="search" spellcheck="false" autocomplete="off" placeholder="搜索标题、电路编号或持有人地址" aria-label="搜索网站">
+          <select id="dir-net" aria-label="链">
+            <option value="">全部链</option>
+            <option value="bnb">BNB Chain</option>
+            <option value="xlayer">X Layer</option>
+            <option value="base">Base</option>
+          </select>
           <select id="dir-sort" aria-label="排序">
             <option value="updated">最近更新</option>
             <option value="id">电路编号</option>
@@ -102,9 +109,8 @@
       <div class="actions"><span id="cache-usage" class="muted"></span><button id="clear-cache" type="button">清除缓存</button></div>
 
       <h2>RPC 节点</h2>
-      <p class="muted">读链用的 BNB Smart Chain 节点，每行一个，按顺序轮换。留空使用内置公共节点。</p>
-      <textarea id="rpcs" rows="5" spellcheck="false" aria-label="RPC 节点"></textarea>
-      <div class="actions"><button id="save-rpcs" type="button">保存</button><span id="rpc-msg" class="muted" role="status"></span></div>
+      <p class="muted">每条链各自的读链节点，每行一个，按顺序轮换。留空使用内置公共节点。</p>
+      <div id="rpc-nets"></div>
 
       <p id="version" class="muted small"></p>
     </section>

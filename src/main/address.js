@@ -1,43 +1,77 @@
 // 地址栏输入解析。纯函数，不依赖 Electron，便于单元测试。
 //
-// 规范网址：tape://<ID>-<处理器>/<路径>，例如 tape://4454-0/
-//   主机名用连字符而不是点：Chromium 会把 "4454.0" 这种全数字主机名当成 IPv4 地址改写。
+// 电路网站由 #ID、区号、处理器编号确定（SPEC §2）：BNB Chain 不带区号，X Layer 区号 2，Base 区号 3。
+//
+//   名字（显示用）   4454.0、1.2.344            链上名字再加 .tape：4454.0.tape、1.2.344.tape
+//   规范网址        tape://4454-0/、tape://1-2-344/
+//     主机名用连字符而不是点：Chromium 会把 "4454.0" 这种全数字主机名当成 IPv4 地址改写。
+//     和官方网关主机名第一段（4454-0.tapekit.org、1-2-344.tapekit.org）写法一致
 //
 // 输入分类（parseInput 的 kind）：
-//   site   明确的电路：4454-0、4454.0、4454.0.tape、#4454@0、tape://4454-0/a.html
-//   digits 不带分隔符的一串数字：12330、12330.tape、tape://12330 → 枚举所有切分
-//   wallet 0x 开头的 40 位十六进制钱包地址 → 扫描钱包
+//   site   明确的电路：4454-0、4454.0、4454.0.tape、#4454@0、1.2.344、#1@2.344、1-2-344、tape://…
+//   digits 不带分隔符的一串数字：12330、12330.tape、tape://12330 → 枚举所有切分（含带区号的）
+//   wallet 0x 开头的 40 位十六进制钱包地址 → 在所有链上扫描钱包
 //   url    http(s):// 或看起来像域名的输入
 //   search 其他（第一版不接搜索引擎，提示无法识别）
+//   bad    像电路写法但不合规（未分配的区号等），message 说明原因
 
-export const siteHost = (tokenId, cpu) => `${tokenId}-${cpu}`;
-export const siteUrl = (tokenId, cpu, path = '') => `tape://${siteHost(tokenId, cpu)}/${path}`;
-export const siteLabel = (tokenId, cpu) => `${tokenId}.${cpu}.tape`;
+import { networkByArea, AREAS } from './config.js';
 
-function validSite(idStr, cpuStr) {
-  if (!/^[1-9]\d*$/.test(idStr) || !/^(0|[1-9]\d*)$/.test(cpuStr)) return null;
+const areaOf = (area) => (area === null || area === undefined ? null : Number(area));
+const areaPart = (area, sep) => (areaOf(area) === null ? '' : `${areaOf(area)}${sep}`);
+
+/** 主机名 / 内部键：4454-0、1-2-344 */
+export const siteHost = (tokenId, cpu, area = null) => `${tokenId}-${areaPart(area, '-')}${cpu}`;
+export const siteUrl = (tokenId, cpu, path = '', area = null) => `tape://${siteHost(tokenId, cpu, area)}/${path}`;
+/** 链上名字：4454.0.tape、1.2.344.tape */
+export const siteLabel = (tokenId, cpu, area = null) => `${tokenId}.${areaPart(area, '.')}${cpu}.tape`;
+/** 同一个网站的唯一键（和主机名相同） */
+export const siteKey = (s) => siteHost(s.tokenId, s.cpu, s.area);
+
+const ID = /^[1-9]\d*$/;
+const CPU = /^(0|[1-9]\d*)$/;
+
+/**
+ * 字面检查：ID 不能以 0 开头，处理器编号除了 "0" 不能以 0 开头，区号必须是已分配的。
+ * 返回 {tokenId, cpu, area}；不合法返回 null
+ */
+function validSite(idStr, cpuStr, areaStr) {
+  if (!ID.test(idStr) || !CPU.test(cpuStr)) return null;
+  let area = null;
+  if (areaStr !== undefined && areaStr !== null) {
+    if (!ID.test(areaStr) || !networkByArea(Number(areaStr))) return null;
+    area = Number(areaStr);
+  }
   const tokenId = Number(idStr);
   const cpu = Number(cpuStr);
   if (!Number.isSafeInteger(tokenId) || !Number.isSafeInteger(cpu)) return null;
-  return { tokenId, cpu };
+  return { tokenId, cpu, area };
 }
 
-/** 解析规范主机名 4454-0（协议处理器用）；兼容 4454.0 与 4454.0.tape */
+/** 解析主机名：4454-0、1-2-344（协议处理器用）；兼容 4454.0、1.2.344 与 .tape 后缀 */
 export function parseHost(host) {
-  const m = String(host).toLowerCase().match(/^(\d+)[-.](\d+)(?:\.tape)?$/);
-  return m ? validSite(m[1], m[2]) : null;
+  const m = String(host).toLowerCase().match(/^(\d+)[-.](?:(\d+)[-.])?(\d+)(?:\.tape)?$/);
+  return m ? validSite(m[1], m[3], m[2]) : null;
 }
 
 /**
- * 把一串数字切成 ID + 处理器编号的所有合法组合（只做字面合法性检查：
- * ID 不能以 0 开头、处理器编号除了 "0" 不能以 0 开头）。处理器是否存在由调用方查链。
- * "12330" → [1.2330, 12.330, 123.30, 1233.0]
+ * 把一串数字切成所有字面合法的组合：ID + 处理器编号（BNB），以及 ID + 区号 + 处理器编号（其他链）。
+ * 处理器是否存在由调用方查链。
+ * "12248" → [1.2248, 12.248, 122.48, 1224.8, 1.2.248, 12.2.48]
  */
 export function splitDigits(digits) {
   const out = [];
   for (let i = 1; i < digits.length; i++) {
     const s = validSite(digits.slice(0, i), digits.slice(i));
     if (s) out.push(s);
+  }
+  for (const area of AREAS) {
+    const a = String(area);
+    for (let i = 1; i + a.length < digits.length; i++) {
+      if (digits.slice(i, i + a.length) !== a) continue;
+      const s = validSite(digits.slice(0, i), digits.slice(i + a.length), a);
+      if (s) out.push(s);
+    }
   }
   return out;
 }
@@ -48,6 +82,9 @@ export function normalizePath(pathname) {
   if (p === '' || p.endsWith('/')) p += 'index.html';
   return p;
 }
+
+const siteResult = (site, rest) => ({ kind: 'site', ...site, url: siteUrl(site.tokenId, site.cpu, '', site.area) + (rest || '/').replace(/^\//, '') });
+const badArea = (s) => ({ kind: 'bad', message: `区号 ${s} 没有分配。X Layer 是 2，Base 是 3；BNB Chain 不带区号，例如 4454.0、1.2.344` });
 
 export function parseInput(raw) {
   const s = String(raw || '').trim();
@@ -62,17 +99,20 @@ export function parseInput(raw) {
     const rest = tm[2] || '/';
     if (/^\d+$/.test(host)) return { kind: 'digits', digits: host, path: rest };
     const site = parseHost(host);
-    if (site) return { kind: 'site', ...site, url: `tape://${siteHost(site.tokenId, site.cpu)}${rest.startsWith('/') ? rest : '/' + rest}` };
+    if (site) return siteResult(site, rest.startsWith('/') ? rest : '/' + rest);
+    const am = host.match(/^\d+[-.](\d+)[-.]\d+$/);
+    if (am) return badArea(am[1]);
     return { kind: 'search', text: s };
   }
 
-  // #4454@0[/path]
-  let m = s.match(/^#(\d+)@(\d+)(\/.*)?$/);
-  // 4454-0 / 4454.0 / 4454.0.tape / #4454.0，可带 /path
-  if (!m) m = s.match(/^#?(\d+)[-.](\d+)(?:\.tape)?(\/.*)?$/i);
+  // #4454@0、#1@2.344，可带 /path
+  let m = s.match(/^#(\d+)@(?:(\d+)\.)?(\d+)(\/.*)?$/);
+  // 4454-0、4454.0、4454.0.tape、1.2.344、1-2-344、1.2.344.tape、#4454.0，可带 /path
+  if (!m) m = s.match(/^#?(\d+)[-.](?:(\d+)[-.])?(\d+)(?:\.tape)?(\/.*)?$/i);
   if (m) {
-    const site = validSite(m[1], m[2]);
-    if (site) return { kind: 'site', ...site, url: siteUrl(site.tokenId, site.cpu) + (m[3] || '/').slice(1) };
+    const site = validSite(m[1], m[3], m[2]);
+    if (site) return siteResult(site, m[4]);
+    if (m[2] !== undefined && ID.test(m[1]) && CPU.test(m[3])) return badArea(m[2]);
   }
 
   // 12330 / 12330.tape

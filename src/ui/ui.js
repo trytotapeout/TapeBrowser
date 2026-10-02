@@ -22,6 +22,16 @@
   if (tb.platform === 'darwin') document.body.classList.add('mac');
 
   const active = () => state.tabs.find((t) => t.id === state.activeId) || null;
+  // TapeKit 网站所在的三条链
+  const CHAINS = { '0x38': 'BNB Chain', '0xc4': 'X Layer', '0x2105': 'Base' };
+  const NET_NAMES = { bnb: 'BNB Chain', xlayer: 'X Layer', base: 'Base' };
+  const NET_SHORT = { bnb: 'BNB', xlayer: 'X Layer', base: 'Base' };
+  /** 当前标签是电路网站时，它所在链的 chainId：tape://1-2-344 → X Layer */
+  function tabChain(t) {
+    const m = /^tape:\/\/\d+-(?:(\d+)-)?\d+(?:[/?#]|$)/i.exec((t && t.url) || '');
+    if (!m) return null;
+    return { 2: '0xc4', 3: '0x2105' }[m[1]] || (m[1] ? null : '0x38');
+  }
   const errText = (e) => String(e && e.message ? e.message : e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 
   function renderTabs() {
@@ -139,7 +149,8 @@
       dl.append(Object.assign(document.createElement('dt'), { textContent: name }), dd);
     };
     if (info.error) { row('错误', info.error); return; }
-    row('电路', `#${info.tokenId}，处理器 ${info.cpu}`);
+    row('链', info.network || 'BNB Chain');
+    row('电路', `#${info.tokenId}，处理器 ${info.cpu}${info.area ? `（区号 ${info.area}）` : ''}`);
     row('持有人', shortHex(info.owner), info.owner);
     row('容器', shortHex(info.container), info.container);
     row('电路合约', shortHex(info.circuits), info.circuits);
@@ -217,16 +228,21 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
+  /** 状态行：各链的进度或错误，扫完后显示总数和各链数量 */
   function dirStatusText(st) {
-    const p = st.progress;
-    if (p && p.stage === 'error') return '刷新失败：' + p.message;
-    if (p) {
-      const n = p.total ? `（${p.done} / ${p.total}）` : '';
-      const label = { cpus: '读取处理器', opened: '检查容器开通', index: '读取首页', check: '检查更新', titles: '读取网站标题' }[p.stage] || '刷新中';
-      return `正在${label}${n}…`;
-    }
-    if (!st.lastFullScan) return '还没有扫描过，第一次扫描大约需要两分钟。';
-    return `已收录 ${st.count} 个网站 · ${ago(st.lastFullScan)}更新`;
+    const nets = st.networks || [];
+    const LABEL = { cpus: '读取处理器', opened: '检查容器开通', index: '读取首页', check: '检查更新', titles: '读取网站标题' };
+    const busy = nets.filter((n) => n.progress && n.progress.stage !== 'error');
+    const bad = nets.filter((n) => n.progress && n.progress.stage === 'error');
+    const parts = busy.map((n) => {
+      const p = n.progress;
+      return `${n.name} 正在${LABEL[p.stage] || '刷新'}${p.total ? `（${p.done} / ${p.total}）` : ''}`;
+    });
+    for (const n of bad) parts.push(`${n.name} 刷新失败：${n.progress.message}`);
+    if (parts.length) return parts.join(' · ') + (busy.length ? '…' : '');
+    if (!st.lastFullScan) return '还没有扫描过，第一次扫描大约需要三分钟。';
+    const per = nets.filter((n) => n.count).map((n) => `${NET_SHORT[n.key] || n.name} ${n.count}`).join('，');
+    return `已收录 ${st.count} 个网站${per ? `（${per}）` : ''} · ${ago(st.lastFullScan)}更新`;
   }
 
   /** 全部网站：按搜索词过滤、排序，只渲染前 dirLimit 条 */
@@ -236,16 +252,18 @@
     $('dir-status').textContent = dirStatusText(st);
     $('dir-refresh').hidden = Boolean(st.running);
     const q = $('dir-search').value.trim().toLowerCase();
-    let items = dir.sites;
+    const netFilter = $('dir-net').value;
+    let items = netFilter ? dir.sites.filter((s) => (s.network || 'bnb') === netFilter) : dir.sites;
     if (q) {
       items = items.filter((s) => (s.title || '').toLowerCase().includes(q)
         || s.label.toLowerCase().includes(q)
+        || s.label.replace(/\.tape$/, '') === q.replace(/^#/, '').replace(/\.tape$/, '')
         || String(s.tokenId) === q.replace(/^#/, '')
         || (s.owner || '').toLowerCase().includes(q));
     }
     const sort = $('dir-sort').value;
     items = items.slice().sort(sort === 'id' ? (a, b) => a.tokenId - b.tokenId || a.cpu - b.cpu
-      : sort === 'cpu' ? (a, b) => a.cpu - b.cpu || a.tokenId - b.tokenId
+      : sort === 'cpu' ? (a, b) => (a.area || 0) - (b.area || 0) || a.cpu - b.cpu || a.tokenId - b.tokenId
         : (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || a.tokenId - b.tokenId);
     const ul = $('directory');
     ul.textContent = '';
@@ -255,6 +273,7 @@
       const a = Object.assign(document.createElement('a'), { href: it.url, title: `${it.url}\n持有人 ${it.owner}` });
       a.append(
         Object.assign(document.createElement('span'), { className: 't' + (it.title ? '' : ' untitled'), textContent: it.title || '（没有标题）' }),
+        Object.assign(document.createElement('span'), { className: 'net ' + (it.network || 'bnb'), textContent: NET_SHORT[it.network || 'bnb'] }),
         Object.assign(document.createElement('span'), { className: 'u', textContent: it.label }),
         Object.assign(document.createElement('span'), { className: 'd', textContent: day(it.updatedAt) }),
       );
@@ -287,13 +306,18 @@
     tb.invoke('find', text, { again, forward });
   }
 
+  const chainName = (id) => (id ? CHAINS[id] || '链 ' + parseInt(id, 16) : '未知链');
+
   function renderWallet() {
     const b = $('wallet');
     b.className = '';
     if (wallet.ready && wallet.account) {
-      const wrongChain = wallet.chainId && wallet.chainId !== '0x38';
+      // 当前网站所在的链和钱包的链不一致时提醒（签名、交易会发到钱包当前的链上）
+      const want = tabChain(active());
+      const wrongChain = Boolean(wallet.chainId && (want ? wallet.chainId !== want : !CHAINS[wallet.chainId]));
       b.textContent = (wrongChain ? '⚠ ' : '') + wallet.account.slice(0, 6) + '…' + wallet.account.slice(-4);
-      b.title = (wallet.wallet || '钱包') + (wrongChain ? '：当前不是 BNB Smart Chain' : '：已连接');
+      b.title = (wallet.wallet || '钱包') + '：' + chainName(wallet.chainId)
+        + (wrongChain ? (want ? `，这个网站在 ${CHAINS[want]} 上，请在钱包里切换` : '，不是 TapeKit 支持的链') : '');
       b.classList.add(wrongChain ? 'warn' : 'ready');
     } else if (wallet.connected) {
       b.textContent = '在浏览器里选择钱包…';
@@ -303,7 +327,7 @@
       b.title = '在系统浏览器里打开钱包桥接页面';
     }
     const s = $('wallet-status');
-    if (wallet.ready && wallet.account) s.textContent = `${wallet.wallet || '钱包'} · ${wallet.account} · 链 ${parseInt(wallet.chainId || '0x38', 16)}`;
+    if (wallet.ready && wallet.account) s.textContent = `${wallet.wallet || '钱包'} · ${wallet.account} · ${chainName(wallet.chainId)}`;
     else if (wallet.connected) s.textContent = '桥接页面已打开，还没有选择钱包。';
     else s.textContent = '没有连接钱包。';
     $('disconnect-wallet').hidden = !(wallet.ready && wallet.account);
@@ -327,8 +351,7 @@
 
   async function loadSettings() {
     const s = await tb.invoke('settings');
-    $('rpcs').value = s.rpcUrls.join('\n');
-    $('rpcs').placeholder = s.defaultRpcs.join('\n');
+    renderRpcs(s.networks);
     $('version').textContent = 'TapeBrowser v' + s.version;
     const ul = $('origins');
     ul.textContent = '';
@@ -376,10 +399,27 @@
   $('wallet').addEventListener('click', () => (wallet.ready ? setSettings(true) : tb.invoke('openBridge')));
   $('open-bridge').addEventListener('click', () => tb.invoke('openBridge'));
   $('disconnect-wallet').addEventListener('click', () => tb.invoke('disconnectWallet'));
-  $('save-rpcs').addEventListener('click', async () => {
-    const list = $('rpcs').value.split('\n').map((s) => s.trim()).filter(Boolean);
-    try { await tb.invoke('saveRpcs', list); $('rpc-msg').textContent = list.length ? '已保存' : '已恢复内置节点'; } catch (e) { $('rpc-msg').textContent = errText(e); }
-  });
+  /** 每条链一个节点输入框，各自保存 */
+  function renderRpcs(networks) {
+    const box = $('rpc-nets');
+    box.textContent = '';
+    for (const n of networks) {
+      const sec = Object.assign(document.createElement('section'), { className: 'rpc-net' });
+      const ta = Object.assign(document.createElement('textarea'), { rows: 4, spellcheck: false, value: n.rpcUrls.join('\n'), placeholder: n.defaultRpcs.join('\n') });
+      ta.setAttribute('aria-label', n.name + ' RPC 节点');
+      const msg = Object.assign(document.createElement('span'), { className: 'muted' });
+      msg.setAttribute('role', 'status');
+      const save = Object.assign(document.createElement('button'), { type: 'button', textContent: '保存' });
+      save.addEventListener('click', async () => {
+        const list = ta.value.split('\n').map((x) => x.trim()).filter(Boolean);
+        try { await tb.invoke('saveRpcs', n.key, list); msg.textContent = list.length ? '已保存' : '已恢复内置节点'; } catch (e) { msg.textContent = errText(e); }
+      });
+      const actions = Object.assign(document.createElement('div'), { className: 'actions' });
+      actions.append(save, msg);
+      sec.append(Object.assign(document.createElement('h3'), { textContent: n.name }), ta, actions);
+      box.append(sec);
+    }
+  }
   for (const b of document.querySelectorAll('.examples button')) {
     b.addEventListener('click', () => { $('address').value = b.dataset.q; tb.invoke('submit', b.dataset.q); });
   }
@@ -393,6 +433,8 @@
     state = s;
     renderTabs();
     renderNav();
+    // 钱包按钮的「链不对」提醒取决于当前标签
+    renderWallet();
     // 主进程切换标签时会结束旧标签的查找，在新标签上重新查找
     if (switched && findOpen) runFind(false);
   });
@@ -427,6 +469,7 @@
   });
   $('dir-search').addEventListener('input', () => { dirLimit = 200; renderDirectory(); });
   $('dir-sort').addEventListener('change', () => { dirLimit = 200; renderDirectory(); });
+  $('dir-net').addEventListener('change', () => { dirLimit = 200; renderDirectory(); });
   $('dir-more').addEventListener('click', () => { dirLimit += 200; renderDirectory(); });
   $('dir-refresh').addEventListener('click', async () => {
     try { dir.status = await tb.invoke('scanDirectory'); renderDirectory(); } catch (e) { notice(errText(e), 'error'); }

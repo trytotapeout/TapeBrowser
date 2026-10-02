@@ -104,3 +104,8 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 .links .d { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 #dir-more { margin: 10px 0; }
 #directory .t { flex: 1; }
+.net { flex: none; font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); }
+.net.xlayer { border-color: #3b3b3b; color: var(--fg); }
+.net.base { border-color: #0052ff; color: #0052ff; }
+#dir-net { height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--fg); font: inherit; }
+.rpc-net h3 { font-size: 13px; margin: 14px 0 6px; }

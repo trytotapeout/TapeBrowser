@@ -19,7 +19,7 @@ const text = (s, n = 200) => String(s ?? '').trim().slice(0, n);
 export function tapeSite(url) {
   const m = /^tape:\/\/([^/?#]+)/i.exec(String(url || ''));
   const s = m && parseHost(m[1]);
-  return s ? { origin: `tape://${siteHost(s.tokenId, s.cpu)}`, label: siteLabel(s.tokenId, s.cpu) } : null;
+  return s ? { origin: `tape://${siteHost(s.tokenId, s.cpu, s.area)}`, label: siteLabel(s.tokenId, s.cpu, s.area) } : null;
 }
 
 export function createLibrary(file, { onChange = () => {}, now = Date.now } = {}) {

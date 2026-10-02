@@ -10,7 +10,9 @@
   let chainId = null;
   let ws = null;
   const PICK_KEY = 'tapebrowser:wallet';
-  const CHAINS = { '0x38': 'BNB Smart Chain', '0x1': 'Ethereum', '0x61': 'BSC Testnet' };
+  // TapeKit 网站所在的三条链；其他链只显示编号
+  const CHAINS = { '0x38': 'BNB Chain', '0xc4': 'X Layer', '0x2105': 'Base', '0x1': 'Ethereum', '0x61': 'BSC Testnet' };
+  const TAPE_CHAINS = new Set(['0x38', '0xc4', '0x2105']);
 
   function log(text) {
     const li = document.createElement('li');
@@ -26,7 +28,7 @@
     $('wallet').textContent = current ? current.info.name : '未选择';
     $('account').textContent = accounts[0] || '—';
     $('chain').textContent = chainId ? (CHAINS[chainId] || '链 ' + parseInt(chainId, 16)) : '—';
-    $('chain').className = chainId && chainId !== '0x38' ? 'bad' : '';
+    $('chain').className = chainId && !TAPE_CHAINS.has(chainId) ? 'bad' : '';
     $('disconnect').hidden = !current;
     renderProviders();
   }
