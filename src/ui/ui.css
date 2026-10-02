@@ -117,3 +117,7 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 @media (prefers-color-scheme: dark) {
   .chain-tag[data-chain="0xc4"] { background: #fff; color: #000; }
 }
+
+/* 最近访问、书签：有更新 / 持有人已变 */
+.links .badge { flex: none; font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--accent); color: var(--accent); }
+.links .badge.warn { border-color: var(--bad); color: var(--bad); }

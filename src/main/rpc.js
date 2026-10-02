@@ -1,5 +1,6 @@
 // 公共节点池：JSON-RPC 请求按顺序轮换节点，遇到限流（429）、网络错误、节点内部错误时换下一个重试。
 // 合约 revert 之类的业务错误（JSON-RPC error 带 code 3 / -32000 且有 data）原样抛出，不重试。
+// rpc.distinct：同一个请求发给几个不同的节点，用于交叉校验。
 
 const RETRYABLE_HTTP = new Set([408, 425, 429, 500, 502, 503, 504]);
 
@@ -68,6 +69,25 @@ export function createRpcPool(getUrls, { fetchImpl = globalThis.fetch, timeoutMs
     }
     throw last;
   }
+
+  /**
+   * 交叉校验用：同一个请求分别发给 n 个不同的节点，返回 [{url, result}]（成功的节点，最多 n 个）。
+   * 节点不够或都失败时返回的少于 n 个，由调用方判断；业务错误（revert）直接抛出
+   */
+  rpc.distinct = async function distinct(method, params = [], n = 2) {
+    const urls = getUrls();
+    const body = JSON.stringify({ jsonrpc: '2.0', id: ++seq, method, params });
+    const out = [];
+    // 从主节点的下一个开始，尽量避开显示网页用的那个节点
+    const start = cursor + 1;
+    for (let k = 0; k < urls.length && out.length < n; k++) {
+      const url = urls[(start + k) % urls.length];
+      const r = await once(url, body);
+      if (!r.error) out.push({ url, result: r.result });
+      else if (!r.retry) throw r.error;
+    }
+    return out;
+  };
 
   return rpc;
 }

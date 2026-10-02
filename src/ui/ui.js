@@ -13,6 +13,10 @@
   let findOpen = false;
   let siteOpen = false;
   let siteInfo = null;
+  // 当前页面的多节点交叉校验结果 {url, status, nodes, mismatches}
+  let verify = null;
+  // 「他的网站」：下一次显示新标签页时按这个持有人筛选
+  let pendingOwner = null;
   // 上次查询网站信息时的 标签 id + 网址 + 是否在加载，变化时才重新查询
   let siteKey = '';
   let editing = false;
@@ -82,6 +86,15 @@
     if (!editing) $('address').value = t && t.url ? t.url : '';
     document.title = t ? t.title + ' - TapeBrowser' : 'TapeBrowser';
     $('newtab-page').hidden = settingsOpen || Boolean(t && t.url);
+    if (pendingOwner && t && !t.url) {
+      $('dir-search').value = pendingOwner;
+      $('dir-net').value = '';
+      pendingOwner = null;
+      panel = 'directory';
+      dirLimit = 200;
+      renderPanels();
+      renderDirectory();
+    }
     $('settings-page').hidden = !settingsOpen;
     const zoom = t ? t.zoom : 100;
     // 新标签页画在外壳界面里，只缩放这一块，标签栏和地址栏不变
@@ -117,14 +130,21 @@
       tag.title = '这个网站在 ' + CHAINS[chain] + ' 上';
       tag.setAttribute('aria-label', '所在的链：' + CHAINS[chain]);
     }
-    if (!tape) { siteInfo = null; siteKey = ''; if (siteOpen) setSite(false); return; }
+    if (!tape) { siteInfo = null; verify = null; siteKey = ''; if (siteOpen) setSite(false); return; }
     const key = `${t.id}|${t.url}|${t.loading}`;
     if (key === siteKey || t.loading) return;
     siteKey = key;
+    if (verify && verify.url !== t.url) verify = null;
     tb.invoke('siteInfo').then((info) => {
       if (siteKey !== key) return;
       siteInfo = info;
       renderSite();
+      // 页面读完后再让另外两个节点交叉校验，不拖慢打开网页
+      return tb.invoke('verifySite').then((v) => {
+        if (siteKey !== key) return;
+        verify = v;
+        renderSite();
+      });
     }).catch(() => {});
   }
 
@@ -134,6 +154,7 @@
     if (!info.opened) return { cls: 'bad', text: '未开通容器' };
     if (!info.file) return { cls: 'bad', text: '文件不存在' };
     if (info.stale || info.file.source === 'stale') return { cls: 'stale', text: '离线缓存' };
+    if (verify && verify.status === 'mismatch') return { cls: 'bad', text: '节点结果不一致' };
     return { cls: 'ok', text: '链上 · 已校验' };
   }
 
@@ -164,6 +185,9 @@
     row('链', info.network || 'BNB Chain');
     row('电路', `#${info.tokenId}，处理器 ${info.cpu}${info.area ? `（区号 ${info.area}）` : ''}`);
     row('持有人', shortHex(info.owner), info.owner);
+    if (info.owner) ownerLink(info.owner);
+    const seen = info.seen || {};
+    if (seen.prevOwner) row('上一任持有人', shortHex(seen.prevOwner) + (seen.ownerChangedAt ? `（${ago(seen.ownerChangedAt)}发现变更）` : ''), seen.prevOwner);
     row('容器', shortHex(info.container), info.container);
     row('电路合约', shortHex(info.circuits), info.circuits);
     row('当前文件', '/' + (info.path || ''));
@@ -173,6 +197,36 @@
       row('上链时间', info.file.updatedAt ? new Date(info.file.updatedAt * 1000).toLocaleString() : '—');
       row('读取方式', SOURCE[info.file.source] || info.file.source);
     }
+    row('交叉校验', verifyText());
+  }
+
+  /** 多节点交叉校验的说明 */
+  function verifyText() {
+    const v = verify;
+    if (!v) return '正在向另外两个节点核对…';
+    if (v.status === 'ok') return `${v.nodes.join('、')} 读到的容器和文件哈希一致`;
+    if (v.status === 'single') return v.nodes.length ? `只有 ${v.nodes[0]} 可用，没有第二个节点可以核对` : '没有其他可用节点，无法核对';
+    if (v.status === 'skip') return '这个页面不是从链上读到的，不核对';
+    if (v.status === 'error') return '核对失败：' + v.message;
+    const what = { container: '容器地址', sha256: '文件哈希' };
+    return '不一致：' + v.mismatches.map((m) => `${m.node} 读到的${what[m.field]}是 ${shortHex(m.got) || '空'}`).join('；')
+      + '。可能是节点数据有问题，或网站刚好在更新，请刷新后再看；签名、交易前请核对。';
+  }
+
+  /** 持有人一行后面加「他的网站」：在新标签页的全部网站里按持有人筛选 */
+  function ownerLink(owner) {
+    const dd = $('si-list').lastElementChild;
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: '他的网站' });
+    b.title = '在全部网站里查看这个地址持有的网站';
+    b.addEventListener('click', () => showOwner(owner));
+    dd.append(b);
+  }
+
+  /** 打开新标签页，全部网站按持有人筛选 */
+  function showOwner(owner) {
+    pendingOwner = owner.toLowerCase();
+    setSite(false);
+    tb.invoke('newTab');
   }
 
   function setSite(on) {
@@ -195,10 +249,16 @@
       for (const it of items) {
         const li = document.createElement('li');
         const a = Object.assign(document.createElement('a'), { href: it.url, title: it.url });
-        a.append(
-          Object.assign(document.createElement('span'), { className: 't', textContent: it.title || it.label || it.url }),
-          Object.assign(document.createElement('span'), { className: 'u', textContent: it.label || it.url }),
-        );
+        a.append(Object.assign(document.createElement('span'), { className: 't', textContent: it.title || it.label || it.url }));
+        // 上次访问之后首页更新了 / 持有人变了
+        if (it.ownerChange) {
+          const b = Object.assign(document.createElement('span'), { className: 'badge warn', textContent: '持有人已变' });
+          b.title = `持有人 ${it.ownerChange.from} → ${it.ownerChange.to}`;
+          a.append(b);
+        } else if (it.updated) {
+          a.append(Object.assign(document.createElement('span'), { className: 'badge', textContent: '有更新', title: '上次访问之后首页更新了' }));
+        }
+        a.append(Object.assign(document.createElement('span'), { className: 'u', textContent: it.label || it.url }));
         // ⌘ 点击或中键在后台标签打开
         a.addEventListener('click', (e) => { e.preventDefault(); tb.invoke('openUrl', it.url, { background: e.metaKey || e.ctrlKey }); });
         a.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); tb.invoke('openUrl', it.url, { background: true }); } });

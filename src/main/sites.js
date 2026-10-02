@@ -133,6 +133,47 @@ export function createSites(chains, store = null) {
     };
   }
 
+  const verified = new Map();
+  const VERIFY_TTL = 10 * 60 * 1000;
+  const lc = (x) => String(x || '').toLowerCase();
+
+  /**
+   * 多节点交叉校验当前页面：另外两个不同的节点各自读「电路 → 容器」和这个文件的 sha256，
+   * 和显示网页用的结果比对。返回 {status, nodes, mismatches}：
+   *   ok        两个节点结果一致，且和显示的内容一致
+   *   mismatch  有节点结果不一致（也可能网站刚好在两次读取之间更新）
+   *   single    可用节点不够两个，没法交叉校验
+   *   skip      电路没有开通、或页面没有从链上读到
+   * 同一个页面、同一个 sha256 十分钟内不重复校验
+   */
+  async function verify(tokenId, cpu, path, area = null) {
+    const s = await site(tokenId, cpu, area);
+    if (s.stale || !s.exists || !s.opened || !s.container) return { status: 'skip' };
+    const file = served.get(`${fileKey(s.container, area)}:${path}`);
+    if (!file || file.source === 'stale') return { status: 'skip' };
+    const key = `${siteHost(tokenId, cpu, area)}:${path}:${file.info.sha256}`;
+    const hit = verified.get(key);
+    if (hit && Date.now() - hit.at < VERIFY_TTL) return hit;
+    const reads = await chainOf(area).crossRead(s.circuits, tokenId, s.container, path);
+    const mismatches = [];
+    for (const r of reads) {
+      if (lc(r.container) !== lc(s.container) || !r.opened) mismatches.push({ node: r.node, field: 'container', got: r.container });
+      else if (lc(r.sha256) !== lc(file.info.sha256)) mismatches.push({ node: r.node, field: 'sha256', got: r.sha256 });
+    }
+    const out = { status: mismatches.length ? 'mismatch' : reads.length < 2 ? 'single' : 'ok', nodes: reads.map((r) => r.node), mismatches, at: Date.now() };
+    // 不一致的结果不缓存，下次打开面板重新校验
+    if (out.status !== 'mismatch') verified.set(key, out);
+    return out;
+  }
+
+  /** 网站首页的文件信息（持有人、首页是否更新的记录用）：{owner, sha256}；没有开通或没有首页时 sha256 为 null */
+  async function indexInfo(tokenId, cpu, area = null) {
+    const s = await site(tokenId, cpu, area);
+    if (!s.exists) return null;
+    const f = s.opened && s.container ? await chainOf(area).fileInfo(s.container, 'index.html') : null;
+    return { owner: s.owner, sha256: f?.sha256 ?? null };
+  }
+
   /** 同一条链上的一组电路里有首页的：items = [{tokenId, cpu, circuits}] → [{tokenId, cpu, area, label, url, container}] */
   async function withIndex(items, area = null) {
     if (!items.length) return [];
@@ -220,5 +261,5 @@ export function createSites(chains, store = null) {
     };
   }
 
-  return { cpus, site, readFile, describe, enumerateDigits, scanWallet, networks: enabled };
+  return { cpus, site, readFile, describe, verify, indexInfo, enumerateDigits, scanWallet, networks: enabled };
 }

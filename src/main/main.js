@@ -37,7 +37,7 @@ const chains = Object.fromEntries(NETWORKS.map((n) => [n.key, createChain(rpcs[n
 const sites = createSites(chains, contentStore);
 const directory = createDirectory({
   chains, sites, file: join(app.getPath('userData'), 'directory.json'),
-  onChange: () => send('directory', directory.list()),
+  onChange: () => { library.syncDirectory(directory.list()); send('directory', directory.list()); },
   onProgress: () => send('directoryStatus', directory.status()),
 });
 /** 后台刷新目录：到期才扫（完整扫描每周一次，增量检查每小时一次） */
@@ -59,6 +59,19 @@ const pendingExternal = [];
 const send = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send('ui:' + ch, payload); };
 const notify = (text, level = 'info') => send('notice', { text, level });
 const pushLibrary = () => send('library', { history: library.history(), bookmarks: library.bookmarks() });
+
+const short = (a) => (a ? a.slice(0, 6) + '…' + a.slice(-4) : '');
+
+/** 打开电路网站后记下当前持有人和首页；持有人和上次看到的不一样时提醒 */
+async function observeSite(url) {
+  const m = /^tape:\/\/([^/?#]+)/i.exec(url || '');
+  const s = m && parseHost(m[1]);
+  if (!s) return;
+  let info;
+  try { info = await sites.indexInfo(s.tokenId, s.cpu, s.area); } catch { return; }
+  const change = library.observe(url, info);
+  if (change) notify(`${siteLabel(s.tokenId, s.cpu, s.area)} 的持有人变了：${short(change.from)} → ${short(change.to)}。网站内容现在由新持有人控制，连接钱包、签名前请留意。`, 'error');
+}
 
 /** 当前标签加入或移出书签 */
 function toggleBookmark() {
@@ -191,7 +204,17 @@ function registerIpc() {
     if (!site) return null;
     let path;
     try { path = normalizePath(m[2] || '/'); } catch { return null; }
-    try { return await sites.describe(site.tokenId, site.cpu, path, site.area); } catch (e) { return { error: String(e?.message || e) }; }
+    try { return { ...(await sites.describe(site.tokenId, site.cpu, path, site.area)), seen: library.seenOf(t.url) }; } catch (e) { return { error: String(e?.message || e) }; }
+  });
+  // 多节点交叉校验当前页面（网站信息面板和「链上」按钮用）
+  ui('verifySite', async () => {
+    const t = tabs.active();
+    const m = /^tape:\/\/([^/?#]+)(\/[^?#]*)?/i.exec(t?.url || '');
+    const site = m && parseHost(m[1]);
+    if (!site) return null;
+    let path;
+    try { path = normalizePath(m[2] || '/'); } catch { return null; }
+    try { return { url: t.url, ...(await sites.verify(site.tokenId, site.cpu, path, site.area)) }; } catch (e) { return { url: t.url, status: 'error', message: String(e?.message || e) }; }
   });
   ui('copy', (text) => { clipboard.writeText(String(text).slice(0, 1000)); return true; });
   ui('cacheUsage', () => contentStore.usage());
@@ -363,7 +386,7 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   tabs = createTabs({
     win, session: tabSession, preload: join(SRC, 'preload/tab.cjs'), send, notify,
-    onVisit: (url) => library.visit(url),
+    onVisit: (url) => { library.visit(url); observeSite(url); },
     onTitle: (url, title) => library.title(url, title),
   });
   win.on('closed', () => { tabs.closeAll(); tabs = null; win = null; uiLoaded = false; });
@@ -439,6 +462,8 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (!win) createWindow(); });
 
   // 启动稍等一会再扫，避免和首屏网页抢 RPC
+  // 上次退出前目录里的变化（有更新、持有人变化）先标到最近访问和书签上
+  library.syncDirectory(directory.list());
   setTimeout(() => refreshDirectory(), 5000).unref?.();
   setInterval(() => refreshDirectory(), QUICK_CHECK_EVERY).unref?.();
 });

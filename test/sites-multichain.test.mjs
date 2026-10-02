@@ -71,3 +71,29 @@ test('未知区号直接报错', async () => {
   const s = createSites({ bnb: fakeChain({ cpus: [], sites: [] }) });
   await assert.rejects(s.site(1, 5, 2), /区号/);
 });
+
+test('交叉校验：两个节点一致为 ok，有节点读到别的容器或哈希为 mismatch，节点不够为 single', async () => {
+  const body = '<html>hi</html>';
+  const chain = fakeChain({ cpus: many(3), sites: ['1-0'], body });
+  let reads = [];
+  chain.crossRead = async () => reads;
+  // site() 只传 {circuits, tokenId}，这里直接当作已开通
+  chain.circuitInfos = async (items) => items.map(() => ({ exists: true, owner: '0xo', container: '0xsame', opened: true }));
+  const s = createSites({ bnb: chain });
+  // 还没读过页面：不核对
+  assert.equal((await s.verify(1, 0, 'index.html')).status, 'skip');
+  await s.readFile('0xsame', 'index.html');
+  reads = [{ node: 'n1', container: '0xSAME', opened: true, sha256: sha(enc(body)) }, { node: 'n2', container: '0xsame', opened: true, sha256: sha(enc(body)) }];
+  assert.equal((await s.verify(1, 0, 'index.html')).status, 'ok');
+  // 十分钟内同一个哈希用缓存
+  reads = [];
+  assert.equal((await s.verify(1, 0, 'index.html')).status, 'ok');
+  const s2 = createSites({ bnb: chain });
+  await s2.readFile('0xsame', 'index.html');
+  reads = [{ node: 'n1', container: '0xevil', opened: true, sha256: sha(enc(body)) }, { node: 'n2', container: '0xsame', opened: true, sha256: '0xbad' }];
+  const bad = await s2.verify(1, 0, 'index.html');
+  assert.equal(bad.status, 'mismatch');
+  assert.deepEqual(bad.mismatches.map((m) => [m.node, m.field]), [['n1', 'container'], ['n2', 'sha256']]);
+  reads = [{ node: 'n1', container: '0xsame', opened: true, sha256: sha(enc(body)) }];
+  assert.equal((await s2.verify(1, 0, 'index.html')).status, 'single');
+});

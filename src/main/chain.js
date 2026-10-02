@@ -132,6 +132,28 @@ export function createChain(rpc, net = BSC) {
     return res.map((r) => decodeFileInfo(take(r, ['uint', 'string', 'bytes32', 'uint', 'uint'])));
   }
 
+  /**
+   * 交叉校验：让两个不同的节点各自读一遍「电路 → 容器」和「容器 + 路径 → 文件信息」。
+   * 返回 [{node, container, opened, sha256}]；节点池不支持或节点不够时返回的少于 2 个
+   */
+  async function crossRead(circuits, tokenId, container, path) {
+    if (typeof rpc.distinct !== 'function') return [];
+    const calls = [
+      { target: net.opener, callData: encodeCall(SEL.accountOf, ['address', 'uint'], [circuits, tokenId]), allowFailure: true },
+      { target: net.opener, callData: encodeCall(SEL.isOpened, ['address', 'uint'], [circuits, tokenId]), allowFailure: true },
+      { target: net.registry, callData: encodeCall(SEL.fileInfo, ['address', 'string'], [container, path]), allowFailure: true },
+    ];
+    const data = encodeCall(SEL.aggregate3, ['call3[]'], [calls]);
+    const res = await rpc.distinct('eth_call', [{ to: net.multicall3, data }, 'latest'], 2);
+    return res.map(({ url, result }) => {
+      const r = decodeAggregate3(result);
+      const file = decodeFileInfo(take(r[2], ['uint', 'string', 'bytes32', 'uint', 'uint']));
+      let node = url;
+      try { node = new URL(url).host; } catch { /* 保留原样 */ }
+      return { node, container: take(r[0], ['address'])?.[0] ?? null, opened: Boolean(take(r[1], ['bool'])?.[0]), sha256: file?.sha256 ?? null };
+    });
+  }
+
   async function fileInfo(container, path, block) {
     return (await fileInfos([{ container, path }], block))[0];
   }
@@ -164,5 +186,5 @@ export function createChain(rpc, net = BSC) {
     return out;
   }
 
-  return { pinBlock, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
+  return { pinBlock, crossRead, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
 }
