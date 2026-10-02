@@ -109,3 +109,11 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 .net.base { border-color: #0052ff; color: #0052ff; }
 #dir-net { height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--fg); font: inherit; }
 .rpc-net h3 { font-size: 13px; margin: 14px 0 6px; }
+/* 当前标签所在的链，颜色取各链 logo 的主色：BNB 黄、X Layer 黑白、Base 蓝 */
+.chain-tag { flex: none; height: 20px; line-height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; -webkit-app-region: no-drag; }
+.chain-tag[data-chain="0x38"] { background: #f0b90b; color: #181a20; }
+.chain-tag[data-chain="0xc4"] { background: #000; color: #fff; }
+.chain-tag[data-chain="0x2105"] { background: #0052ff; color: #fff; }
+@media (prefers-color-scheme: dark) {
+  .chain-tag[data-chain="0xc4"] { background: #fff; color: #000; }
+}

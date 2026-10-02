@@ -105,6 +105,16 @@
     const t = active();
     const tape = Boolean(t && isTape(t.url));
     $('site-btn').hidden = !tape;
+    // 网站所在的链：直接从网址的区号判断，不用等读链
+    const chain = tape ? tabChain(t) : null;
+    const tag = $('chain-tag');
+    tag.hidden = !chain;
+    if (chain) {
+      tag.textContent = CHAINS[chain];
+      tag.dataset.chain = chain;
+      tag.title = '这个网站在 ' + CHAINS[chain] + ' 上';
+      tag.setAttribute('aria-label', '所在的链：' + CHAINS[chain]);
+    }
     if (!tape) { siteInfo = null; siteKey = ''; if (siteOpen) setSite(false); return; }
     const key = `${t.id}|${t.url}|${t.loading}`;
     if (key === siteKey || t.loading) return;
