@@ -244,7 +244,7 @@ async function submit(text) {
     case 'wallet': return scanWallet(q.address);
     case 'bad': notify(q.message, 'error'); return;
     default:
-      notify('无法识别。可以输入 4454.0、#4454@0、1.2.248（X Layer）、1.3.5（Base）、8888.tape、钱包地址 0x… 或网址', 'error');
+      notify('无法识别。可以输入 42460、1888、4454.0、#4454@0、1.2.248（X Layer）、1.3.5（Base）、8888.tape、钱包地址 0x… 或网址', 'error');
   }
 }
 
