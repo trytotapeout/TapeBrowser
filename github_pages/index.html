@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TapeBrowser · TapeKit DeWEB 桌面浏览器</title>
+  <meta name="description" content="TapeBrowser 直接从链上读取并校验 TapeKit DeWEB 网站，支持 BNB Chain、X Layer 和 Base，桥接浏览器钱包扩展，不导入私钥。">
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">跳到正文</a>
+  <header class="site">
+    <div class="wrap">
+      <a class="brand" href="#"><img src="icon.png" alt="">TapeBrowser</a>
+      <nav aria-label="页面导航">
+        <ul>
+          <li><a href="#features">DeWEB 特性</a></li>
+          <li><a href="#download">下载</a></li>
+          <li><a href="#changelog">更新日志</a></li>
+          <li><a href="https://github.com/trytotapeout/TapeBrowser">GitHub</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="hero">
+      <div class="wrap">
+        <img src="icon.png" alt="TapeBrowser 图标">
+        <h1>TapeBrowser</h1>
+        <p>TapeKit DeWEB 网站的桌面浏览器。网站文件直接从链上读取并校验，不经过任何网关服务器。</p>
+        <div class="cta">
+          <a class="btn primary" href="#download">下载 0.9.0</a>
+          <a class="btn" href="https://github.com/trytotapeout/TapeBrowser">查看源代码</a>
+        </div>
+        <p class="version">macOS · Windows · Linux｜GPL-3.0-or-later 开源</p>
+      </div>
+    </div>
+
+    <section id="features" aria-labelledby="features-title">
+      <div class="wrap">
+        <h2 id="features-title">DeWEB 特性</h2>
+        <p class="lead">普通浏览器做不到、只有去中心化网站才需要的能力。</p>
+        <div class="grid">
+          <div class="card"><h3>tape:// 直接读链</h3><p>网站文件存在 TapeKit 电路的链上容器里，TapeBrowser 直接从公共节点读取，不依赖任何网关服务器。</p></div>
+          <div class="card"><h3>按电路名访问</h3><p>输入 <code>4454.0</code>、<code>#4454@0</code>、<code>1.2.248</code>（X Layer）或 <code>8888.tape</code> 都能打开同一个网站。</p></div>
+          <div class="card"><h3>数字串和钱包地址</h3><p>输入 <code>42460</code> 这样的数字串，自动尝试所有切分；输入钱包地址，打开它在三条链上持有的所有网站。</p></div>
+          <div class="card"><h3>三条链</h3><p>BNB Chain、X Layer（区号 2）、Base（区号 3）并行查询，各自的节点池，地址栏显示网站所在的链。</p></div>
+          <div class="card"><h3>哈希校验</h3><p>每个文件下载后都核对长度和链上记录的 SHA-256，节点或网络篡改了内容会直接拒绝显示。</p></div>
+          <div class="card"><h3>多节点交叉校验</h3><p>再找两个不同的节点核对容器和文件哈希，单个节点作恶伪造不了，不一致时按钮变红。</p></div>
+          <div class="card"><h3>持有人变更提醒</h3><p>网站换了持有人（被转手或卖掉）时，再次打开会提醒，书签和最近访问里也会标出来。</p></div>
+          <div class="card"><h3>签名风险解读</h3><p>无限额授权、授权全部 NFT、离线签名授权、盲签等高危请求翻成一句话，默认按钮是「拒绝」。</p></div>
+          <div class="card"><h3>外部脚本和代码变更</h3><p>网站运行了不在链上的脚本时标出来；上次签名之后网站改过代码，签名时列出改了哪些文件。</p></div>
+          <div class="card"><h3>钱包不导入私钥</h3><p>桥接系统浏览器里的钱包扩展（MetaMask 等），不依赖 WalletConnect 这类中心化中继，每次签名都先显示真实来源。</p></div>
+          <div class="card"><h3>全站目录</h3><p>自动收录三条链上所有有首页的网站，可以按标题、编号、持有人搜索，首页更新过的标「有更新」。</p></div>
+          <div class="card"><h3>离线兜底</h3><p>文件按 SHA-256 缓存在本机，每次仍先查链上最新版本；读链失败时显示上次缓存的版本。</p></div>
+        </div>
+        <p class="note">TapeBrowser 能证明你看到的内容来自链上、没有被篡改，但判断不了网站作者本身有没有恶意。签名和交易前请自己核对。</p>
+      </div>
+    </section>
+
+    <section id="download" aria-labelledby="download-title">
+      <div class="wrap">
+        <h2 id="download-title">下载</h2>
+        <p class="lead">最新版本 0.9.0，发布于 2026-10-04。所有版本见 <a href="https://github.com/trytotapeout/TapeBrowser/releases">GitHub Releases</a>。</p>
+        <table class="downloads">
+          <thead><tr><th scope="col">平台</th><th scope="col">文件</th><th scope="col">下载</th></tr></thead>
+          <tbody>
+            <tr><td>macOS（Apple 芯片）</td><td><code>TapeBrowser-0.9.0-mac-arm64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.9.0/TapeBrowser-0.9.0-mac-arm64.dmg">下载（122 MB）</a></td></tr>
+            <tr><td>macOS（Intel）</td><td><code>TapeBrowser-0.9.0-mac-x64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.9.0/TapeBrowser-0.9.0-mac-x64.dmg">下载（126 MB）</a></td></tr>
+            <tr><td>Windows（x64）</td><td><code>TapeBrowser-0.9.0-win-x64-setup.exe</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.9.0/TapeBrowser-0.9.0-win-x64-setup.exe">下载（106 MB）</a></td></tr>
+            <tr><td>Linux（x86_64）</td><td><code>TapeBrowser-0.9.0-linux-x86_64.AppImage</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.9.0/TapeBrowser-0.9.0-linux-x86_64.AppImage">下载（119 MB）</a></td></tr>
+          </tbody>
+        </table>
+        <div class="hint">
+          <p>每个文件的 SHA-256 见 <a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.9.0/SHA256SUMS.txt">SHA256SUMS.txt</a>。安装包还没有签名，第一次打开时：</p>
+          <ul>
+            <li>macOS：右键点应用选「打开」，或在「系统设置 → 隐私与安全性」里允许</li>
+            <li>Windows：SmartScreen 提示时点「更多信息 → 仍要运行」</li>
+            <li>Linux：先 <code>chmod +x</code> 再运行 AppImage</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="changelog" class="log" aria-labelledby="changelog-title">
+      <div class="wrap">
+        <h2 id="changelog-title">更新日志</h2>
+
+        <h3>0.9.0 <span class="date">2026-10-04</span></h3>
+        <ul>
+          <li>签名风险解读：无限额授权、授权全部 NFT、Permit / Permit2 离线授权、Seaport 挂单、<code>eth_sign</code> 盲签标为高危，默认按钮改为「拒绝」</li>
+          <li>代币名称和精度直接从链上读；金额单位跟着链显示 BNB / OKB / ETH（以前总是显示 BNB）</li>
+          <li>网站运行了不在链上的脚本或接口时，按钮显示「含外部脚本」，面板列出地址</li>
+          <li>上次同意签名之后网站改过文件，签名时列出改了哪些文件</li>
+          <li>按 GPL-3.0-or-later 开源，欢迎提 PR</li>
+        </ul>
+
+        <h3>0.8.2 <span class="date">2026-10-03</span></h3>
+        <ul>
+          <li>新增 macOS Intel（x64）安装包</li>
+          <li>安装包统一命名为 <code>TapeBrowser-版本-平台-架构</code></li>
+        </ul>
+
+        <h3>0.8.1 <span class="date">2026-10-02</span></h3>
+        <ul>
+          <li>第一个公开发布的版本，提供 macOS、Windows、Linux 安装包</li>
+          <li>「关于」里显示 GitHub 仓库地址</li>
+        </ul>
+
+        <h3>0.8.0</h3>
+        <ul><li>中英文界面，默认跟随系统语言，可以在设置里切换</li></ul>
+
+        <h3>0.7</h3>
+        <ul>
+          <li>多节点交叉校验</li>
+          <li>持有人变更提醒；最近访问和书签里标「有更新」「持有人已变」</li>
+          <li>「持有的全部网站」：列出某个持有人的所有网站</li>
+        </ul>
+
+        <h3>0.6</h3>
+        <ul>
+          <li>目录改为每小时增量检查、每周完整扫描</li>
+          <li>新标签页支持缩放</li>
+        </ul>
+
+        <h3>0.5</h3>
+        <ul>
+          <li>支持 X Layer（区号 2）和 Base（区号 3），每条链各自的节点，连接时自动切换钱包的链</li>
+          <li>地址栏显示网站所在链的彩色标签</li>
+          <li>Windows 和 Linux 打包</li>
+        </ul>
+
+        <h3>0.4</h3>
+        <ul><li>全站目录：自动扫描链上所有有首页的网站</li></ul>
+
+        <h3>0.1 – 0.3 <span class="date">2026-10-01</span></h3>
+        <ul>
+          <li><code>tape://</code> 浏览、数字串枚举、钱包地址扫描、桥接浏览器钱包扩展</li>
+          <li>页内查找、缩放、历史记录和书签</li>
+          <li>网站信息面板；本机内容缓存，读链失败时用缓存兜底</li>
+        </ul>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>TapeBrowser · <a href="https://github.com/trytotapeout/TapeBrowser/blob/main/LICENSE">GPL-3.0-or-later</a> · 作者 <a href="https://x.com/boostbob">x.com/boostbob</a></span>
+      <span><a href="https://github.com/trytotapeout/TapeBrowser/blob/main/CONTRIBUTING.md">参与贡献</a> · <a href="https://github.com/trytotapeout/TapeBrowser/issues">反馈问题</a></span>
+    </div>
+  </footer>
+</body>
+</html>
