@@ -15,7 +15,7 @@
   "type": "module",
   "main": "src/main/main.js",
   "desktopName": "tapebrowser.desktop",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "engines": {
     "node": ">=22.12.0"
@@ -42,7 +42,8 @@
     "productName": "TapeBrowser",
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "LICENSE"
     ],
     "protocols": [
       {

@@ -1,6 +1,25 @@
 # TapeBrowser
 
-浏览 TapeKit 电路容器里 DeWEB 网站的桌面浏览器（Electron）。第一版只做了 macOS，Windows / Linux 的打包配置已经写好。
+浏览 TapeKit 电路容器里 DeWEB 网站的桌面浏览器（Electron），支持 macOS、Windows 和 Linux。网站文件直接从链上读取并校验，不经过任何网关服务器。
+
+**欢迎一起共建。** 这是一个开源项目，修 bug、加功能、改文案、补翻译、在 Windows / Linux 真机上测试，都欢迎直接提 Issue 和 PR。比起各自维护分支，我们更希望改进能合并回这个仓库，让所有用户都能用上。怎么参与见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 下载
+
+在 [GitHub Releases](https://github.com/trytotapeout/TapeBrowser/releases/latest) 下载最新版本：
+
+| 平台 | 文件 |
+| --- | --- |
+| macOS（Apple 芯片） | `TapeBrowser-<版本>-mac-arm64.dmg` |
+| macOS（Intel） | `TapeBrowser-<版本>-mac-x64.dmg` |
+| Windows（x64） | `TapeBrowser-<版本>-win-x64-setup.exe` |
+| Linux（x86_64） | `TapeBrowser-<版本>-linux-x86_64.AppImage` |
+
+每个版本都附有 `SHA256SUMS.txt`，可以核对下载的文件。安装包还没有签名，第一次打开时：
+
+- macOS：右键点应用选「打开」，或者在「系统设置 → 隐私与安全性」里允许
+- Windows：SmartScreen 提示时点「更多信息 → 仍要运行」
+- Linux：先 `chmod +x` 再运行 AppImage
 
 ## 地址栏能输入什么
 
@@ -122,3 +141,20 @@ npm run dist:linux
 - 桥接服务只监听 127.0.0.1，页面和 WebSocket 都要求口令，同时校验 Host 和 Origin。口令保存在本机的 settings.json 里（文件权限 0600）。
 - 网页的权限请求只放行全屏和剪贴板写入。
 - 网页可以访问外部 http/https 地址，跟普通浏览器一样。
+
+## 参与贡献
+
+欢迎提 PR 一起共建：
+
+- 小的修复可以直接提 PR；较大的改动请先开 Issue 讨论方向
+- 提交前跑 `npm test`，界面文字记得在 `src/i18n/en.json` 补英文
+- 提交用 `git commit -s` 签署（[DCO](https://developercertificate.org/)）
+- 安全问题请不要公开提 Issue，先私下联系 https://x.com/boostbob
+
+详细说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 协议
+
+TapeBrowser 按 [GNU GPL v3.0 或更高版本](LICENSE)（GPL-3.0-or-later）开源。你可以自由使用、修改和分发；发布修改后的版本时，也必须按同样的协议公开源代码。
+
+「TapeBrowser」名称和应用图标不在开源授权范围内。发布修改后的版本请使用其他名称和图标，避免和官方版本混淆。
