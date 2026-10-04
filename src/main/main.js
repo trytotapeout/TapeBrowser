@@ -15,8 +15,9 @@ import { createLibrary } from './library.js';
 import { createContentStore } from './content-store.js';
 import { createDirectory, QUICK_CHECK_EVERY } from './directory.js';
 import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
-import { describeRequest } from './describe.js';
-import { NETWORKS, BSC, networkByArea, networkByKey } from './config.js';
+import { createAnalyzer } from './risk.js';
+import { createPageAudit } from './page-audit.js';
+import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
 import { createRequire } from 'node:module';
 const i18n = createRequire(import.meta.url)('../i18n/i18n.cjs');
 
@@ -48,6 +49,15 @@ const directory = createDirectory({
 /** 后台刷新目录：到期才扫（完整扫描每周一次，增量检查每小时一次） */
 function refreshDirectory(force = false) {
   directory.refresh({ force }).catch(() => { /* 失败状态已经通过 directoryStatus 显示 */ });
+}
+// 每个网站实际加载的链上文件、外部资源，以及上次同意签名时的文件快照
+const audit = createPageAudit(settings.baselines);
+// 代币符号和精度：按「链 + 合约」缓存，确认弹窗解读授权数额用
+const tokenCache = new Map();
+function tokenInfo(net, token) {
+  const key = `${net.key}:${String(token).toLowerCase()}`;
+  if (!tokenCache.has(key)) tokenCache.set(key, chains[net.key].tokenInfo(token).catch(() => { tokenCache.delete(key); return null; }));
+  return tokenCache.get(key);
 }
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
@@ -113,18 +123,42 @@ async function confirm(req) {
     });
     return { ok: r.response === 0, remember: false };
   }
-  const d = describeRequest(req.method, req.params);
+  // 解读请求：钱包当前在 TapeKit 支持的链上时，从链上读代币信息
+  const net = bridge?.state.chainId ? networkByChainId(parseInt(bridge.state.chainId, 16)) : null;
+  const analyzer = createAnalyzer({ tokenInfo: net ? (a) => tokenInfo(net, a) : null, tr: (...a) => tr(...a) });
+  let d;
+  try { d = await analyzer.analyze(req.method, req.params, { net }); } catch { d = { level: 'warn', title: req.method, lines: [], raw: '' }; }
+  const code = audit.compare(req.origin);
+  const danger = d.level === 'danger';
+  // 勾选过「不再询问」的网站：普通操作直接交给钱包；高危操作、网站代码改过时仍然弹窗
+  if (req.trusted && !danger && !code.changed.length) { audit.commit(req.origin); return { ok: true, remember: false }; }
+
+  const parts = [];
+  if (danger) parts.push(tr('⚠️ 高危操作'));
+  parts.push(...d.lines);
+  if (code.changed.length) {
+    parts.push('', tr('⚠️ 这个网站在你上次使用钱包之后改过代码：{files}', { files: code.changed.slice(0, 5).map((f) => '/' + f).join(tr('、')) + (code.changed.length > 5 ? tr(' 等 {n} 个文件', { n: code.changed.length }) : '') }));
+    parts.push(tr('新代码可能和你之前用过的不一样，请确认这次请求是你自己发起的。'));
+  }
+  const ext = audit.externalOf(req.origin).filter((e) => e.risky);
+  if (ext.length) parts.push('', tr('这个网站运行了不在链上的外部脚本或接口：{list}', { list: ext.slice(0, 3).map((e) => e.origin).join(tr('、')) + (ext.length > 3 ? tr(' 等 {n} 个', { n: ext.length }) : '') }));
+  if (d.raw) parts.push('', d.raw);
+  parts.push('', tr('来源：{origin}', { origin: req.origin }), tr('继续后请切换到浏览器，在钱包扩展里核对并确认。'));
+
+  // 高危时默认按钮是「拒绝」，也不能勾选「不再询问」
+  const buttons = danger ? [tr('拒绝'), tr('我了解风险，去钱包确认')] : [tr('去钱包确认'), tr('拒绝')];
   const r = await dialog.showMessageBox(win, {
-    type: 'warning',
-    buttons: [tr('去钱包确认'), tr('拒绝')],
+    type: danger || code.changed.length ? 'error' : 'warning',
+    buttons,
     defaultId: 0,
-    cancelId: 1,
+    cancelId: danger ? 0 : 1,
     message: tr('{name} 请求：{title}', { name, title: d.title }),
-    detail: tr('{body}\n\n来源：{origin}\n继续后请切换到浏览器，在钱包扩展里核对并确认。', { body: d.body, origin: req.origin }),
-    checkboxLabel: tr('本次运行期间不再询问这个网站（仍需在钱包里确认）'),
-    checkboxChecked: false,
+    detail: parts.join('\n'),
+    ...(danger ? {} : { checkboxLabel: tr('本次运行期间不再询问这个网站（仍需在钱包里确认；高危操作和网站改过代码时仍会询问）'), checkboxChecked: false }),
   });
-  return { ok: r.response === 0, remember: r.checkboxChecked };
+  const ok = danger ? r.response === 1 : r.response === 0;
+  if (ok) audit.commit(req.origin);
+  return { ok, remember: ok && !danger && Boolean(r.checkboxChecked) };
 }
 
 function emit(origin, event, payload) {
@@ -222,7 +256,7 @@ function registerIpc() {
     if (!site) return null;
     let path;
     try { path = normalizePath(m[2] || '/'); } catch { return null; }
-    try { return { ...(await sites.describe(site.tokenId, site.cpu, path, site.area)), seen: library.seenOf(t.url) }; } catch (e) { return { error: String(e?.message || e) }; }
+    try { return { ...(await sites.describe(site.tokenId, site.cpu, path, site.area)), seen: library.seenOf(t.url), external: audit.externalOf(originOf(t.url)) }; } catch (e) { return { error: String(e?.message || e) }; }
   });
   // 多节点交叉校验当前页面（网站信息面板和「链上」按钮用）
   ui('verifySite', async () => {
@@ -442,6 +476,7 @@ function createWindow() {
   tabs = createTabs({
     win, session: tabSession, preload: join(SRC, 'preload/tab.cjs'), send, notify, tr: (...a) => tr(...a),
     onVisit: (url) => { library.visit(url); observeSite(url); },
+    onNavigate: (url) => { const o = originOf(url); if (o) audit.reset(o); },
     onTitle: (url, title) => library.title(url, title),
   });
   win.on('closed', () => { tabs.closeAll(); tabs = null; win = null; uiLoaded = false; });
@@ -488,7 +523,15 @@ app.whenReady().then(async () => {
   if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(SRC, '../build/icon.png'));
 
   tabSession = electronSession.fromPartition(PARTITION);
-  tabSession.protocol.handle('tape', createTapeHandler(sites));
+  tabSession.protocol.handle('tape', createTapeHandler(sites, { onServe: (origin, path, sha) => audit.file(origin, path, sha) }));
+  // 电路网站发出的非链上请求（外部脚本、接口、WebSocket 等）记下来，网站信息面板和签名确认里提示
+  tabSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (details, cb) => {
+    try {
+      const page = details.webContents && !details.webContents.isDestroyed() ? originOf(details.webContents.getURL()) : null;
+      if (page && page.startsWith('tape://')) audit.external(page, details.url, details.resourceType);
+    } catch { /* 记录失败不影响请求 */ }
+    cb({});
+  });
   const allowed = new Set(['fullscreen', 'clipboard-sanitized-write']);
   tabSession.setPermissionRequestHandler((_wc, permission, cb) => cb(allowed.has(permission)));
   tabSession.setPermissionCheckHandler((_wc, permission) => allowed.has(permission));

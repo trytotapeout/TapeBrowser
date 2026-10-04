@@ -13,7 +13,8 @@
 //   rpcs          每条链的节点池 { bnb: rpc, xlayer: rpc, base: rpc }，rpc(method, params)（只传 rpc 时当作 BNB 的）
 //   settings      createSettings() 的返回值
 //   openBridge()  在系统浏览器里打开桥接页面
-//   confirm({kind, origin, method, params}) → Promise<{ok, remember}>
+//   confirm({kind, origin, method, params, trusted}) → Promise<{ok, remember}>
+//                 trusted：本次运行里用户对这个网站勾选过「不再询问」，confirm 可以不弹窗直接放行
 //   emit(origin|null, event, payload)  向网页派发事件；origin 为 null 表示所有网页，payload 可以是 (origin) => 值
 
 import { BSC, networkByArea, networkByChainId } from './config.js';
@@ -147,11 +148,10 @@ export function createProviderHost({ bridge, rpc, rpcs, settings, openBridge, co
       if (SIGN_METHODS.has(method)) {
         const from = signerOf(method, params);
         if (from && !bridge.state.accounts.includes(from)) throw providerError(4100, '签名地址不是当前连接的钱包地址');
-        if (!trusted.has(origin)) {
-          const r = await confirm({ kind: 'sign', origin, method, params });
-          if (!r.ok) throw providerError(4001, '用户拒绝请求');
-          if (r.remember) trusted.add(origin);
-        }
+        // 勾选过「不再询问」的网站也交给 confirm 决定：高危操作、网站代码改过时仍然要弹窗
+        const r = await confirm({ kind: 'sign', origin, method, params, trusted: trusted.has(origin) });
+        if (!r.ok) throw providerError(4001, '用户拒绝请求');
+        if (r.remember) trusted.add(origin);
       }
       return bridge.request(method, params, origin);
     }

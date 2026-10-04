@@ -19,8 +19,9 @@ const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.
 
 // onVisit(url)         主框架成功打开一个页面（HTTP 2xx/3xx）
 // onTitle(url, title)  页面标题更新
+// onNavigate(url)      主框架开始加载一个新页面（刷新也算）
 // tr(text, vars) 界面文字翻译（见 i18n/i18n.cjs）
-export function createTabs({ win, session, preload, send, notify, tr = (s) => s, onVisit = () => {}, onTitle = () => {} }) {
+export function createTabs({ win, session, preload, send, notify, tr = (s) => s, onVisit = () => {}, onTitle = () => {}, onNavigate = () => {} }) {
   const tabs = new Map();
   const order = [];
   let activeId = null;
@@ -98,6 +99,7 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
     wc.on('will-navigate', guard);
     wc.on('will-redirect', guard);
     wc.on('did-start-loading', () => { t.loading = true; push(); });
+    wc.on('did-start-navigation', (e) => { if (e.isMainFrame && !e.isSameDocument) onNavigate(e.url); });
     wc.on('did-stop-loading', () => { t.loading = false; push(); });
     wc.on('page-title-updated', (_e, title) => { t.title = title; onTitle(wc.getURL(), title); push(); });
     wc.on('page-favicon-updated', (_e, icons) => { t.favicon = icons.find((i) => /^(https?|tape|data):/.test(i)) || null; push(); });

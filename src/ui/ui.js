@@ -180,6 +180,8 @@
     if (!info.file) return { cls: 'bad', text: tr('文件不存在') };
     if (info.stale || info.file.source === 'stale') return { cls: 'stale', text: tr('离线缓存') };
     if (verify && verify.status === 'mismatch') return { cls: 'bad', text: tr('节点结果不一致') };
+    // 外部脚本、接口不在链上，不受校验保护
+    if ((info.external || []).some((e) => e.risky)) return { cls: 'stale', text: tr('含外部脚本') };
     return { cls: 'ok', text: tr('链上 · 已校验') };
   }
 
@@ -223,6 +225,16 @@
       row(tr('读取方式'), SOURCE[info.file.source] || info.file.source);
     }
     row(tr('交叉校验'), verifyText());
+    row(tr('外部资源'), externalText(info.external || []));
+  }
+
+  /** 不在链上的外部资源：脚本、接口能改变网页行为，不受链上校验保护 */
+  function externalText(list) {
+    if (!list.length) return tr('没有，全部内容来自链上');
+    const risky = list.filter((e) => e.risky);
+    const show = (arr) => arr.slice(0, 4).map((e) => e.origin.replace(/^https?:\/\//, '')).join(tr('、')) + (arr.length > 4 ? tr(' 等 {n} 个', { n: arr.length }) : '');
+    if (risky.length) return tr('运行了外部脚本或接口，不受链上校验保护：{list}', { list: show(risky) });
+    return tr('只加载了外部图片、字体或样式：{list}', { list: show(list) });
   }
 
   /** 多节点交叉校验的说明 */

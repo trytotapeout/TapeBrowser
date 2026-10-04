@@ -25,7 +25,8 @@ h1{font-size:20px;margin:0 0 8px}p{color:#666;margin:0;word-break:break-all}@med
   return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8' } });
 }
 
-export function createTapeHandler(sites) {
+// onServe(origin, path, sha256)：每返回一个文件调用一次（页面审计用，见 page-audit.js）
+export function createTapeHandler(sites, { onServe = () => {} } = {}) {
   return async function handle(request) {
     const url = new URL(request.url);
     const site = parseHost(url.hostname);
@@ -58,6 +59,7 @@ export function createTapeHandler(sites) {
         // chain / cache / stale（读链失败时用的是上次缓存的版本）
         'x-tape-source': file.source || 'chain',
       };
+      onServe(`tape://${url.hostname}`, path, file.info.sha256);
       return new Response(request.method === 'HEAD' ? null : file.bytes, { status: 200, headers });
     } catch (e) {
       return errorPage(502, '读取链上数据失败', String(e?.message || e));

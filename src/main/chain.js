@@ -154,6 +154,28 @@ export function createChain(rpc, net = BSC) {
     });
   }
 
+  /**
+   * 代币的符号和精度（确认弹窗解读授权数额用）：{symbol, decimals}。
+   * decimals 读不到时为 null（NFT 合约没有精度）；合约不存在或都读不到返回 null。symbol 兼容返回 bytes32 的老合约
+   */
+  async function tokenInfo(token) {
+    const res = await multicall([
+      { target: token, callData: '0x95d89b41' }, // symbol()
+      { target: token, callData: '0x313ce567' }, // decimals()
+    ]);
+    let symbol = take(res[0], ['string'])?.[0] ?? null;
+    if (symbol === null) {
+      const b32 = take(res[0], ['bytes32'])?.[0];
+      if (b32) symbol = Buffer.from(b32.slice(2), 'hex').toString('utf8').replace(/\0+$/, '') || null;
+    }
+    const d = take(res[1], ['uint'])?.[0];
+    const decimals = d !== undefined && d <= 77n ? Number(d) : null;
+    if (symbol === null && decimals === null) return null;
+    // 符号来自合约自己，限制长度和字符，避免伪装成别的文字
+    if (symbol) symbol = symbol.replace(/[^\w.$+-]/g, '').slice(0, 16) || null;
+    return { symbol, decimals };
+  }
+
   async function fileInfo(container, path, block) {
     return (await fileInfos([{ container, path }], block))[0];
   }
@@ -186,5 +208,5 @@ export function createChain(rpc, net = BSC) {
     return out;
   }
 
-  return { pinBlock, crossRead, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
+  return { pinBlock, crossRead, tokenInfo, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
 }

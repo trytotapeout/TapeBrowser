@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createProviderHost } from '../src/main/provider-host.js';
-import { describeRequest } from '../src/main/describe.js';
 
 const ACC = '0x571d447f4f24688ec35ccf07f1d6993655f6af15';
 const SITE = 'tape://4454-0';
@@ -87,13 +86,14 @@ test('已授权网站签名：先弹窗再交给钱包；签名地址必须是�
   await assert.rejects(t.host.handle(SITE, 'personal_sign', ['0x68', '0x' + '1'.repeat(40)]), (e) => e.code === 4100);
 });
 
-test('勾选"不再询问"后同一网站不再弹窗', async () => {
+test('勾选"不再询问"后，同一网站的请求带 trusted 交给 confirm', async () => {
   const t = setup({ remember: true });
   t.set({ connected: true, ready: true, accounts: [ACC], chainId: '0x38' });
   t.perms.set(SITE, 1);
   await t.host.handle(SITE, 'eth_sendTransaction', [{ from: ACC, to: ACC }]);
   await t.host.handle(SITE, 'eth_sendTransaction', [{ from: ACC, to: ACC }]);
-  assert.equal(t.confirms.length, 1);
+  // 第二次仍交给 confirm，但带上 trusted，由 confirm 决定是否弹窗（高危操作、代码改过时仍会弹）
+  assert.deepEqual(t.confirms.map((r) => r.trusted), [false, true]);
   assert.equal(t.calls.length, 2);
 });
 
@@ -118,10 +118,6 @@ test('账户变化只通知已授权网站；断开时发空数组', async () =>
   assert.deepEqual(acc(), [SITE, 'accountsChanged', []]);
 });
 
-test('describeRequest 解码 personal_sign 文本和交易金额', () => {
-  assert.equal(describeRequest('personal_sign', ['0x' + Buffer.from('你好').toString('hex'), ACC]).body, '你好');
-  assert.match(describeRequest('eth_sendTransaction', [{ to: ACC, value: '0xde0b6b3a7640000', data: '0x1234' }]).body, /1 BNB[\s\S]*2 字节/);
-});
 
 const XSITE = 'tape://1-2-230';
 
