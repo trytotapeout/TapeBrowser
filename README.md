@@ -6,6 +6,8 @@
 
 ## 下载
 
+产品介绍和下载页：https://trytotapeout.github.io/TapeBrowser/
+
 在 [GitHub Releases](https://github.com/trytotapeout/TapeBrowser/releases/latest) 下载最新版本：
 
 | 平台 | 文件 |
