@@ -19,7 +19,7 @@
 
 每个版本都附有 `SHA256SUMS.txt`，可以核对下载的文件。安装包还没有签名，第一次打开时：
 
-- macOS：右键点应用选「打开」，或者在「系统设置 → 隐私与安全性」里允许
+- macOS：把应用拖进「应用程序」后双击，系统提示无法验证开发者时点「完成」，再到「系统设置 → 隐私与安全性」底部点「仍要打开」。如果仍然提示「已损坏」（0.9.0 及更早的版本会这样），在终端运行 `xattr -dr com.apple.quarantine /Applications/TapeBrowser.app` 后再打开
 - Windows：SmartScreen 提示时点「更多信息 → 仍要运行」
 - Linux：先 `chmod +x` 再运行 AppImage
 
@@ -133,7 +133,7 @@ npm run dist:linux
 
 打包产物都在 `dist/`：mac 是 Apple 芯片（arm64）和 Intel（x64）两个 `.dmg`，Windows 是 x64 的 `.exe` 安装包，Linux 是 x64 的 `.AppImage`。文件名统一为 `TapeBrowser-<版本>-<平台>-<架构>`，例如 `TapeBrowser-0.8.2-mac-x64.dmg`。三个平台都可以在 mac 上直接交叉打包，不需要装 Wine；`npm run dist:all` 依次打全部三个。
 
-打包产物都没有签名：mac 第一次打开时 Gatekeeper 会拦截，需要右键选择「打开」；Windows 会弹 SmartScreen 提示，点「更多信息 → 仍要运行」；Linux 的 AppImage 需要先 `chmod +x` 再运行。
+打包产物没有开发者签名：mac 包只做了临时签名（ad-hoc，见 package.json 的 `build.mac.identity`），没有经过 Apple 公证，第一次打开时 Gatekeeper 会拦截，打开方法见上面「下载」一节；Windows 会弹 SmartScreen 提示，点「更多信息 → 仍要运行」；Linux 的 AppImage 需要先 `chmod +x` 再运行。
 
 ## 代码结构
 
