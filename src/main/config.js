@@ -27,6 +27,8 @@ export const BSC = Object.freeze({
     'https://56.rpc.thirdweb.com',
   ]),
   explorer: 'https://bscscan.com',
+  // TapeOut 挖矿奖励代币 BEM（8 位精度）；X Layer 上是 LayerZero 跨链版本，Base 上还没有
+  bem: '0x5ce033b2bfca3af30b3e8c8457deaf776a8b695a',
 });
 
 // X Layer 和 Base：同一份合约源码、同一部署者按同一顺序部署，两条链上地址相同（和 BNB 不同）
@@ -52,6 +54,7 @@ export const XLAYER = Object.freeze({
     'https://196.rpc.thirdweb.com',
   ]),
   explorer: 'https://www.oklink.com/xlayer',
+  bem: '0x60e62efa9405d6873c5deabd4e6cc91c25363952',
 });
 
 export const BASE = Object.freeze({
@@ -69,6 +72,7 @@ export const BASE = Object.freeze({
     'https://8453.rpc.thirdweb.com',
   ]),
   explorer: 'https://basescan.org',
+  bem: null,
 });
 
 /** 所有网络，BNB 在最前 */

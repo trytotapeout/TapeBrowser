@@ -176,6 +176,12 @@ export function createChain(rpc, net = BSC) {
     return { symbol, decimals };
   }
 
+  /** 代币余额（最小单位，BigInt） */
+  async function tokenBalance(token, owner, block = 'latest') {
+    const [v] = await view(token, encodeCall(SEL.balanceOf, ['address'], [lower(owner)]), ['uint'], block);
+    return v;
+  }
+
   async function fileInfo(container, path, block) {
     return (await fileInfos([{ container, path }], block))[0];
   }
@@ -208,5 +214,5 @@ export function createChain(rpc, net = BSC) {
     return out;
   }
 
-  return { pinBlock, crossRead, tokenInfo, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
+  return { pinBlock, crossRead, tokenInfo, tokenBalance, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
 }

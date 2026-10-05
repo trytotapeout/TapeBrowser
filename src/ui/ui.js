@@ -506,6 +506,7 @@
   $('forward').addEventListener('click', () => tb.invoke('forward'));
   $('reload').addEventListener('click', () => tb.invoke(active() && active().loading ? 'stop' : 'reload'));
   $('settings-btn').addEventListener('click', () => setSettings(!settingsOpen));
+  $('bem').addEventListener('click', () => tb.invoke('refreshBem'));
   $('wallet').addEventListener('click', () => (wallet.ready ? setSettings(true) : tb.invoke('openBridge')));
   $('open-bridge').addEventListener('click', () => tb.invoke('openBridge'));
   $('disconnect-wallet').addEventListener('click', () => tb.invoke('disconnectWallet'));
@@ -549,6 +550,22 @@
     if (switched && findOpen) runFind(false);
   });
   tb.on('wallet', (w) => { wallet = w || {}; renderWallet(); });
+  tb.on('bem', (v) => renderBem(v));
+
+  /** 钱包按钮旁的 BEM 余额：总数，鼠标移上去看各条链 */
+  function renderBem(v) {
+    const b = $('bem');
+    b.hidden = !v;
+    if (!v) return;
+    b.textContent = '';
+    b.className = '';
+    const failed = v.networks.filter((n) => n.error);
+    b.append(document.createTextNode(v.total ?? (v.loading ? '…' : '—')), Object.assign(document.createElement('span'), { className: 'unit', textContent: 'BEM' }));
+    if (failed.length) b.classList.add('stale');
+    const lines = v.networks.map((n) => (n.error ? tr('{name}：读取失败', { name: n.name }) : tr('{name}：{amount} BEM', { name: n.name, amount: n.balance ?? '…' })));
+    b.title = tr('BEM 余额（点击刷新）') + '\n' + lines.join('\n');
+    b.setAttribute('aria-label', tr('BEM 余额 {total}，{detail}', { total: v.total ?? '—', detail: lines.join(tr('；')) }));
+  }
   tb.on('notice', (n) => notice(n.text, n.level));
   tb.on('command', (name) => {
     if (name === 'focusAddress') focusAddress();

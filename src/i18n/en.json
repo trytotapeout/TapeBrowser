@@ -305,5 +305,9 @@
  "外部资源": "External resources",
  "没有，全部内容来自链上": "None, everything comes from the chain",
  "运行了外部脚本或接口，不受链上校验保护：{list}": "Runs external scripts or APIs not covered by on-chain verification: {list}",
- "只加载了外部图片、字体或样式：{list}": "Only external images, fonts or styles: {list}"
+ "只加载了外部图片、字体或样式：{list}": "Only external images, fonts or styles: {list}",
+ "{name}：读取失败": "{name}: failed to read",
+ "{name}：{amount} BEM": "{name}: {amount} BEM",
+ "BEM 余额（点击刷新）": "BEM balance (click to refresh)",
+ "BEM 余额 {total}，{detail}": "BEM balance {total}, {detail}"
 }

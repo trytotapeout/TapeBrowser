@@ -17,6 +17,7 @@ import { createDirectory, QUICK_CHECK_EVERY } from './directory.js';
 import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
 import { createAnalyzer } from './risk.js';
 import { createPageAudit } from './page-audit.js';
+import { createBemBalances } from './bem.js';
 import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
 import { createRequire } from 'node:module';
 const i18n = createRequire(import.meta.url)('../i18n/i18n.cjs');
@@ -59,6 +60,8 @@ function tokenInfo(net, token) {
   if (!tokenCache.has(key)) tokenCache.set(key, chains[net.key].tokenInfo(token).catch(() => { tokenCache.delete(key); return null; }));
   return tokenCache.get(key);
 }
+// 钱包在各条链上的 BEM 余额，工具栏钱包按钮旁显示
+const bem = createBemBalances({ chains, networks: NETWORKS, onChange: (v) => send('bem', v) });
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
@@ -200,7 +203,8 @@ function registerIpc() {
     if (!win || e.sender !== win.webContents) throw new Error('forbidden');
     return fn(...args);
   });
-  ui('ready', () => { tabs.push(); send('wallet', walletView()); pushLibrary(); });
+  ui('ready', () => { tabs.push(); send('wallet', walletView()); send('bem', bem.view()); pushLibrary(); });
+  ui('refreshBem', () => bem.refresh());
   ui('newTab', () => tabs.open());
   ui('closeTab', (id) => tabs.close(id));
   ui('activate', (id) => tabs.activate(id));
@@ -540,7 +544,7 @@ app.whenReady().then(async () => {
   const port = await bridge.start();
   if (port !== settings.get('bridgePort')) settings.set('bridgePort', port);
   host = createProviderHost({ bridge, rpcs, settings, openBridge: () => shell.openExternal(bridge.url()), confirm, emit });
-  bridge.on('state', () => send('wallet', walletView()));
+  bridge.on('state', (s) => { send('wallet', walletView()); bem.setAccount(s.ready ? s.accounts?.[0] : null); });
 
   registerIpc();
   // ready 之后系统语言才准
