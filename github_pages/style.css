@@ -50,6 +50,12 @@ th { color: var(--muted); font-weight: 500; }
 .hint { color: var(--muted); font-size: 14px; }
 .hint ul { margin: 8px 0 0; padding-left: 20px; }
 
+.steps-title { font-size: 18px; margin: 32px 0 8px; }
+.steps { margin: 0; padding-left: 22px; }
+.steps li { margin: 0 0 24px; }
+.steps p { margin: 0 0 10px; }
+.steps img { display: block; max-width: 520px; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; }
+
 .log h3 { font-size: 18px; margin: 28px 0 4px; }
 .log h3 .date { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 8px; }
 .log ul { margin: 6px 0 0; padding-left: 20px; }
