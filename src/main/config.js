@@ -29,6 +29,8 @@ export const BSC = Object.freeze({
   explorer: 'https://bscscan.com',
   // TapeOut 挖矿奖励代币 BEM（8 位精度）；X Layer 上是 LayerZero 跨链版本，Base 上还没有
   bem: '0x5ce033b2bfca3af30b3e8c8457deaf776a8b695a',
+  // BEM 价格：PancakeSwap V3 BEM/USDT 1% 池（流动性最深），读当前成交价；USDT 按 1 美元计
+  bemPricePool: { pool: '0x3098d7a051045000d68ec0360753a40c8cabea31', quote: '0x55d398326f99059ff775485246999027b3197955', quoteDecimals: 18, quoteSymbol: 'USDT' },
 });
 
 // X Layer 和 Base：同一份合约源码、同一部署者按同一顺序部署，两条链上地址相同（和 BNB 不同）

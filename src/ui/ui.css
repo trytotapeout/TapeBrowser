@@ -40,7 +40,10 @@ body.mac #tabstrip { padding-left: 80px; }
 #wallet.ready { border-color: var(--ok); color: var(--ok); }
 #wallet.warn { border-color: var(--bad); color: var(--bad); }
 #bem { -webkit-app-region: no-drag; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 14px; background: transparent; color: var(--fg); cursor: pointer; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
-#bem .unit { color: var(--muted); margin-left: 4px; }
+#bem .unit { color: var(--muted); }
+#bem .price { margin-left: 4px; }
+#bem .sep { color: var(--muted); margin: 0 6px; }
+#bem > :not(:first-child).unit { margin-left: 4px; }
 #bem.stale { color: var(--muted); }
 
 #notice { padding: 6px 12px; background: var(--notice); border-top: 1px solid var(--line); word-break: break-all; }

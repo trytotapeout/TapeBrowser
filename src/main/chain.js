@@ -176,6 +176,20 @@ export function createChain(rpc, net = BSC) {
     return { symbol, decimals };
   }
 
+  /**
+   * Uniswap / PancakeSwap V3 池的当前价格：每 1 个 token 值多少 quote（浮点数）。
+   * 读 slot0 的 sqrtPriceX96 和 token0，按两边精度换算
+   */
+  async function v3Price(pool, token, tokenDecimals, quoteDecimals, block = 'latest') {
+    const res = await multicall([{ target: pool, callData: '0x3850c7bd' }, { target: pool, callData: '0x0dfe1681' }], block);
+    const sp = take(res[0], ['uint'])?.[0];
+    const t0 = take(res[1], ['address'])?.[0];
+    if (!sp || !t0) throw new Error('读不到池子价格');
+    const raw = (Number(sp) / 2 ** 96) ** 2; // token1 最小单位 / token0 最小单位
+    const perToken = t0 === lower(token) ? raw : 1 / raw;
+    return perToken * 10 ** (tokenDecimals - quoteDecimals);
+  }
+
   /** 原生币余额（BNB / OKB / ETH，最小单位，BigInt） */
   async function nativeBalance(owner, block = 'latest') {
     return BigInt(await rpc('eth_getBalance', [lower(owner), block]));
@@ -219,5 +233,5 @@ export function createChain(rpc, net = BSC) {
     return out;
   }
 
-  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
+  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, v3Price, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
 }

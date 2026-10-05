@@ -585,20 +585,31 @@
   tb.on('wallet', (w) => { wallet = w || {}; renderWallet(); });
   tb.on('bem', (v) => renderBem(v));
 
-  /** 钱包按钮旁的 BEM 余额：总数，鼠标移上去看各条链 */
+  /** 钱包按钮旁的 BEM：没连钱包只显示价格；连上后显示余额和折合美元，鼠标移上去看各条链 */
+  const usd = (n) => (n >= 100 ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 4 : 2 }));
   function renderBem(v) {
     const b = $('bem');
-    b.hidden = !v;
-    if (!v) return;
+    b.hidden = !v || (v.price === null && !v.balance);
+    if (b.hidden) return;
     b.textContent = '';
     b.className = '';
-    const failed = v.networks.filter((n) => n.error);
-    b.append(document.createTextNode(v.total ?? (v.loading ? '…' : '—')), Object.assign(document.createElement('span'), { className: 'unit', textContent: 'BEM' }));
-    if (failed.length) b.classList.add('stale');
-    const lines = v.networks.map((n) => (n.error ? tr('{name}：读取失败', { name: n.name }) : tr('{name}：{amount} BEM', { name: n.name, amount: n.balance ?? '…' })));
-    b.title = tr('BEM 余额（点击刷新）') + '\n' + lines.join('\n');
-    b.setAttribute('aria-label', tr('BEM 余额 {total}，{detail}', { total: v.total ?? '—', detail: lines.join(tr('；')) }));
+    const price = v.price !== null ? '$' + usd(v.price) : null;
+    const lines = [tr('BEM 价格：{price}（PancakeSwap BEM/USDT 池的即时价格，仅供参考）', { price: price ?? tr('读取失败') })];
+    const bal = v.balance;
+    const span = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
+    // 价格一直显示在最前面
+    b.append(span('unit', 'BEM'), span('price', price ?? '—'));
+    if (bal) {
+      // 连上钱包后接着显示持有数量和折合美元
+      b.append(span('sep', '·'), document.createTextNode(bal.total ?? (bal.loading ? '…' : '—')));
+      if (bal.usd !== null && bal.usd > 0) b.append(span('unit', '≈ $' + usd(bal.usd)));
+      if (bal.networks.some((n) => n.error)) b.classList.add('stale');
+      for (const n of bal.networks) lines.push(n.error ? tr('{name}：读取失败', { name: n.name }) : tr('{name}：{amount} BEM', { name: n.name, amount: n.balance ?? '…' }));
+    }
+    b.title = lines.join('\n') + '\n' + tr('点击刷新');
+    b.setAttribute('aria-label', lines.join(tr('；')));
   }
+
   tb.on('notice', (n) => notice(n.text, n.level));
   tb.on('command', (name) => {
     if (name === 'focusAddress') focusAddress();

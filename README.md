@@ -89,7 +89,7 @@ TapeBrowser 不导入私钥，也不用 WalletConnect，而是通过系统浏览
 
 只读请求（`eth_call` 等）在 BSC 上走内置的公共 RPC 池，不经过钱包。已授权的网站可以在设置里取消授权。要断开钱包，在设置页或菜单「钱包 → 断开钱包」操作；网站授权会保留，重新连接后不用再确认。OKX 等不支持 `wallet_revokePermissions` 的钱包，扩展里对 127.0.0.1 的授权需要在扩展里手动移除。
 
-连上钱包后，钱包按钮左边显示这个地址在各条链上的 BEM 总数，鼠标移上去看每条链各有多少，点一下立即刷新（平时每分钟刷新一次）。余额直接从 BEM 合约读取：BNB Chain `0x5ce033b2bfca3af30b3e8c8457deaf776a8b695a`，X Layer `0x60e62efa9405d6873c5deabd4e6cc91c25363952`（LayerZero 跨链版本）；Base 上还没有 BEM。
+钱包按钮左边显示 BEM 价格，连上钱包后接着显示这个地址在各条链上的 BEM 总数和折合美元，鼠标移上去看每条链各有多少，点一下立即刷新（平时每分钟刷新一次）。价格直接读 PancakeSwap V3 BEM/USDT 1% 池（`0x3098d7a051045000d68ec0360753a40c8cabea31`）的当前成交价，USDT 按 1 美元计，只是一个池子的即时价格，仅供参考。余额直接从 BEM 合约读取：BNB Chain `0x5ce033b2bfca3af30b3e8c8457deaf776a8b695a`，X Layer `0x60e62efa9405d6873c5deabd4e6cc91c25363952`（LayerZero 跨链版本）；Base 上还没有 BEM。
 
 ## 界面语言
 

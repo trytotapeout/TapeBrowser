@@ -568,6 +568,8 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (!win) createWindow(); });
 
   // 启动稍等一会再扫，避免和首屏网页抢 RPC
+  // BEM 价格：没连钱包也显示
+  bem.start();
   // 上次退出前目录里的变化（有更新、持有人变化）先标到最近访问和书签上
   library.syncDirectory(directory.list());
   setTimeout(() => refreshDirectory(), 5000).unref?.();

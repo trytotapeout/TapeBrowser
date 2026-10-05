@@ -308,10 +308,10 @@
  "只加载了外部图片、字体或样式：{list}": "Only external images, fonts or styles: {list}",
  "{name}：读取失败": "{name}: failed to read",
  "{name}：{amount} BEM": "{name}: {amount} BEM",
- "BEM 余额（点击刷新）": "BEM balance (click to refresh)",
- "BEM 余额 {total}，{detail}": "BEM balance {total}, {detail}",
  "容器资产": "Container assets",
  "读取中…": "Loading…",
  "读取失败：{message}": "Failed to read: {message}",
- "{symbol} 读取失败": "{symbol} failed to read"
+ "{symbol} 读取失败": "{symbol} failed to read",
+ "BEM 价格：{price}（PancakeSwap BEM/USDT 池的即时价格，仅供参考）": "BEM price: {price} (spot price from the PancakeSwap BEM/USDT pool, for reference only)",
+ "点击刷新": "Click to refresh"
 }

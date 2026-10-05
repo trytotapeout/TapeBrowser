@@ -1,7 +1,10 @@
-// 钱包在各条链上的 BEM 余额（工具栏钱包按钮旁边显示）。不依赖 Electron。
+// BEM 价格和钱包在各条链上的 BEM 余额（工具栏钱包按钮旁边显示）。不依赖 Electron。
 //
-// 用每条链的内置节点池直接读 BEM 合约的 balanceOf，不经过钱包扩展、不调用第三方接口。
-// 钱包连上、换地址时立即刷新，之后每 REFRESH_EVERY 刷新一次；一条链读失败不影响其他链。
+// 价格：直接读 PancakeSwap V3 BEM/USDT 池的当前成交价（config.js 的 bemPricePool），USDT 按 1 美元计。
+//       只是一个池子的即时价格，交易量小的时候可能被拉高或砸低，仅供参考
+// 余额：用每条链的内置节点池直接读 BEM 合约的 balanceOf，钱包连上后才读
+// 都不经过钱包扩展、不调用第三方接口。启动、钱包连上、换地址时立即刷新，之后每 REFRESH_EVERY 刷新一次；
+// 一条链读失败不影响其他链
 //
 //   chains    { bnb: chain, xlayer: chain, base: chain }（chain.js）
 //   networks  config.js 里的网络列表，只查 bem 地址不为空的链
@@ -21,6 +24,9 @@ export function formatBem(v, decimals = BEM_DECIMALS) {
 
 export function createBemBalances({ chains, networks, onChange = () => {}, now = Date.now }) {
   const nets = networks.filter((n) => n.bem && chains[n.key]);
+  const priceNet = networks.find((n) => n.bemPricePool && chains[n.key]) || null;
+  // { usd } | { error } | null（还没读到）
+  let price = null;
   let account = null;
   // key → { balance: BigInt } | { error }
   let results = {};
@@ -29,18 +35,31 @@ export function createBemBalances({ chains, networks, onChange = () => {}, now =
   let timer = null;
 
   function view() {
-    if (!account) return null;
+    const p = price && 'usd' in price ? price.usd : null;
+    if (!account) return { price: p, balance: null };
     const per = nets.map((n) => {
       const r = results[n.key];
       return { key: n.key, name: n.name, balance: r && 'balance' in r ? formatBem(r.balance) : null, error: r?.error ?? null };
     });
     const ok = nets.filter((n) => results[n.key] && 'balance' in results[n.key]);
     const total = ok.reduce((s, n) => s + results[n.key].balance, 0n);
-    return { account, total: ok.length ? formatBem(total) : null, loading: !at, networks: per, at };
+    // 余额折合美元：BEM 是 8 位精度，先转成浮点数再乘价格
+    const usd = ok.length && p !== null ? (Number(total) / 10 ** BEM_DECIMALS) * p : null;
+    return { price: p, balance: { account, total: ok.length ? formatBem(total) : null, usd, loading: !at, networks: per, at } };
+  }
+
+  async function readPrice() {
+    if (!priceNet) return;
+    const pp = priceNet.bemPricePool;
+    try {
+      const usd = await chains[priceNet.key].v3Price(pp.pool, priceNet.bem, BEM_DECIMALS, pp.quoteDecimals);
+      price = Number.isFinite(usd) && usd > 0 ? { usd } : { error: '价格不合法' };
+    } catch (e) { price = { error: String(e?.message || e) }; }
   }
 
   async function refresh() {
-    if (!account) return;
+    await readPrice();
+    if (!account) { onChange(view()); return; }
     const me = ++seq;
     const who = account;
     const settled = await Promise.allSettled(nets.map((n) => chains[n.key].tokenBalance(n.bem, who)));
@@ -55,13 +74,13 @@ export function createBemBalances({ chains, networks, onChange = () => {}, now =
 
   function schedule() {
     clearInterval(timer);
-    timer = null;
-    if (!account) return;
     timer = setInterval(() => { refresh().catch(() => {}); }, REFRESH_EVERY);
     timer.unref?.();
   }
 
   return {
+    /** 开始定时刷新价格（没连钱包也显示价格） */
+    start() { schedule(); refresh().catch(() => {}); },
     /** 钱包当前地址（小写）；null 表示没连接 */
     setAccount(a) {
       const next = a ? String(a).toLowerCase() : null;
@@ -71,7 +90,6 @@ export function createBemBalances({ chains, networks, onChange = () => {}, now =
       at = 0;
       seq++;
       onChange(view());
-      schedule();
       refresh().catch(() => {});
     },
     refresh,
