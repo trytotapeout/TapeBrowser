@@ -30,7 +30,7 @@ nav a:hover { color: var(--fg); }
 .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 .btn { display: inline-block; padding: 10px 20px; border-radius: 8px; border: 1px solid var(--line); color: var(--fg); text-decoration: none; font-weight: 500; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.version { color: var(--muted); font-size: 14px; margin-top: 14px; }
+.hero .version { color: var(--muted); font-size: 14px; margin: 24px auto 0; }
 
 section { padding: 48px 0; border-top: 1px solid var(--line); }
 section h2 { font-size: 28px; margin: 0 0 8px; }
