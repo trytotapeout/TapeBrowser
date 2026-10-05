@@ -40,6 +40,8 @@
   let siteInfo = null;
   // 当前页面的多节点交叉校验结果 {url, status, nodes, mismatches}
   let verify = null;
+  // 当前网站容器里的资产 {url, assets} | {url, error}；打开网站信息面板时读一次
+  let assets = null;
   // 「持有的全部网站」：下一次显示新标签页时按这个持有人筛选
   let pendingOwner = null;
   // 上次查询网站信息时的 标签 id + 网址 + 是否在加载，变化时才重新查询
@@ -216,6 +218,7 @@
     const seen = info.seen || {};
     if (seen.prevOwner) row(tr('上一任持有人'), shortHex(seen.prevOwner) + (seen.ownerChangedAt ? tr('（{0}发现变更）', { 0: ago(seen.ownerChangedAt) }) : ''), seen.prevOwner);
     row(tr('容器'), shortHex(info.container), info.container);
+    if (info.container) row(tr('容器资产'), assetsText());
     row(tr('电路合约'), shortHex(info.circuits), info.circuits);
     row(tr('当前文件'), '/' + (info.path || ''));
     if (info.file) {
@@ -226,6 +229,35 @@
     }
     row(tr('交叉校验'), verifyText());
     row(tr('外部资源'), externalText(info.external || []));
+  }
+
+  /** 容器里的原生币和 BEM：数额按精度显示，小数最多 4 位 */
+  function assetsText() {
+    const t = active();
+    if (!assets || assets.url !== (t && t.url)) return tr('读取中…');
+    if (assets.error) return tr('读取失败：{message}', { message: assets.error });
+    return assets.assets.map((a) => (a.error ? tr('{symbol} 读取失败', { symbol: a.symbol }) : `${units(a.amount, a.decimals)} ${a.symbol}`)).join(tr('，'));
+  }
+
+  const units = (raw, decimals) => {
+    const v = BigInt(raw);
+    const base = 10n ** BigInt(decimals);
+    const frac = (v % base).toString().padStart(decimals, '0').slice(0, 4).replace(/0+$/, '');
+    const whole = (v / base).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return frac ? `${whole}.${frac}` : whole;
+  };
+
+  /** 打开网站信息面板时读一次容器资产 */
+  function loadAssets() {
+    const t = active();
+    const url = t && t.url;
+    if (!url || !isTape(url)) return;
+    assets = null;
+    tb.invoke('siteAssets').then((r) => {
+      if (!r || r.url !== url) return;
+      assets = r;
+      if (siteOpen) renderSite();
+    }).catch(() => {});
   }
 
   /** 不在链上的外部资源：脚本、接口能改变网页行为，不受链上校验保护 */
@@ -275,6 +307,7 @@
       siteKey = '';
       renderSite();
       refreshSite();
+      loadAssets();
     }
   }
 

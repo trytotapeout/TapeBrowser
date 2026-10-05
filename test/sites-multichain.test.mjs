@@ -97,3 +97,22 @@ test('交叉校验：两个节点一致为 ok，有节点读到别的容器或�
   reads = [{ node: 'n1', container: '0xsame', opened: true, sha256: sha(enc(body)) }];
   assert.equal((await s2.verify(1, 0, 'index.html')).status, 'single');
 });
+
+test('容器资产：网站所在链的原生币，有 BEM 的链再加 BEM；一项失败不影响另一项', async () => {
+  const mk = (bemFails) => ({
+    ...fakeChain({ cpus: many(3), sites: ['1-0'] }),
+    circuitInfos: async (items) => items.map(() => ({ exists: true, owner: '0xo', container: '0xc0ffee', opened: true })),
+    nativeBalance: async (a) => { assert.equal(a, '0xc0ffee'); return 15n * 10n ** 17n; },
+    tokenBalance: async (t, a) => { if (bemFails) throw new Error('rpc down'); assert.equal(a, '0xc0ffee'); return 12345678n; },
+  });
+  const s = createSites({ bnb: mk(false), xlayer: mk(true), base: mk(false) });
+  assert.deepEqual(await s.containerAssets(1, 0), [
+    { symbol: 'BNB', decimals: 18, amount: '1500000000000000000' },
+    { symbol: 'BEM', decimals: 8, amount: '12345678' },
+  ]);
+  const x = await s.containerAssets(1, 0, 2);
+  assert.equal(x[0].symbol, 'OKB');
+  assert.match(x[1].error, /rpc down/);
+  // Base 上没有 BEM，只查 ETH
+  assert.deepEqual((await s.containerAssets(1, 0, 3)).map((a) => a.symbol), ['ETH']);
+});

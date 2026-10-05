@@ -176,6 +176,11 @@ export function createChain(rpc, net = BSC) {
     return { symbol, decimals };
   }
 
+  /** 原生币余额（BNB / OKB / ETH，最小单位，BigInt） */
+  async function nativeBalance(owner, block = 'latest') {
+    return BigInt(await rpc('eth_getBalance', [lower(owner), block]));
+  }
+
   /** 代币余额（最小单位，BigInt） */
   async function tokenBalance(token, owner, block = 'latest') {
     const [v] = await view(token, encodeCall(SEL.balanceOf, ['address'], [lower(owner)]), ['uint'], block);
@@ -214,5 +219,5 @@ export function createChain(rpc, net = BSC) {
     return out;
   }
 
-  return { pinBlock, crossRead, tokenInfo, tokenBalance, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
+  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
 }

@@ -262,6 +262,14 @@ function registerIpc() {
     try { path = normalizePath(m[2] || '/'); } catch { return null; }
     try { return { ...(await sites.describe(site.tokenId, site.cpu, path, site.area)), seen: library.seenOf(t.url), external: audit.externalOf(originOf(t.url)) }; } catch (e) { return { error: String(e?.message || e) }; }
   });
+  // 当前网站容器里的原生币和 BEM（网站信息面板打开时读一次）
+  ui('siteAssets', async () => {
+    const t = tabs.active();
+    const m = /^tape:\/\/([^/?#]+)/i.exec(t?.url || '');
+    const site = m && parseHost(m[1]);
+    if (!site) return null;
+    try { return { url: t.url, assets: await sites.containerAssets(site.tokenId, site.cpu, site.area) }; } catch (e) { return { url: t.url, error: String(e?.message || e) }; }
+  });
   // 多节点交叉校验当前页面（网站信息面板和「链上」按钮用）
   ui('verifySite', async () => {
     const t = tabs.active();

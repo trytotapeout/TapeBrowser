@@ -166,6 +166,23 @@ export function createSites(chains, store = null) {
     return out;
   }
 
+  /**
+   * 容器里的资产（网站信息面板用）：网站所在链的原生币，以及这条链上有 BEM 时的 BEM 余额。
+   * 返回 [{symbol, amount, decimals}]（最小单位，字符串）；一项读失败时这一项带 error
+   */
+  async function containerAssets(tokenId, cpu, area = null) {
+    const net = netOf(area);
+    const chain = chainOf(area);
+    const s = await site(tokenId, cpu, area);
+    if (!s.container) return [];
+    const items = [{ symbol: net.currency, decimals: 18, read: () => chain.nativeBalance(s.container) }];
+    if (net.bem) items.push({ symbol: 'BEM', decimals: 8, read: () => chain.tokenBalance(net.bem, s.container) });
+    const settled = await Promise.allSettled(items.map((x) => x.read()));
+    return items.map((x, i) => (settled[i].status === 'fulfilled'
+      ? { symbol: x.symbol, decimals: x.decimals, amount: settled[i].value.toString() }
+      : { symbol: x.symbol, decimals: x.decimals, error: String(settled[i].reason?.message || settled[i].reason) }));
+  }
+
   /** 网站首页的文件信息（持有人、首页是否更新的记录用）：{owner, sha256}；没有开通或没有首页时 sha256 为 null */
   async function indexInfo(tokenId, cpu, area = null) {
     const s = await site(tokenId, cpu, area);
@@ -261,5 +278,5 @@ export function createSites(chains, store = null) {
     };
   }
 
-  return { cpus, site, readFile, describe, verify, indexInfo, enumerateDigits, scanWallet, networks: enabled };
+  return { cpus, site, readFile, describe, verify, indexInfo, containerAssets, enumerateDigits, scanWallet, networks: enabled };
 }
