@@ -52,6 +52,9 @@ body.mac #tabstrip { padding-left: 80px; }
 
 #content { flex: 1; position: relative; overflow: auto; }
 .page { max-width: 680px; margin: 48px auto; padding: 0 24px; font-size: 14px; }
+/* 新标签页主要是网站列表（标题、电路名、日期），放宽；开头的说明文字仍限制行宽，方便阅读 */
+#newtab-page { max-width: 1040px; }
+#newtab-page > p, #newtab-page > .examples { max-width: 720px; }
 .page h1 { font-size: 22px; margin: 0 0 8px; }
 .page h2 { font-size: 15px; margin: 28px 0 8px; }
 .muted { color: var(--muted); }
