@@ -31,7 +31,7 @@
         <h1>TapeBrowser</h1>
         <p>TapeKit DeWEB 网站的桌面浏览器。网站文件直接从链上读取并校验，不经过任何网关服务器。</p>
         <div class="cta">
-          <a class="btn primary" href="#download">下载 0.10.1</a>
+          <a class="btn primary" href="#download">下载 0.11.0</a>
           <a class="btn" href="https://github.com/trytotapeout/TapeBrowser">查看源代码</a>
         </div>
         <p class="version">macOS · Windows · Linux｜GPL-3.0-or-later 开源</p>
@@ -55,6 +55,8 @@
           <div class="card"><h3>钱包不导入私钥</h3><p>桥接系统浏览器里的钱包扩展（MetaMask 等），不依赖 WalletConnect 这类中心化中继，每次签名都先显示真实来源；链不对时一键切换。</p></div>
           <div class="card"><h3>全站目录</h3><p>自动收录三条链上所有有首页的网站，可以按标题、编号、持有人搜索，首页更新过的标「有更新」。</p></div>
           <div class="card"><h3>BEM 价格和资产</h3><p>工具栏显示 BEM 价格和钱包在两条链上的 BEM 总数；网站信息面板显示容器里的原生币和 BEM。都直接从链上读。</p></div>
+          <div class="card"><h3>电路身份和打赏</h3><p>一枚 TapeBrowser 电路就是一个可以转让的身份，资产放在电路的容器里；喜欢的网站可以从身份的容器直接打赏 BEM，打赏公开记录在链上。</p></div>
+          <div class="card"><h3>新上线</h3><p>新标签页列出最近 7 天第一次发布的网站，按首页上链时间排序，新网站一上线就能被看到。</p></div>
           <div class="card"><h3>离线兜底</h3><p>文件按 SHA-256 缓存在本机，每次仍先查链上最新版本；读链失败时显示上次缓存的版本。</p></div>
         </div>
         <p class="note">TapeBrowser 能证明你看到的内容来自链上、没有被篡改，但判断不了网站作者本身有没有恶意。签名和交易前请自己核对。</p>
@@ -64,18 +66,18 @@
     <section id="download" aria-labelledby="download-title">
       <div class="wrap">
         <h2 id="download-title">下载</h2>
-        <p class="lead">最新版本 0.10.1，发布于 2026-10-06。所有版本见 <a href="https://github.com/trytotapeout/TapeBrowser/releases">GitHub Releases</a>。</p>
+        <p class="lead">最新版本 0.11.0，发布于 2026-10-07。所有版本见 <a href="https://github.com/trytotapeout/TapeBrowser/releases">GitHub Releases</a>。</p>
         <table class="downloads">
           <thead><tr><th scope="col">平台</th><th scope="col">文件</th><th scope="col">下载</th></tr></thead>
           <tbody>
-            <tr><td>macOS（Apple 芯片）</td><td><code>TapeBrowser-0.10.1-mac-arm64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.10.1/TapeBrowser-0.10.1-mac-arm64.dmg">下载（121 MB）</a></td></tr>
-            <tr><td>macOS（Intel）</td><td><code>TapeBrowser-0.10.1-mac-x64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.10.1/TapeBrowser-0.10.1-mac-x64.dmg">下载（127 MB）</a></td></tr>
-            <tr><td>Windows（x64）</td><td><code>TapeBrowser-0.10.1-win-x64-setup.exe</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.10.1/TapeBrowser-0.10.1-win-x64-setup.exe">下载（106 MB）</a></td></tr>
-            <tr><td>Linux（x86_64）</td><td><code>TapeBrowser-0.10.1-linux-x86_64.AppImage</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.10.1/TapeBrowser-0.10.1-linux-x86_64.AppImage">下载（119 MB）</a></td></tr>
+            <tr><td>macOS（Apple 芯片）</td><td><code>TapeBrowser-0.11.0-mac-arm64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.11.0/TapeBrowser-0.11.0-mac-arm64.dmg">下载（121 MB）</a></td></tr>
+            <tr><td>macOS（Intel）</td><td><code>TapeBrowser-0.11.0-mac-x64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.11.0/TapeBrowser-0.11.0-mac-x64.dmg">下载（127 MB）</a></td></tr>
+            <tr><td>Windows（x64）</td><td><code>TapeBrowser-0.11.0-win-x64-setup.exe</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.11.0/TapeBrowser-0.11.0-win-x64-setup.exe">下载（106 MB）</a></td></tr>
+            <tr><td>Linux（x86_64）</td><td><code>TapeBrowser-0.11.0-linux-x86_64.AppImage</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.11.0/TapeBrowser-0.11.0-linux-x86_64.AppImage">下载（119 MB）</a></td></tr>
           </tbody>
         </table>
         <div class="hint">
-          <p>每个文件的 SHA-256 见 <a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.10.1/SHA256SUMS.txt">SHA256SUMS.txt</a>。安装包还没有签名，第一次打开时：</p>
+          <p>每个文件的 SHA-256 见 <a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.11.0/SHA256SUMS.txt">SHA256SUMS.txt</a>。安装包还没有签名，第一次打开时：</p>
           <ul>
             <li>macOS：按下面的步骤操作</li>
             <li>Windows：SmartScreen 提示时点「更多信息 → 仍要运行」</li>
@@ -101,6 +103,15 @@
     <section id="changelog" class="log" aria-labelledby="changelog-title">
       <div class="wrap">
         <h2 id="changelog-title">更新日志</h2>
+
+        <h3>0.11.0 <span class="date">2026-10-07</span></h3>
+        <ul>
+          <li>浏览器身份：用一枚 TapeBrowser 电路（BSC 第 1196 号、X Layer 第 281 号处理器）登录，一枚电路就是一个身份；工具栏显示身份和它容器里的 BEM，电路转走或换了钱包会自动退出</li>
+          <li>打赏：在网站信息面板里，从身份的容器把 BEM 打赏给网站的容器。打赏前先在链上模拟，容器合约的手续费会写在确认框里</li>
+          <li>新上线：新标签页列出最近 7 天第一次发布首页的网站</li>
+          <li>新标签页放宽，网站列表显示得更完整；链的简称改成 BSC</li>
+          <li>身份容器没开通时，可以直接在新标签里打开 TapeOut 官网去开通</li>
+        </ul>
 
         <h3>0.10.1 <span class="date">2026-10-06</span></h3>
         <ul>
