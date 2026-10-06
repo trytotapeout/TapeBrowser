@@ -303,6 +303,7 @@
     $('siteinfo').hidden = !on;
     $('site-btn').setAttribute('aria-expanded', String(on));
     if (on) {
+      if (idOpen) setIdentityPanel(false);
       // 打开面板时重新读一次，显示最新状态
       siteKey = '';
       renderSite();
@@ -539,7 +540,12 @@
   $('forward').addEventListener('click', () => tb.invoke('forward'));
   $('reload').addEventListener('click', () => tb.invoke(active() && active().loading ? 'stop' : 'reload'));
   $('settings-btn').addEventListener('click', () => setSettings(!settingsOpen));
-  $('bem').addEventListener('click', () => tb.invoke('refreshBem'));
+  // 连上钱包后点 BEM 按钮打开身份面板；没连钱包时点它只刷新价格
+  $('bem').addEventListener('click', () => {
+    if (ident && ident.account) setIdentityPanel(!idOpen);
+    else tb.invoke('refreshBem');
+  });
+  $('id-close').addEventListener('click', () => setIdentityPanel(false));
   $('wallet').addEventListener('click', () => {
     if (!wallet.ready) { tb.invoke('openBridge'); return; }
     // 红色（链不对）时直接请钱包切到当前网站所在的链
@@ -588,17 +594,125 @@
     if (switched && findOpen) runFind(false);
   });
   tb.on('wallet', (w) => { wallet = w || {}; renderWallet(); });
-  tb.on('bem', (v) => renderBem(v));
+  let bemView = null;
+  // 浏览器身份 {account, scanning, error, identities, current}
+  let ident = null;
+  let idOpen = false;
+  tb.on('bem', (v) => { bemView = v; renderBem(v); });
+  tb.on('identity', (v) => { ident = v; renderBem(bemView); renderIdentity(); });
+
+  /** 浏览器身份面板：当前身份、容器状态和资产，以及钱包持有的全部身份 */
+  function setIdentityPanel(on) {
+    idOpen = on;
+    $('idpanel').hidden = !on;
+    $('bem').setAttribute('aria-expanded', String(on));
+    if (on) { if (siteOpen) setSite(false); renderIdentity(); tb.invoke('identityRefresh').catch(() => {}); }
+  }
+
+  function renderIdentity() {
+    if (!idOpen) return;
+    const v = ident || {};
+    const cur = v.current;
+    $('id-status').textContent = !v.account ? tr('没有连接钱包') : v.scanning && !v.identities ? tr('正在查找你持有的身份…') : cur ? tr('已登录 {label}', { label: cur.label }) : tr('未登录');
+    const dl = $('id-list');
+    dl.textContent = '';
+    const row = (name, value, copy) => {
+      const dd = document.createElement('dd');
+      dd.append(Object.assign(document.createElement('span'), { className: 'v', textContent: value ?? '—', title: copy || value || '' }));
+      if (copy) {
+        const c = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('复制') });
+        c.addEventListener('click', () => tb.invoke('copy', copy).then(() => { c.textContent = tr('已复制'); setTimeout(() => { c.textContent = tr('复制'); }, 1200); }));
+        dd.append(c);
+      }
+      dl.append(Object.assign(document.createElement('dt'), { textContent: name }), dd);
+      return dd;
+    };
+    if (cur) {
+      row(tr('身份'), `${cur.label}（${cur.networkName}）`);
+      row(tr('容器'), shortHex(cur.container), cur.container);
+      if (cur.opened === false) {
+        row(tr('容器资产'), tr('容器还没开通，需要持有人先开通，才能存放资产和数据'));
+      } else {
+        row(tr('容器资产'), (cur.assets || []).map((a) => (a.error ? tr('{symbol} 读取失败', { symbol: a.symbol }) : `${units(a.amount, a.decimals)} ${a.symbol}`)).join(tr('，')) || tr('读取中…'));
+      }
+      if (cur.error) row(tr('错误'), cur.error);
+    }
+    if (v.error) row(tr('提示'), tr('有一条链读取失败：{message}', { message: v.error }));
+
+    const box = $('id-choose');
+    box.textContent = '';
+    if (!v.account) {
+      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: tr('连接钱包') });
+      b.addEventListener('click', () => tb.invoke('openBridge'));
+      box.append(b);
+      return;
+    }
+    const list = v.identities;
+    if (!list) { box.append(Object.assign(document.createElement('span'), { className: 'muted', textContent: tr('正在查找…') })); return; }
+    if (!list.length) {
+      box.append(Object.assign(document.createElement('span'), { className: 'muted', textContent: tr('这个钱包还没有 TapeBrowser 电路，暂时不能登录。') }));
+      return;
+    }
+    const byNet = {};
+    for (const x of list) (byNet[x.networkName] ||= []).push(x);
+    for (const [net, items] of Object.entries(byNet)) {
+      const r = Object.assign(document.createElement('div'), { className: 'row' });
+      r.append(Object.assign(document.createElement('span'), { className: 'net-title', textContent: net }));
+      for (const x of items) {
+        const on = Boolean(cur && cur.network === x.network && cur.cpu === x.cpu && cur.tokenId === x.tokenId);
+        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'pick', textContent: x.label });
+        b.setAttribute('aria-pressed', String(on));
+        b.title = on ? tr('当前身份') : tr('用 {label} 登录', { label: x.label });
+        b.addEventListener('click', () => { if (!on) tb.invoke('identityLogin', { network: x.network, cpu: x.cpu, tokenId: x.tokenId }).catch((e) => notice(errText(e), 'error')); });
+        r.append(b);
+      }
+      box.append(r);
+    }
+    if (cur) {
+      const out = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('退出登录') });
+      out.addEventListener('click', () => tb.invoke('identityLogout'));
+      box.append(out);
+    }
+  }
+
+  /** 容器资产里某个币的数量（显示用）；没读到返回 null */
+  const assetOf = (cur, symbol) => {
+    const a = (cur.assets || []).find((x) => x.symbol === symbol && !x.error);
+    return a ? { text: units(a.amount, a.decimals), value: Number(BigInt(a.amount)) / 10 ** a.decimals } : null;
+  };
+
+  /** 登录后的按钮：身份编号 · 容器里的 BEM ≈ 美元；鼠标移上去看容器资产、钱包余额和价格 */
+  function renderIdentityButton(b, v, cur, price) {
+    const span = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
+    const bem = assetOf(cur, 'BEM');
+    b.append(span('ident', cur.label), span('sep', '·'));
+    if (!cur.opened && cur.opened !== undefined) b.append(span('unit', tr('容器未开通')));
+    else {
+      b.append(document.createTextNode(bem ? bem.text : '…'), span('unit', 'BEM'));
+      if (bem && v && v.price !== null && bem.value > 0) b.append(span('unit', '≈ $' + usd(bem.value * v.price)));
+    }
+    const lines = [tr('身份 {label}（{network}）的容器：', { label: cur.label, network: cur.networkName })];
+    if (cur.opened === false) lines.push('  ' + tr('容器还没开通'));
+    else for (const a of cur.assets || []) lines.push('  ' + (a.error ? tr('{symbol} 读取失败', { symbol: a.symbol }) : `${units(a.amount, a.decimals)} ${a.symbol}`));
+    const bal = v && v.balance;
+    if (bal) lines.push(tr('你的钱包：{amount} BEM', { amount: bal.total ?? '…' }) + ' (' + bal.networks.map((n) => `${n.name} ${n.balance ?? '…'}`).join(' / ') + ')');
+    lines.push(tr('BEM 价格：{price}', { price: price ?? tr('读取失败') }));
+    b.title = lines.join('\n') + '\n' + tr('点击管理身份');
+    b.setAttribute('aria-label', lines.join(tr('；')));
+  }
 
   /** 钱包按钮旁的 BEM：没连钱包只显示价格；连上后显示余额和折合美元，鼠标移上去看各条链 */
   const usd = (n) => (n >= 100 ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 4 : 2 }));
   function renderBem(v) {
     const b = $('bem');
-    b.hidden = !v || (v.price === null && !v.balance);
+    b.setAttribute('aria-expanded', String(idOpen));
+    b.hidden = !(ident && ident.current) && (!v || (v.price === null && !v.balance));
     if (b.hidden) return;
     b.textContent = '';
     b.className = '';
     const price = v.price !== null ? '$' + usd(v.price) : null;
+    const cur = ident && ident.current;
+    if (cur) { renderIdentityButton(b, v, cur, price); return; }
     const lines = [tr('BEM 价格：{price}（PancakeSwap BEM/USDT 池的即时价格，仅供参考）', { price: price ?? tr('读取失败') })];
     const bal = v.balance;
     const span = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
@@ -611,7 +725,7 @@
       if (bal.networks.some((n) => n.error)) b.classList.add('stale');
       for (const n of bal.networks) lines.push(n.error ? tr('{name}：读取失败', { name: n.name }) : tr('{name}：{amount} BEM', { name: n.name, amount: n.balance ?? '…' }));
     }
-    b.title = lines.join('\n') + '\n' + tr('点击刷新');
+    b.title = lines.join('\n') + '\n' + (bal ? tr('点击登录浏览器身份') : tr('点击刷新'));
     b.setAttribute('aria-label', lines.join(tr('；')));
   }
 

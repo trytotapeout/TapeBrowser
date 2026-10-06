@@ -18,6 +18,7 @@ import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
 import { createAnalyzer } from './risk.js';
 import { createPageAudit } from './page-audit.js';
 import { createBemBalances } from './bem.js';
+import { createIdentity } from './identity.js';
 import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
 import { createRequire } from 'node:module';
 const i18n = createRequire(import.meta.url)('../i18n/i18n.cjs');
@@ -62,6 +63,8 @@ function tokenInfo(net, token) {
 }
 // 钱包在各条链上的 BEM 余额，工具栏钱包按钮旁显示
 const bem = createBemBalances({ chains, networks: NETWORKS, onChange: (v) => send('bem', v) });
+// 浏览器身份：指定处理器下的一枚电路，资产和数据在它的容器里
+const identity = createIdentity({ chains, sites, store: settings.identityStore, onChange: (v) => send('identity', v) });
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
@@ -203,7 +206,10 @@ function registerIpc() {
     if (!win || e.sender !== win.webContents) throw new Error('forbidden');
     return fn(...args);
   });
-  ui('ready', () => { tabs.push(); send('wallet', walletView()); send('bem', bem.view()); pushLibrary(); });
+  ui('ready', () => { tabs.push(); send('wallet', walletView()); send('bem', bem.view()); send('identity', identity.view()); pushLibrary(); });
+  ui('identityLogin', (x) => identity.login(x || {}));
+  ui('identityLogout', () => identity.logout());
+  ui('identityRefresh', () => identity.refresh());
   ui('refreshBem', () => bem.refresh());
   // 钱包和当前网站不在同一条链上时，点钱包按钮请钱包切过去
   ui('switchChain', async () => {
@@ -567,7 +573,7 @@ app.whenReady().then(async () => {
   const port = await bridge.start();
   if (port !== settings.get('bridgePort')) settings.set('bridgePort', port);
   host = createProviderHost({ bridge, rpcs, settings, openBridge: () => shell.openExternal(bridge.url()), confirm, emit });
-  bridge.on('state', (s) => { send('wallet', walletView()); bem.setAccount(s.ready ? s.accounts?.[0] : null); });
+  bridge.on('state', (s) => { send('wallet', walletView()); bem.setAccount(s.ready ? s.accounts?.[0] : null); identity.setAccount(s.ready ? s.accounts?.[0] : null); });
 
   registerIpc();
   // ready 之后系统语言才准

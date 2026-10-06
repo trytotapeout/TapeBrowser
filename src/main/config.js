@@ -126,3 +126,10 @@ export const READ_RANGE = 96000;
 export const MULTICALL_BATCH = 400;
 // 扫描钱包时单个处理器最多扫多少个编号
 export const MAX_IDS_PER_CPU = 50000;
+
+// 浏览器身份：这些处理器下的电路可以作为 TapeBrowser 的登录身份，一枚电路就是一个身份。
+// 身份的资产和数据放在电路的容器里，电路转让后身份跟着走（加密数据新持有人解不开）
+export const IDENTITY_PROCESSORS = Object.freeze([
+  Object.freeze({ network: 'bnb', cpu: 1196, circuits: '0xc982844b0f4a42443ba58f267099d128300f86a2', name: 'TapeBrowser' }),
+  Object.freeze({ network: 'xlayer', cpu: 281, circuits: '0xf78251b38aac35d00ccfc5b69c2a35363bf16275', name: 'TapeBrowser' }),
+]);

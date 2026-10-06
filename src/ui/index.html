@@ -24,7 +24,7 @@
       </form>
       <button id="zoom" type="button" title="点击恢复实际大小 (⌘0)" hidden></button>
       <button id="bookmark" class="icon" type="button" title="加入书签 (⌘D)" aria-label="加入书签" aria-pressed="false">☆</button>
-      <button id="bem" type="button" hidden></button>
+      <button id="bem" type="button" aria-expanded="false" aria-controls="idpanel" hidden></button>
       <button id="wallet" type="button" aria-live="polite">连接钱包</button>
       <button id="settings-btn" class="icon" type="button" title="设置 (⌘,)" aria-label="设置">⚙</button>
     </div>
@@ -32,6 +32,12 @@
     <section id="siteinfo" aria-label="网站信息" hidden>
       <div class="si-head"><strong id="si-label"></strong><span id="si-status"></span><button id="si-close" class="icon" type="button" aria-label="关闭网站信息">×</button></div>
       <dl id="si-list"></dl>
+    </section>
+    <section id="idpanel" aria-label="浏览器身份" hidden>
+      <div class="si-head"><strong>浏览器身份</strong><span id="id-status" class="muted"></span><button id="id-close" class="icon" type="button" aria-label="关闭浏览器身份">×</button></div>
+      <p class="muted small">一枚 TapeBrowser 电路就是一个身份。身份的资产和数据放在电路的容器里，电路转让后，容器里的资产也跟着转给新持有人。</p>
+      <dl id="id-list"></dl>
+      <div id="id-choose"></div>
     </section>
     <form id="findbar" role="search" hidden>
       <input id="find-input" type="text" spellcheck="false" autocomplete="off" placeholder="在页面中查找" aria-label="在页面中查找">
