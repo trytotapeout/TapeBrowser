@@ -167,7 +167,6 @@
  "链 ": "Chain ",
  "未知链": "Unknown chain",
  "：": ": ",
- "，这个网站在 {0} 上，请在钱包里切换": ". This site is on {0}, switch networks in your wallet",
  "，不是 TapeKit 支持的链": ", not a chain TapeKit supports",
  "在浏览器里选择钱包…": "Choose a wallet in your browser…",
  "桥接页面已打开，请在页面里选择钱包": "The bridge page is open, choose a wallet there",
@@ -313,5 +312,10 @@
  "读取失败：{message}": "Failed to read: {message}",
  "{symbol} 读取失败": "{symbol} failed to read",
  "BEM 价格：{price}（PancakeSwap BEM/USDT 池的即时价格，仅供参考）": "BEM price: {price} (spot price from the PancakeSwap BEM/USDT pool, for reference only)",
- "点击刷新": "Click to refresh"
+ "点击刷新": "Click to refresh",
+ "，这个网站在 {0} 上，点击切换": ". This site is on {0}, click to switch",
+ "正在请钱包切换到 {name}，请在浏览器的钱包扩展里确认…": "Asking your wallet to switch to {name}. Confirm in your browser's wallet extension…",
+ "钱包已切换到 {name}": "Wallet switched to {name}",
+ "已取消切换": "Switch cancelled",
+ "切换失败：{message}，可以在钱包里手动切到 {name}": "Switch failed: {message}. You can switch to {name} in your wallet"
 }

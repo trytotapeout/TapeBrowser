@@ -1,7 +1,7 @@
 {
   "name": "tapebrowser",
   "productName": "TapeBrowser",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "TapeKit DeWEB 桌面浏览器：打开 tape:// 电路网站，桥接浏览器钱包扩展",
   "repository": {
     "type": "git",

@@ -9,7 +9,7 @@ import { createChain } from './chain.js';
 import { createSites } from './sites.js';
 import { createTapeHandler } from './tape-protocol.js';
 import { createBridgeServer } from './bridge-server.js';
-import { createProviderHost, providerError } from './provider-host.js';
+import { createProviderHost, providerError, homeNetwork } from './provider-host.js';
 import { createTabs, originOf, ALLOWED } from './tabs.js';
 import { createLibrary } from './library.js';
 import { createContentStore } from './content-store.js';
@@ -205,6 +205,21 @@ function registerIpc() {
   });
   ui('ready', () => { tabs.push(); send('wallet', walletView()); send('bem', bem.view()); pushLibrary(); });
   ui('refreshBem', () => bem.refresh());
+  // 钱包和当前网站不在同一条链上时，点钱包按钮请钱包切过去
+  ui('switchChain', async () => {
+    const origin = originOf(tabs.active()?.url || '');
+    const net = homeNetwork(origin);
+    if (!net) return 'none';
+    notify(tr('正在请钱包切换到 {name}，请在浏览器的钱包扩展里确认…', { name: net.name }));
+    try {
+      const r = await host.switchChain(origin);
+      if (r === 'switched') notify(tr('钱包已切换到 {name}', { name: net.name }), 'ok');
+      return r;
+    } catch (e) {
+      notify(Number(e?.code) === 4001 ? tr('已取消切换') : tr('切换失败：{message}，可以在钱包里手动切到 {name}', { message: String(e?.message || e), name: net.name }), 'error');
+      return 'failed';
+    }
+  });
   ui('newTab', () => tabs.open());
   ui('closeTab', (id) => tabs.close(id));
   ui('activate', (id) => tabs.activate(id));

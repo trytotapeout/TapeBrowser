@@ -170,3 +170,28 @@ test('钱包已经在网站所在的链上、或是普通网站：连接时不�
   await t2.host.handle('https://example.com', 'eth_requestAccounts');
   assert.ok(![...t.calls, ...t2.calls].some((c) => c.method === 'wallet_switchEthereumChain'));
 });
+
+test('switchChain：点红色钱包按钮时请钱包切到网站所在的链', async () => {
+  const t = setup();
+  // 钱包没连：什么也不做
+  assert.equal(await t.host.switchChain(SITE), 'none');
+  t.set({ connected: true, ready: true, accounts: [ACC], chainId: '0xc4' });
+  assert.equal(await t.host.switchChain(SITE), 'switched');
+  assert.deepEqual(t.calls.at(-1), { method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }], origin: SITE });
+  // 已经在同一条链上
+  t.set({ chainId: '0x38' });
+  assert.equal(await t.host.switchChain(SITE), 'already');
+  // 普通网站没有所在的链
+  assert.equal(await t.host.switchChain('https://example.com'), 'none');
+});
+
+test('switchChain：钱包里没有这条链就先添加；用户拒绝时抛出 4001', async () => {
+  const t = setup({ switchError: Object.assign(new Error('Unrecognized chain'), { code: 4902 }) });
+  t.set({ connected: true, ready: true, accounts: [ACC], chainId: '0x38' });
+  assert.equal(await t.host.switchChain(XSITE), 'switched');
+  assert.equal(t.calls.at(-1).method, 'wallet_addEthereumChain');
+  assert.equal(t.calls.at(-1).params[0].chainId, '0xc4');
+  const r = setup({ switchError: Object.assign(new Error('User rejected'), { code: 4001 }) });
+  r.set({ connected: true, ready: true, accounts: [ACC], chainId: '0x38' });
+  await assert.rejects(r.host.switchChain(XSITE), (e) => e.code === 4001);
+});

@@ -459,7 +459,7 @@
       const wrongChain = Boolean(wallet.chainId && (want ? wallet.chainId !== want : !CHAINS[wallet.chainId]));
       b.textContent = (wrongChain ? '⚠ ' : '') + wallet.account.slice(0, 6) + '…' + wallet.account.slice(-4);
       b.title = (wallet.wallet || tr('钱包')) + tr('：') + chainName(wallet.chainId)
-        + (wrongChain ? (want ? tr('，这个网站在 {0} 上，请在钱包里切换', { 0: CHAINS[want] }) : tr('，不是 TapeKit 支持的链')) : '');
+        + (wrongChain ? (want ? tr('，这个网站在 {0} 上，点击切换', { 0: CHAINS[want] }) : tr('，不是 TapeKit 支持的链')) : '');
       b.classList.add(wrongChain ? 'warn' : 'ready');
     } else if (wallet.connected) {
       b.textContent = tr('在浏览器里选择钱包…');
@@ -540,7 +540,12 @@
   $('reload').addEventListener('click', () => tb.invoke(active() && active().loading ? 'stop' : 'reload'));
   $('settings-btn').addEventListener('click', () => setSettings(!settingsOpen));
   $('bem').addEventListener('click', () => tb.invoke('refreshBem'));
-  $('wallet').addEventListener('click', () => (wallet.ready ? setSettings(true) : tb.invoke('openBridge')));
+  $('wallet').addEventListener('click', () => {
+    if (!wallet.ready) { tb.invoke('openBridge'); return; }
+    // 红色（链不对）时直接请钱包切到当前网站所在的链
+    if ($('wallet').classList.contains('warn') && tabChain(active())) { tb.invoke('switchChain'); return; }
+    setSettings(true);
+  });
   $('open-bridge').addEventListener('click', () => tb.invoke('openBridge'));
   $('disconnect-wallet').addEventListener('click', () => tb.invoke('disconnectWallet'));
   /** 每条链一个节点输入框，各自保存 */

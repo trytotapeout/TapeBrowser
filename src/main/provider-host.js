@@ -188,6 +188,22 @@ export function createProviderHost({ bridge, rpc, rpcs, settings, openBridge, co
 
   return {
     handle,
+    /**
+     * 用户点了红色的钱包按钮：请钱包切到这个网站所在的链（钱包里还没有就先添加）。
+     * 返回 'switched' | 'already' | 'none'（不是电路网站或钱包没连）；钱包拒绝等失败时抛出
+     */
+    async switchChain(origin) {
+      const home = homeNetwork(origin);
+      if (!home || !bridge.state.ready) return 'none';
+      if (bridge.state.chainId === home.chainIdHex) return 'already';
+      try {
+        await bridge.request('wallet_switchEthereumChain', [{ chainId: home.chainIdHex }], origin);
+      } catch (e) {
+        if (Number(e?.code) !== 4902) throw e;
+        await bridge.request('wallet_addEthereumChain', [addChainParams(home)], origin);
+      }
+      return 'switched';
+    },
     /** 网页加载时取初始状态 */
     initial: (origin) => ({ chainId: chainId(origin), accounts: accountsFor(origin) }),
     revoke(origin) {
