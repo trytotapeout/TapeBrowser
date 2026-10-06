@@ -106,10 +106,16 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
         title: prev && prev.titleSha === f.sha256 ? prev.title : '',
         titleSha: prev && prev.titleSha === f.sha256 ? prev.titleSha : null,
         firstSeen: prev?.firstSeen ?? now(),
+        // 首页最早的上链时间（秒）：第一次收录时就是首页当时的上链时间，之后首页更新也不变。
+        // 「新上线」按它排序，不用本机第一次扫到的时间（新装的浏览器会把所有网站都当成新的）
+        firstPublished: prev?.firstPublished ?? earliest(prev?.updatedAt, f.updatedAt),
       });
     });
     return { found: out, waiting };
   }
+
+  // 两个上链时间里较早的（秒），都没有时为 null
+  const earliest = (...ts) => { const v = ts.filter((x) => Number.isFinite(x) && x > 0); return v.length ? Math.min(...v) : null; };
 
   const pick = (s) => ({ tokenId: s.tokenId, cpu: s.cpu, circuits: s.circuits });
 

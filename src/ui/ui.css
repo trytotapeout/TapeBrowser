@@ -139,4 +139,7 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 #id-choose .net-title { color: var(--muted); font-size: 12px; margin-right: 2px; }
 #id-choose .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; width: 100%; }
 #bem .ident { font-family: ui-monospace, Menlo, monospace; }
+#bem.signed-in { border-color: var(--ok); }
+#bem .person { width: 13px; height: 13px; color: var(--ok); vertical-align: -2px; margin-right: 5px; }
 #bem[aria-expanded="true"] { border-color: var(--accent); }
+.tip-amount { width: 80px; height: 22px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--input); color: var(--fg); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }

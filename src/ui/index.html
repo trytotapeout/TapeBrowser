@@ -63,6 +63,7 @@
       <div id="lib-tabs" class="seg" role="tablist" aria-label="网站列表">
         <button id="tab-history" type="button" role="tab" data-panel="history" aria-controls="panel-history">最近访问</button>
         <button id="tab-bookmarks" type="button" role="tab" data-panel="bookmarks" aria-controls="panel-bookmarks">书签</button>
+        <button id="tab-new" type="button" role="tab" data-panel="new" aria-controls="panel-new">新上线</button>
         <button id="tab-directory" type="button" role="tab" data-panel="directory" aria-controls="panel-directory">全部网站 <span id="dir-count" class="muted"></span></button>
       </div>
 
@@ -75,6 +76,12 @@
       <section id="panel-bookmarks" role="tabpanel" aria-labelledby="tab-bookmarks" hidden>
         <ul id="bookmarks" class="list links"></ul>
         <p id="bookmarks-empty" class="muted" hidden>还没有书签。打开网站后按 ⌘D 或点地址栏右边的 ☆ 加入。</p>
+      </section>
+
+      <section id="panel-new" role="tabpanel" aria-labelledby="tab-new" hidden>
+        <p class="muted dir-status">最近 7 天第一次发布首页的网站，按发布时间排序。</p>
+        <ul id="newsites" class="list links"></ul>
+        <p id="newsites-empty" class="muted" hidden>最近 7 天还没有新网站。</p>
       </section>
 
       <section id="panel-directory" role="tabpanel" aria-labelledby="tab-directory" hidden>

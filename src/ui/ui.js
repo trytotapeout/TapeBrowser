@@ -56,7 +56,8 @@
   // TapeKit 网站所在的三条链
   const CHAINS = { '0x38': 'BNB Chain', '0xc4': 'X Layer', '0x2105': 'Base' };
   const NET_NAMES = { bnb: 'BNB Chain', xlayer: 'X Layer', base: 'Base' };
-  const NET_SHORT = { bnb: 'BNB', xlayer: 'X Layer', base: 'Base' };
+  // 简称：BNB Chain 写成 BSC，免得和 BNB 币的数量混在一起
+  const NET_SHORT = { bnb: 'BSC', xlayer: 'X Layer', base: 'Base' };
   /** 当前标签是电路网站时，它所在链的 chainId：tape://1-2-344 → X Layer */
   function tabChain(t) {
     const m = /^tape:\/\/\d+-(?:(\d+)-)?\d+(?:[/?#]|$)/i.exec((t && t.url) || '');
@@ -209,6 +210,7 @@
         dd.append(c);
       }
       dl.append(Object.assign(document.createElement('dt'), { textContent: name }), dd);
+      return dd;
     };
     if (info.error) { row(tr('错误'), info.error); return; }
     row(tr('链'), info.network || 'BNB Chain');
@@ -229,6 +231,7 @@
     }
     row(tr('交叉校验'), verifyText());
     row(tr('外部资源'), externalText(info.external || []));
+    if (info.container && info.opened) tipRow(row, info);
   }
 
   /** 容器里的原生币和 BEM：数额按精度显示，小数最多 4 位 */
@@ -258,6 +261,45 @@
       assets = r;
       if (siteOpen) renderSite();
     }).catch(() => {});
+  }
+
+  /** 「去官网开通」链接：在新标签里打开 TapeOut 官网 */
+  function openSiteLink(dd) {
+    const a = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('去官网开通') });
+    a.title = 'https://tapeout.net/';
+    a.addEventListener('click', () => { setIdentityPanel(false); setSite(false); tb.invoke('openContainerSite'); });
+    dd.append(a);
+  }
+
+  /** 打赏一行：登录了同一条链上的身份才能打赏 */
+  function tipRow(row, info) {
+    const cur = ident && ident.current;
+    const netKey = { 'BNB Chain': 'bnb', 'X Layer': 'xlayer', Base: 'base' }[info.network || 'BNB Chain'];
+    if (!cur) { row(tr('打赏'), ident && ident.account ? tr('登录浏览器身份后，可以从身份的容器打赏 BEM 给这个网站') : tr('连接钱包并登录浏览器身份后可以打赏')); return; }
+    if (cur.network !== netKey) {
+      const dd = row(tr('打赏'), tr('当前身份 {id} 在 {a}，这个网站在 {b}，只能打赏同一条链上的网站，点击右上角进行身份 ID 切换', { id: cur.label, a: cur.networkName, b: info.network }));
+      // 直接打开身份面板，不用再去找右上角的按钮
+      const sw = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('切换身份') });
+      sw.addEventListener('click', () => setIdentityPanel(true));
+      dd.append(sw);
+      return;
+    }
+    if (cur.opened === false) { openSiteLink(row(tr('打赏'), tr('身份 {id} 的容器还没开通', { id: cur.label }))); return; }
+    const bem = assetOf(cur, 'BEM');
+    const dd = row(tr('打赏'), tr('从身份 {id} 的容器（{amount} BEM）', { id: cur.label, amount: bem ? bem.text : '…' }));
+    const input = Object.assign(document.createElement('input'), { type: 'text', inputMode: 'decimal', value: '0.01', className: 'tip-amount', spellcheck: false });
+    input.setAttribute('aria-label', tr('打赏数额（BEM）'));
+    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('打赏 BEM') });
+    go.addEventListener('click', async () => {
+      go.disabled = true;
+      try {
+        const r = await tb.invoke('tip', input.value);
+        if (r && r.ok) input.value = '0.01';
+      } catch (e) { notice(errText(e), 'error'); }
+      go.disabled = false;
+    });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click(); });
+    dd.append(input, go);
   }
 
   /** 不在链上的外部资源：脚本、接口能改变网页行为，不受链上校验保护 */
@@ -410,23 +452,41 @@
         : (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || a.tokenId - b.tokenId);
     const ul = $('directory');
     ul.textContent = '';
-    for (const it of items.slice(0, dirLimit)) {
-      const li = document.createElement('li');
-      // 标题来自网站自己的 HTML，只用 textContent
-      const a = Object.assign(document.createElement('a'), { href: it.url, title: tr('{url}\n持有人 {owner}', { url: it.url, owner: it.owner }) });
-      a.append(
-        Object.assign(document.createElement('span'), { className: 't' + (it.title ? '' : ' untitled'), textContent: it.title || tr('（没有标题）') }),
-        Object.assign(document.createElement('span'), { className: 'net ' + (it.network || 'bnb'), textContent: NET_SHORT[it.network || 'bnb'] }),
-        Object.assign(document.createElement('span'), { className: 'u', textContent: it.label }),
-        Object.assign(document.createElement('span'), { className: 'd', textContent: day(it.updatedAt) }),
-      );
-      a.addEventListener('click', (e) => { e.preventDefault(); tb.invoke('openUrl', it.url, { background: e.metaKey || e.ctrlKey }); });
-      a.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); tb.invoke('openUrl', it.url, { background: true }); } });
-      li.append(a);
-      ul.append(li);
-    }
+    for (const it of items.slice(0, dirLimit)) ul.append(dirItem(it, it.updatedAt));
     $('dir-more').hidden = items.length <= dirLimit;
     $('dir-more').textContent = tr('显示更多（还有 {0} 个）', { 0: items.length - dirLimit });
+    renderNewSites();
+  }
+
+  /** 目录里的一行；date 是右边显示的上链时间（秒） */
+  function dirItem(it, date) {
+    const li = document.createElement('li');
+    // 标题来自网站自己的 HTML，只用 textContent
+    const a = Object.assign(document.createElement('a'), { href: it.url, title: tr('{url}\n持有人 {owner}', { url: it.url, owner: it.owner }) });
+    a.append(
+      Object.assign(document.createElement('span'), { className: 't' + (it.title ? '' : ' untitled'), textContent: it.title || tr('（没有标题）') }),
+      Object.assign(document.createElement('span'), { className: 'net ' + (it.network || 'bnb'), textContent: NET_SHORT[it.network || 'bnb'] }),
+      Object.assign(document.createElement('span'), { className: 'u', textContent: it.label }),
+      Object.assign(document.createElement('span'), { className: 'd', textContent: day(date) }),
+    );
+    a.addEventListener('click', (e) => { e.preventDefault(); tb.invoke('openUrl', it.url, { background: e.metaKey || e.ctrlKey }); });
+    a.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); tb.invoke('openUrl', it.url, { background: true }); } });
+    li.append(a);
+    return li;
+  }
+
+  /** 新上线：首页最早的上链时间在最近 7 天内的网站，最新的在前 */
+  const NEW_DAYS = 7;
+  function renderNewSites() {
+    const since = Date.now() / 1000 - NEW_DAYS * 86400;
+    const pub = (it) => it.firstPublished || it.updatedAt || 0;
+    const items = dir.sites.filter((it) => pub(it) >= since).sort((a, b) => pub(b) - pub(a));
+    const ul = $('newsites');
+    ul.textContent = '';
+    for (const it of items.slice(0, 100)) ul.append(dirItem(it, pub(it)));
+    $('newsites-empty').hidden = items.length > 0;
+    $('tab-new').textContent = tr('新上线');
+    if (items.length) $('tab-new').append(' ', Object.assign(document.createElement('span'), { className: 'muted', textContent: String(items.length) }));
   }
 
   function setFind(on) {
@@ -599,7 +659,7 @@
   let ident = null;
   let idOpen = false;
   tb.on('bem', (v) => { bemView = v; renderBem(v); });
-  tb.on('identity', (v) => { ident = v; renderBem(bemView); renderIdentity(); });
+  tb.on('identity', (v) => { ident = v; renderBem(bemView); renderIdentity(); if (siteOpen) renderSite(); });
 
   /** 浏览器身份面板：当前身份、容器状态和资产，以及钱包持有的全部身份 */
   function setIdentityPanel(on) {
@@ -631,7 +691,7 @@
       row(tr('身份'), `${cur.label}（${cur.networkName}）`);
       row(tr('容器'), shortHex(cur.container), cur.container);
       if (cur.opened === false) {
-        row(tr('容器资产'), tr('容器还没开通，需要持有人先开通，才能存放资产和数据'));
+        openSiteLink(row(tr('容器资产'), tr('容器还没开通，需要持有人先开通，才能存放资产和数据')));
       } else {
         row(tr('容器资产'), (cur.assets || []).map((a) => (a.error ? tr('{symbol} 读取失败', { symbol: a.symbol }) : `${units(a.amount, a.decimals)} ${a.symbol}`)).join(tr('，')) || tr('读取中…'));
       }
@@ -681,11 +741,30 @@
     return a ? { text: units(a.amount, a.decimals), value: Number(BigInt(a.amount)) / 10 ** a.decimals } : null;
   };
 
+  /** 人形图标（SVG，跟着文字颜色）；不用 emoji，各个系统上显示不一样 */
+  function personIcon() {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('class', 'person');
+    const head = document.createElementNS(NS, 'circle');
+    head.setAttribute('cx', '8'); head.setAttribute('cy', '5'); head.setAttribute('r', '3');
+    const body = document.createElementNS(NS, 'path');
+    body.setAttribute('d', 'M2.5 14.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5');
+    for (const el of [head, body]) { el.setAttribute('fill', 'none'); el.setAttribute('stroke', 'currentColor'); el.setAttribute('stroke-width', '1.6'); el.setAttribute('stroke-linecap', 'round'); svg.append(el); }
+    return svg;
+  }
+
   /** 登录后的按钮：身份编号 · 容器里的 BEM ≈ 美元；鼠标移上去看容器资产、钱包余额和价格 */
   function renderIdentityButton(b, v, cur, price) {
     const span = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
     const bem = assetOf(cur, 'BEM');
-    b.append(span('ident', cur.label), span('sep', '·'));
+    // 已登录：人形图标 + 绿色边框，一眼和「未登录」分开
+    b.classList.add('signed-in');
+    b.append(personIcon());
+    // 身份只在一条链上，前面写上链名（容器余额也只是这条链上的）
+    b.append(span('unit', NET_SHORT[cur.network] || cur.networkName), document.createTextNode(' '), span('ident', cur.label), span('sep', '·'));
     if (!cur.opened && cur.opened !== undefined) b.append(span('unit', tr('容器未开通')));
     else {
       b.append(document.createTextNode(bem ? bem.text : '…'), span('unit', 'BEM'));
@@ -698,7 +777,7 @@
     if (bal) lines.push(tr('你的钱包：{amount} BEM', { amount: bal.total ?? '…' }) + ' (' + bal.networks.map((n) => `${n.name} ${n.balance ?? '…'}`).join(' / ') + ')');
     lines.push(tr('BEM 价格：{price}', { price: price ?? tr('读取失败') }));
     b.title = lines.join('\n') + '\n' + tr('点击管理身份');
-    b.setAttribute('aria-label', lines.join(tr('；')));
+    b.setAttribute('aria-label', tr('已登录身份 {chain} {label}', { chain: NET_SHORT[cur.network] || cur.networkName, label: cur.label }) + tr('；') + lines.join(tr('；')));
   }
 
   /** 钱包按钮旁的 BEM：没连钱包只显示价格；连上后显示余额和折合美元，鼠标移上去看各条链 */
@@ -716,6 +795,8 @@
     const lines = [tr('BEM 价格：{price}（PancakeSwap BEM/USDT 池的即时价格，仅供参考）', { price: price ?? tr('读取失败') })];
     const bal = v.balance;
     const span = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
+    // 连了钱包还没登录：最前面写「未登录」，提醒可以点这里登录
+    if (bal) b.append(span('unit', tr('未登录')), span('sep', '·'));
     // 价格一直显示在最前面
     b.append(span('unit', 'BEM'), span('price', price ?? '—'));
     if (bal) {
@@ -726,7 +807,7 @@
       for (const n of bal.networks) lines.push(n.error ? tr('{name}：读取失败', { name: n.name }) : tr('{name}：{amount} BEM', { name: n.name, amount: n.balance ?? '…' }));
     }
     b.title = lines.join('\n') + '\n' + (bal ? tr('点击登录浏览器身份') : tr('点击刷新'));
-    b.setAttribute('aria-label', lines.join(tr('；')));
+    b.setAttribute('aria-label', (bal ? tr('未登录') + tr('；') : '') + lines.join(tr('；')));
   }
 
   tb.on('notice', (n) => notice(n.text, n.level));

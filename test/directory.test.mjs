@@ -217,3 +217,21 @@ test('增量检查：新铸造的编号、首页晚上传的电路都会被收�
   assert.equal(chain.st.flagged - before, 8, '没有 seen 时完整扫描');
   rmSync(dir, { recursive: true, force: true });
 });
+
+test('firstPublished：记首页最早的上链时间，首页更新后不变', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tb-dir-'));
+  const file = join(dir, 'directory.json');
+  let t = 1_000_000;
+  const chain = fakeChain();
+  const d = createDirectory({ chains: { bnb: chain }, sites: fakeSites({ '0xc1-0': { sha: '0xaa', body: '' }, '0xc2-1': { sha: '0xbb', body: '' } }), file, now: () => t, pause: 0 });
+  await d.refresh();
+  const first = d.list().find((s) => s.label === '1.0.tape');
+  assert.equal(first.firstPublished, 100);
+  t += QUICK_CHECK_EVERY;
+  chain.st.index['0xc1-0'] = { sha256: '0xa2', size: 10, updatedAt: 900 };
+  await d.refresh();
+  const after = d.list().find((s) => s.label === '1.0.tape');
+  assert.equal(after.updatedAt, 900);
+  assert.equal(after.firstPublished, 100, '首页更新后发布时间不变');
+  rmSync(dir, { recursive: true, force: true });
+});
