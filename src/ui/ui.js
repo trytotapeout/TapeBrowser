@@ -152,6 +152,7 @@
 
   const isTape = (u) => /^tape:\/\//i.test(u || '');
   const isLocal = (u) => /^tape:\/\/local-[0-9a-f]{12}(?:[/?#]|$)/i.test(u || '');
+  const isWeb = (u) => /^https?:\/\//i.test(u || '');
   const shortHex = (h) => (h && h.length > 20 ? h.slice(0, 10) + '…' + h.slice(-8) : h || '—');
   const SOURCE = { chain: tr('从链上下载'), cache: tr('链上哈希未变，使用本机缓存'), stale: tr('读链失败，显示的是上次缓存的版本') };
 
@@ -159,7 +160,8 @@
   function refreshSite() {
     const t = active();
     const tape = Boolean(t && isTape(t.url));
-    $('site-btn').hidden = !tape;
+    const web = Boolean(t && isWeb(t.url));
+    $('site-btn').hidden = !tape && !web;
     // 网站所在的链：直接从网址的区号判断，不用等读链
     const chain = tape ? tabChain(t) : null;
     const tag = $('chain-tag');
@@ -169,6 +171,14 @@
       tag.dataset.chain = chain;
       tag.title = tr('这个网站在 ') + CHAINS[chain] + tr(' 上');
       tag.setAttribute('aria-label', tr('所在的链：') + CHAINS[chain]);
+    }
+    // 普通网页：不在链上，内容来自对方服务器，没法校验，明确标出来
+    if (web) {
+      verify = null;
+      const key = `${t.id}|${t.url}`;
+      if (key !== siteKey) { siteKey = key; siteInfo = { web: true, url: t.url, insecure: /^http:/i.test(t.url) }; }
+      renderSite();
+      return;
     }
     if (!tape) { siteInfo = null; verify = null; siteKey = ''; if (siteOpen) setSite(false); return; }
     const key = `${t.id}|${t.url}|${t.loading}`;
@@ -190,6 +200,7 @@
   }
 
   function siteState(info) {
+    if (info && info.web) return { cls: 'web', text: info.insecure ? tr('未校验 · 未加密') : tr('未校验') };
     if (info && info.local) return localState(info);
     if (!info || info.error) return { cls: 'bad', text: tr('读取失败') };
     if (!info.exists) return { cls: 'bad', text: tr('电路不存在') };
@@ -206,11 +217,13 @@
     const st = siteState(siteInfo);
     const b = $('site-btn');
     const local = Boolean(siteInfo && siteInfo.local);
+    const web = Boolean(siteInfo && siteInfo.web);
     b.className = (st.cls === 'ok' ? '' : st.cls) + (local ? ' local' : '');
     b.textContent = local ? tr('本地') : st.cls === 'ok' ? tr('链上') : st.text;
-    b.title = (local ? tr('本地预览：') : tr('网站信息：')) + st.text;
+    b.title = (local ? tr('本地预览：') : web ? tr('不在链上：') : tr('网站信息：')) + st.text;
     if (!siteOpen) return;
     if (local) { renderLocal(siteInfo, st); return; }
+    if (web) { renderWeb(siteInfo, st); return; }
     const info = siteInfo || {};
     $('si-label').textContent = info.label || tr('网站信息');
     $('si-status').textContent = st.text;
@@ -302,6 +315,26 @@
       checks.append(ul);
     }
     row(tr('卡片预览')).append(localCard(c.card));
+  }
+
+  /** 普通网页的面板：说明内容不在链上、TapeBrowser 证明不了它，签名时仍有风险解读 */
+  function renderWeb(info, st) {
+    let host = info.url;
+    try { host = new URL(info.url).host; } catch { /* 原样显示 */ }
+    $('si-label').textContent = host;
+    $('si-status').textContent = st.text;
+    $('si-status').className = st.cls;
+    const dl = $('si-list');
+    dl.textContent = '';
+    const row = (name, value) => {
+      const dd = document.createElement('dd');
+      dd.append(Object.assign(document.createElement('span'), { className: 'v wrap', textContent: value }));
+      dl.append(Object.assign(document.createElement('dt'), { textContent: name }), dd);
+    };
+    row(tr('内容来源'), tr('对方的服务器，不在链上。TapeBrowser 无法证明你看到的代码是谁写的、有没有被改过，服务器也可以给不同的人返回不同的内容'));
+    if (info.insecure) row(tr('连接方式'), tr('没有加密（http），网络上的其他人可以看到和篡改页面'));
+    row(tr('钱包'), tr('签名和交易仍会经过 TapeBrowser 的风险解读，但判断不了网站本身是否可信。连接钱包、授权前请核对网址'));
+    row(tr('更可信的做法'), tr('如果这个应用有链上版本（tape:// 网站），优先用链上版本：文件经过 SHA-256 校验，持有人和每次更新都公开记录在链上'));
   }
 
   /** 目录卡片预览：和「DeWEB 应用」里的卡片同样的样式，不能点 */

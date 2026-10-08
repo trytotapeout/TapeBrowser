@@ -110,11 +110,19 @@ function toggleBookmark() {
 function siteName(origin) {
   const m = /^tape:\/\/(.+)$/.exec(origin || '');
   const s = m && parseHost(m[1]);
-  return s ? siteLabel(s.tokenId, s.cpu, s.area) : origin;
+  if (s) return siteLabel(s.tokenId, s.cpu, s.area);
+  return isLocalUrl(origin) ? tr('本地预览') : origin;
 }
 function walletView() {
   const s = bridge?.state || {};
   return { connected: Boolean(s.connected), ready: Boolean(s.ready), wallet: s.wallet || null, account: s.accounts?.[0] || null, chainId: s.chainId || null, bridgeUrl: bridge ? bridge.url() : null };
+}
+
+/** 不在链上的网站（普通网页、本地预览）在确认弹窗里的提醒；链上网站返回 null */
+function offChainNote(origin) {
+  if (isLocalUrl(origin)) return tr('⚠️ 这是本地预览，内容来自本机文件夹，还没有上链。');
+  if (/^https?:/i.test(origin || '')) return tr('⚠️ 这个网站不在链上：内容来自 {host} 的服务器，TapeBrowser 无法校验它的代码是谁写的、有没有被改过。请核对网址。', { host: origin.replace(/^https?:\/\//, '') });
+  return null;
 }
 
 /** TapeBrowser 自己的确认弹窗：钱包扩展只看得到 127.0.0.1，看不到真正发请求的网站 */
@@ -129,7 +137,7 @@ async function confirm(req) {
       defaultId: 0,
       cancelId: 1,
       message: tr('{name} 想连接你的钱包', { name }),
-      detail: tr('网站将看到地址 {account}。\n之后每次签名或交易都会再次询问，并且需要在浏览器的钱包扩展里确认。\n\n来源：{origin}', { account: req.account, origin: req.origin }),
+      detail: [offChainNote(req.origin), tr('网站将看到地址 {account}。\n之后每次签名或交易都会再次询问，并且需要在浏览器的钱包扩展里确认。\n\n来源：{origin}', { account: req.account, origin: req.origin })].filter(Boolean).join('\n\n'),
     });
     return { ok: r.response === 0, remember: false };
   }
@@ -145,6 +153,8 @@ async function confirm(req) {
 
   const parts = [];
   if (danger) parts.push(tr('⚠️ 高危操作'));
+  const off = offChainNote(req.origin);
+  if (off) parts.push(off);
   parts.push(...d.lines);
   if (code.changed.length) {
     parts.push('', tr('⚠️ 这个网站在你上次使用钱包之后改过代码：{files}', { files: code.changed.slice(0, 5).map((f) => '/' + f).join(tr('、')) + (code.changed.length > 5 ? tr(' 等 {n} 个文件', { n: code.changed.length }) : '') }));

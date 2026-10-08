@@ -424,5 +424,17 @@
  "{files} 个文件，共 {size}，全部上传约 {txs} 笔交易（每 24 KB 一笔）": "{files} files, {size} in total; about {txs} transactions to upload everything (one per 24 KB)",
  "预检查": "Pre-publish check",
  "没有发现问题": "No problems found",
- "卡片预览": "Card preview"
+ "卡片预览": "Card preview",
+ "⚠️ 这是本地预览，内容来自本机文件夹，还没有上链。": "⚠️ This is a local preview. Its content comes from a folder on this computer and isn't on chain yet.",
+ "⚠️ 这个网站不在链上：内容来自 {host} 的服务器，TapeBrowser 无法校验它的代码是谁写的、有没有被改过。请核对网址。": "⚠️ This site isn't on chain: its content comes from the {host} server, and TapeBrowser can't verify who wrote its code or whether it was changed. Check the address.",
+ "未校验 · 未加密": "Unverified · Not encrypted",
+ "未校验": "Unverified",
+ "不在链上：": "Not on chain: ",
+ "内容来源": "Content source",
+ "对方的服务器，不在链上。TapeBrowser 无法证明你看到的代码是谁写的、有没有被改过，服务器也可以给不同的人返回不同的内容": "The site's own server, not the chain. TapeBrowser can't prove who wrote the code you see or whether it was changed, and the server can serve different content to different people",
+ "没有加密（http），网络上的其他人可以看到和篡改页面": "Not encrypted (http). Others on the network can see and modify the page",
+ "签名和交易仍会经过 TapeBrowser 的风险解读，但判断不了网站本身是否可信。连接钱包、授权前请核对网址": "Signatures and transactions still go through TapeBrowser's risk check, but it can't tell whether the site itself is trustworthy. Check the address before connecting your wallet or approving anything",
+ "更可信的做法": "Safer option",
+ "如果这个应用有链上版本（tape:// 网站），优先用链上版本：文件经过 SHA-256 校验，持有人和每次更新都公开记录在链上": "If this app has an on-chain version (a tape:// site), prefer it: its files are checked by SHA-256, and the owner and every update are recorded publicly on chain",
+ "连接方式": "Connection"
 }

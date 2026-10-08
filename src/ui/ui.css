@@ -194,3 +194,7 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 .check-list .info .lv { color: var(--muted); }
 .card.preview { width: 200px; margin: 2px 0 6px; }
 .card.preview:hover { transform: none; box-shadow: 0 1px 2px rgba(0, 0, 0, .05); border-color: var(--line); }
+/* 普通网页：不在链上，灰色，和链上的绿色区分开 */
+#site-btn.web { border-color: var(--line); color: var(--muted); }
+#si-status.web { color: var(--muted); }
+#si-list dd .v.wrap { white-space: normal; font-family: inherit; font-size: 13px; line-height: 1.5; }
