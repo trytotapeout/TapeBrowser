@@ -359,5 +359,7 @@
  "：正方形图标，推荐 256×256，最大 512×512，居中显示，PNG 可以用透明背景": ": a square icon, 256×256 recommended, 512×512 at most, shown centered; PNGs can have a transparent background",
  "：16:10 封面，推荐 640×400，铺满卡片的图片区；有封面时不显示 logo": ": a 16:10 cover, 640×400 recommended, fills the card's image area; when there's a cover, the logo isn't shown",
  "每张不超过 50 KB，超过的不显示。目录每小时检查一次，换图后最多一小时更新": "Each image must be 50 KB or less, or it isn't shown. The directory checks hourly, so a new image shows up within an hour",
- "或": "or"
+ "或": "or",
+ "分享链接": "Share link",
+ "要发到社交平台或聊天里，用网站信息面板里的「分享链接」：它是一个普通的 https 链接，装了 TapeBrowser 的人点开会直接打开网站，没装的会看到下载页。": "To post on social media or in chats, use the Share link in the site info panel. It's a regular https link: people with TapeBrowser go straight to the site, and everyone else sees a download page."
 }

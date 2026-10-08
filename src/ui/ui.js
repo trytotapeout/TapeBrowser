@@ -221,6 +221,9 @@
     };
     if (info.error) { row(tr('错误'), info.error); return; }
     row(tr('链'), info.network || 'BNB Chain');
+    // https 分享链接：没装 TapeBrowser 的人打开会看到下载按钮，装了的直接唤起
+    const share = shareUrl(info, active() && active().url);
+    if (share) row(tr('分享链接'), share, share);
     row(tr('电路'), tr('#{tokenId}，处理器 {cpu}{0}', { tokenId: info.tokenId, cpu: info.cpu, 0: info.area ? tr('（区号 {area}）', { area: info.area }) : '' }));
     row(tr('持有人'), shortHex(info.owner), info.owner);
     if (info.owner) ownerLink(info.owner);
@@ -319,6 +322,16 @@
     const what = { container: tr('容器地址'), sha256: tr('文件哈希') };
     return tr('不一致：') + v.mismatches.map((m) => tr('{node} 读到的{0}是 {1}', { node: m.node, 0: what[m.field], 1: shortHex(m.got) || tr('空') })).join(tr('；'))
       + tr('。可能是节点数据有问题，或网站刚好在更新，请刷新后再看；签名、交易前请核对。');
+  }
+
+  // 产品站上的分享落地页（github_pages/open/）
+  const SHARE_BASE = 'https://trytotapeout.github.io/TapeBrowser/open/?';
+  /** 4454.0、1.2.248，带上当前页面的路径（首页不带） */
+  function shareUrl(info, url) {
+    if (!info || !info.label) return null;
+    const m = /^tape:\/\/[^/?#]+(\/[^?#]*)?/i.exec(url || '');
+    const path = m && m[1] && m[1] !== '/' && m[1] !== '/index.html' ? m[1] : '';
+    return SHARE_BASE + info.label.replace(/\.tape$/, '') + path;
   }
 
   /** 持有人一行后面加「持有的全部网站」：在新标签页的 DeWEB 应用里按持有人筛选 */

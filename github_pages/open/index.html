@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>在 TapeBrowser 中打开 · DeWEB 网站</title>
+  <meta name="description" content="这是一个存放在链上的 DeWEB 网站，用 TapeBrowser 打开：文件直接从链上读取并校验，不经过网关服务器。">
+  <meta property="og:title" content="在 TapeBrowser 中打开 DeWEB 网站">
+  <meta property="og:description" content="这是一个存放在链上的 DeWEB 网站，用 TapeBrowser 打开：文件直接从链上读取并校验，不经过网关服务器。">
+  <meta property="og:image" content="https://trytotapeout.github.io/TapeBrowser/icon.png">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="../icon.png">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="wrap">
+      <a class="brand" href="../"><img src="../icon.png" alt="">TapeBrowser</a>
+    </div>
+  </header>
+
+  <main id="main" class="open-page">
+    <div class="wrap">
+      <!-- 链接里的网站地址合法时显示 -->
+      <div id="site" hidden>
+        <p class="eyebrow" data-i18n="eyebrow">DeWEB 网站</p>
+        <h1 id="label"></h1>
+        <p class="chain"><span id="chain" class="chain-pill"></span></p>
+
+        <p id="trying" class="status" role="status" data-i18n="trying">正在用 TapeBrowser 打开…</p>
+        <p id="opened" class="status" role="status" hidden data-i18n="opened">已经交给 TapeBrowser 打开了。没看到的话，点下面的按钮再试一次。</p>
+
+        <div id="fallback" hidden>
+          <p class="status" data-i18n="need">这个网站存放在链上，需要用 TapeBrowser 打开。TapeBrowser 直接从链上读取并校验网站文件，不经过网关服务器。</p>
+          <div class="cta left">
+            <a id="download" class="btn primary" href="../#download" data-i18n="download">下载 TapeBrowser</a>
+            <a id="retry" class="btn" href="#" data-i18n="retry">已安装，再试一次</a>
+          </div>
+          <p id="platform" class="hint"></p>
+        </div>
+
+        <p class="hint addr"><span data-i18n="addr">网站地址：</span><code id="tape"></code></p>
+      </div>
+
+      <!-- 链接里没有地址或地址不合法 -->
+      <div id="invalid" hidden>
+        <h1 data-i18n="badTitle">链接里的网站地址不对</h1>
+        <p class="status" data-i18n="badBody">分享链接的格式是 …/open/?4454.0，也可以是 1.2.248（X Layer）、1.3.5（Base）这样的电路地址。</p>
+        <div class="cta left"><a class="btn primary" href="../" data-i18n="home">了解 TapeBrowser</a></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>TapeBrowser · <a href="https://github.com/trytotapeout/TapeBrowser" data-i18n="source">开源代码</a></span>
+    </div>
+  </footer>
+  <script src="open.js"></script>
+</body>
+</html>
