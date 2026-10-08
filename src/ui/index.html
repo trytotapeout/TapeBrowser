@@ -47,9 +47,9 @@
       <h1>TapeBrowser</h1>
       <p class="muted">浏览 TapeKit 电路容器里的 DeWEB 网站。在上方地址栏输入：</p>
       <ul class="examples">
+        <li><button type="button" data-q="1888">1888</button> 直接输数字就行：自动查找 1.888、18.88、188.8 所有组合，有首页的都打开，也可以写 1888.tape。数字更长时还会查带区号的组合，比如 12330 会查到 1.2.330（X Layer）、12.3.30（Base）</li>
         <li><button type="button" data-q="4454.0">4454.0</button> 打开 BNB Chain 上电路 #4454（处理器 0）的网站，也可以写 tape://4454-0、#4454@0</li>
         <li><button type="button" data-q="1.2.230">1.2.230</button> X Layer 和 Base 的网站在处理器编号前加区号：X Layer 是 2，Base 是 3。1.2.230 就是 X Layer 上 230 号处理器的 #1，也可以写 #1@2.230</li>
-        <li><button type="button" data-q="12330.tape">12330.tape</button> 不带分隔符：查找 1.2330、12.330、1233.0、1.2.330（X Layer）、12.3.30（Base）等所有组合，有首页的都打开</li>
         <li><code>0x…</code> 钱包地址：在三条链上扫描这个钱包持有的全部电路，有首页的都打开</li>
         <li>普通网址：https://… 照常打开</li>
       </ul>

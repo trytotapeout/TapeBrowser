@@ -186,7 +186,7 @@
  "浏览 TapeKit 电路容器里的 DeWEB 网站。在上方地址栏输入：": "Browse DeWEB sites stored in TapeKit circuit containers. Type in the address bar:",
  "打开 BNB Chain 上电路 #4454（处理器 0）的网站，也可以写 tape://4454-0、#4454@0": "opens the site of circuit #4454 (processor 0) on BNB Chain. Also written tape://4454-0 or #4454@0",
  "X Layer 和 Base 的网站在处理器编号前加区号：X Layer 是 2，Base 是 3。1.2.230 就是 X Layer 上 230 号处理器的 #1，也可以写 #1@2.230": "X Layer and Base sites put an area code before the processor: 2 for X Layer, 3 for Base. 1.2.230 is #1 on processor 230 on X Layer, also written #1@2.230",
- "不带分隔符：查找 1.2330、12.330、1233.0、1.2.330（X Layer）、12.3.30（Base）等所有组合，有首页的都打开": "no separators: tries every split such as 1.2330, 12.330, 1233.0, 1.2.330 (X Layer) and 12.3.30 (Base), and opens each one with a home page",
+ "直接输数字就行：自动查找 1.888、18.88、188.8 所有组合，有首页的都打开，也可以写 1888.tape。数字更长时还会查带区号的组合，比如 12330 会查到 1.2.330（X Layer）、12.3.30（Base）": "just type the number: tries every split (1.888, 18.88, 188.8) and opens each one with a home page; 1888.tape works too. Longer numbers also try splits with an area code, e.g. 12330 finds 1.2.330 (X Layer) and 12.3.30 (Base)",
  "钱包地址：在三条链上扫描这个钱包持有的全部电路，有首页的都打开": "a wallet address: scans every circuit it holds on all three chains and opens each one with a home page",
  "普通网址：https://… 照常打开": "Regular URLs: https://… open as usual",
  "最近访问": "Recent",
