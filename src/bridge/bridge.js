@@ -133,6 +133,13 @@
     return { code: Number(e && e.code) || -32603, message: String((e && e.message) || e || '钱包错误'), data: e && e.data !== undefined ? JSON.parse(JSON.stringify(e.data)) : undefined };
   }
 
+  async function refreshChain() {
+    try {
+      const c = String(await current.provider.request({ method: 'eth_chainId' })).toLowerCase();
+      if (c !== chainId) { chainId = c; log('网络变化：' + chainId); report(); }
+    } catch { /* 读不到就等钱包自己的 chainChanged */ }
+  }
+
   async function onRequest(msg) {
     const who = msg.origin ? msg.origin + ' ' : '';
     log(who + '请求 ' + msg.method);
@@ -140,6 +147,8 @@
     try {
       const result = await current.provider.request({ method: msg.method, params: msg.params });
       if (msg.method === 'eth_requestAccounts') { accounts = result || []; report(); }
+      // 有的钱包切链成功后不发 chainChanged（或者很晚才发），自己再读一次当前的链，免得 TapeBrowser 一直以为链不对
+      if (msg.method === 'wallet_switchEthereumChain' || msg.method === 'wallet_addEthereumChain') await refreshChain();
       send({ type: 'response', id: msg.id, result: result === undefined ? null : result });
     } catch (e) {
       log(who + msg.method + ' 失败：' + safeError(e).message);
