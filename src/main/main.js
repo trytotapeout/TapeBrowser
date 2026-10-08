@@ -3,11 +3,14 @@
 import { app, BrowserWindow, protocol, session as electronSession, ipcMain, dialog, shell, net, Menu, nativeTheme, clipboard } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { watch } from 'node:fs';
 import { createSettings } from './settings.js';
 import { createRpcPool } from './rpc.js';
 import { createChain } from './chain.js';
 import { createSites } from './sites.js';
 import { createTapeHandler } from './tape-protocol.js';
+import { createLocalSites, isLocalUrl } from './local-site.js';
+import { precheck } from './precheck.js';
 import { createBridgeServer } from './bridge-server.js';
 import { createProviderHost, providerError, homeNetwork } from './provider-host.js';
 import { createTabs, originOf, ALLOWED } from './tabs.js';
@@ -44,6 +47,8 @@ const rpcs = Object.fromEntries(NETWORKS.map((n) => [n.key, createRpcPool(() => 
 const contentStore = createContentStore(join(app.getPath('userData'), 'content-cache'));
 const chains = Object.fromEntries(NETWORKS.map((n) => [n.key, createChain(rpcs[n.key], n)]));
 const sites = createSites(chains, contentStore);
+// 本地预览：本机文件夹当成网站打开（tape://local-<id>/），开发者上链前看效果、做发布预检查
+const localSites = createLocalSites();
 const directory = createDirectory({
   chains, sites, file: join(app.getPath('userData'), 'directory.json'),
   onChange: () => { library.syncDirectory(directory.list()); send('directory', directory.list()); },
@@ -304,6 +309,7 @@ function registerIpc() {
   ui('clearHistory', () => library.clearHistory());
   ui('siteInfo', async () => {
     const t = tabs.active();
+    if (isLocalUrl(t?.url)) return localInfo(t.url);
     const m = /^tape:\/\/([^/?#]+)(\/[^?#]*)?/i.exec(t?.url || '');
     const site = m && parseHost(m[1]);
     if (!site) return null;
@@ -343,6 +349,18 @@ function registerIpc() {
     } catch { return null; }
   });
   ui('clearCache', () => contentStore.clear());
+  ui('openLocal', () => openLocalFolder());
+  ui('revealLocal', () => { const root = localSites.rootOf(tabs.active()?.url); if (root) shell.openPath(root); });
+  // 本地预览的卡片图片：预检查核对过格式和大小的才显示
+  ui('localImage', async (kind) => {
+    const t = tabs.active();
+    const root = localSites.rootOf(t?.url);
+    if (!root || (kind !== 'logo' && kind !== 'cover')) return null;
+    const r = await localInfo(t.url);
+    const img = r?.check?.card?.[kind];
+    const bytes = img && await localSites.bytesOf(root, img.path);
+    return bytes ? `data:image/${img.type};base64,${Buffer.from(bytes).toString('base64')}` : null;
+  });
   ui('openUrl', (url, opts) => {
     url = String(url || '');
     if (!ALLOWED.test(url)) return;
@@ -350,6 +368,62 @@ function registerIpc() {
     else submit(url);
   });
 }
+// 本地预览的文件夹监听：root → watcher。文件一改，打开这个文件夹的标签自动刷新
+const watchers = new Map();
+
+/** 选一个本机文件夹（不传 dir 时弹出选择框），在标签里按 tape:// 规则打开 */
+async function openLocalFolder(dir = null) {
+  if (!dir) {
+    const r = await dialog.showOpenDialog(win, { title: tr('打开本地文件夹预览'), buttonLabel: tr('预览'), properties: ['openDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return;
+    dir = r.filePaths[0];
+  }
+  let site;
+  try { site = await localSites.add(dir); } catch (e) { notify(tr('打不开这个文件夹：') + (e?.message || e), 'error'); return; }
+  watchLocal(site);
+  if (tabs.activeIsBlank()) tabs.navigate(tabs.active().id, site.url); else tabs.open(site.url);
+  notify(tr('本地预览：{root}。文件改动后会自动刷新；点地址栏左边的「本地」查看发布预检查', { root: site.root }), 'ok');
+}
+
+function watchLocal({ root, url }) {
+  if (watchers.has(root)) return;
+  let timer = null;
+  try {
+    const w = watch(root, { recursive: true }, (_e, name) => {
+      // 隐藏文件（.git 等）的变化不刷新
+      if (name && String(name).split(/[\\/]/).some((s) => s.startsWith('.'))) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        localChecks.delete(root);
+        for (const wc of tabs?.byOrigin(originOf(url)) || []) wc.reload();
+        send('localChanged', originOf(url));
+      }, 300);
+    });
+    w.on('error', () => { w.close(); watchers.delete(root); });
+    watchers.set(root, w);
+  } catch { /* 不支持监听时只是不自动刷新 */ }
+}
+
+// 预检查结果按文件夹缓存，文件改动后清掉
+const localChecks = new Map();
+
+/** 本地预览标签的网站信息：文件夹、首页和发布预检查 */
+async function localInfo(url) {
+  const root = localSites.rootOf(url);
+  if (!root) return { local: true, error: tr('这个本地文件夹没有在本次运行中打开，请重新选择') };
+  const origin = originOf(url);
+  // 外部资源每次都按当前页面实际加载的算，不缓存
+  const external = audit.externalOf(origin);
+  try {
+    let listing = localChecks.get(root);
+    if (!listing) localChecks.set(root, (listing = await localSites.list(root)));
+    const check = await precheck({ ...listing, read: (p) => localSites.bytesOf(root, p), external, tr: (...a) => tr(...a) });
+    return { local: true, root, label: tr('本地预览'), external, check };
+  } catch (e) {
+    return { local: true, root, error: String(e?.message || e) };
+  }
+}
+
 /** 一组网站：第一个放进当前空白标签（或新开并切过去），其余在后台标签打开 */
 function openSites(list) {
   list.forEach((s, i) => {
@@ -466,6 +540,7 @@ function buildMenu() {
       submenu: [
         { label: tr('新标签页'), accelerator: 'CmdOrCtrl+T', click: () => { tabs.open(); ui('focusAddress')(); } },
         { label: tr('打开地址'), accelerator: 'CmdOrCtrl+L', click: ui('focusAddress') },
+        { label: tr('打开本地文件夹预览…'), accelerator: 'CmdOrCtrl+O', click: () => openLocalFolder() },
         { label: tr('关闭标签页'), accelerator: 'CmdOrCtrl+W', click: () => { const t = tabs.active(); if (t) tabs.close(t.id); } },
         ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit', label: tr('退出') }]),
       ],
@@ -565,8 +640,12 @@ function createWindow() {
   win.loadFile(join(SRC, 'ui/index.html'));
   win.webContents.once('did-finish-load', () => {
     uiLoaded = true;
+    // 命令行 --preview <文件夹>：启动后直接打开本地预览（npm start -- --preview dist）
+    const pi = process.argv.indexOf('--preview');
+    const previewDir = pi > 0 ? process.argv[pi + 1] : null;
     if (pendingExternal.length) for (const u of pendingExternal.splice(0)) openExternalTape(u);
-    else tabs.open();
+    else if (!previewDir) tabs.open();
+    if (previewDir) { if (!tabs.active()) tabs.open(); openLocalFolder(previewDir); }
   });
 }
 
@@ -604,7 +683,7 @@ app.whenReady().then(async () => {
   if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(SRC, '../build/icon.png'));
 
   tabSession = electronSession.fromPartition(PARTITION);
-  tabSession.protocol.handle('tape', createTapeHandler(sites, { onServe: (origin, path, sha) => audit.file(origin, path, sha) }));
+  tabSession.protocol.handle('tape', createTapeHandler(sites, { local: localSites, onServe: (origin, path, sha) => audit.file(origin, path, sha) }));
   // 电路网站发出的非链上请求（外部脚本、接口、WebSocket 等）记下来，网站信息面板和签名确认里提示
   tabSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (details, cb) => {
     try {

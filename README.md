@@ -103,6 +103,17 @@ TapeBrowser 不导入私钥，也不用 WalletConnect，而是通过系统浏览
 
 钱包按钮左边显示 BEM 价格，连上钱包后接着显示这个地址在各条链上的 BEM 总数和折合美元，鼠标移上去看每条链各有多少，点一下立即刷新（平时每分钟刷新一次）。价格直接读 PancakeSwap V3 BEM/USDT 1% 池（`0x3098d7a051045000d68ec0360753a40c8cabea31`）的当前成交价，USDT 按 1 美元计，只是一个池子的即时价格，仅供参考。余额直接从 BEM 合约读取：BNB Chain `0x5ce033b2bfca3af30b3e8c8457deaf776a8b695a`，X Layer `0x60e62efa9405d6873c5deabd4e6cc91c25363952`（LayerZero 跨链版本）；Base 上还没有 BEM。
 
+## 本地预览和发布预检查
+
+写 DeWEB 网站时，可以在上链之前用 TapeBrowser 直接打开本机文件夹：「文件 → 打开本地文件夹预览…」（⌘O），或者开发时 `npm start -- --preview <文件夹>`。
+
+- 网址是 `tape://local-<文件夹路径哈希前 12 位>/`，和链上网站走同一个 tape:// 处理器：路径规则、`/docs` 补斜杠、内容类型、外部资源检测都一样。同一个文件夹每次地址相同，`localStorage` 不会丢
+- 文件改动后标签自动刷新，预检查结果也重新算
+- 只读选中的文件夹：拒绝 `..`、隐藏文件（`.git`、`.env` 等），符号链接不跟；`node_modules` 不算网站文件
+- 地址栏左边的按钮显示「本地」（虚线边框），点开是预检查面板：文件夹、要上传的文件数、大小和交易笔数（每 24 KB 一笔），以及检查结果和目录卡片预览
+- 检查结果分三级：错误（没有 `index.html`、空文件、超过 350 块、文件名网址里打不开）、警告（引用的文件不存在、外部脚本或接口、首页超过 256 KB 或没有 `<title>`、logo / cover 超过 50 KB、`web.json` 不合法）、提示（没有 `web.json`、图片比例、小文件太多可以合并）。外部资源同时看 HTML / CSS 里写的地址和预览时实际加载的请求
+- 本地预览不是链上内容，不做交叉校验，也不记进最近访问
+
 ## 界面语言
 
 支持中文和英文，默认跟随系统语言（系统是中文时用中文，否则用英文），可以在设置里切换，切换后立即生效。
@@ -152,7 +163,7 @@ npm run dist:linux
 
 ## 代码结构
 
-- `src/main/`：主进程。`tape-protocol.js` 负责从链上读取并校验文件，`sites.js` 负责枚举和钱包扫描，`bridge-server.js` 是钱包桥接服务，`provider-host.js` 处理网页的 EIP-1193 请求，`tabs.js` 管理标签页。
+- `src/main/`：主进程。`tape-protocol.js` 负责从链上读取并校验文件（本地预览也走它，见 `local-site.js`），`precheck.js` 是发布预检查，`sites.js` 负责枚举和钱包扫描，`bridge-server.js` 是钱包桥接服务，`provider-host.js` 处理网页的 EIP-1193 请求，`tabs.js` 管理标签页。
 - `src/preload/`：`tab.cjs` 往网页注入 `window.ethereum`，`ui.cjs` 是外壳界面的 IPC。
 - `src/ui/`：标签栏、地址栏和设置界面。
 - `src/bridge/`：在系统浏览器里打开的钱包桥接页面。

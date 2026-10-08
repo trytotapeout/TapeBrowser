@@ -1,6 +1,7 @@
 // tape:// 协议处理：tape://<ID>-<处理器>/<路径>、tape://<ID>-<区号>-<处理器>/<路径> → 容器里的文件。不依赖 Electron，返回标准 Response。
 
 import { parseHost, normalizePath, siteLabel } from './address.js';
+import { parseLocalHost } from './local-site.js';
 
 const MIME = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8',
@@ -26,29 +27,43 @@ h1{font-size:20px;margin:0 0 8px}p{color:#666;margin:0;word-break:break-all}@med
 }
 
 // onServe(origin, path, sha256)：每返回一个文件调用一次（页面审计用，见 page-audit.js）
-export function createTapeHandler(sites, { onServe = () => {} } = {}) {
+// local：本地预览（local-site.js），tape://local-<id>/ 从本机文件夹读，其余规则和链上网站完全一样
+export function createTapeHandler(sites, { onServe = () => {}, local = null } = {}) {
+  /** 按网址找到读文件的函数：read(path) → {bytes, info, source} | null；找不到网站时返回错误页 */
+  async function resolve(url) {
+    const id = parseLocalHost(url.hostname);
+    if (id) {
+      const root = local?.rootOf(url.href);
+      if (!root) return { error: errorPage(404, '本地预览已失效', '这个本地文件夹没有在本次运行中打开，请在「文件 → 打开本地文件夹预览」里重新选择。') };
+      return { where: '本地文件夹', read: (path) => local.readLocal(root, path) };
+    }
+    const site = parseHost(url.hostname);
+    if (!site) return { error: errorPage(400, '无法识别的电路地址', url.hostname) };
+    const label = siteLabel(site.tokenId, site.cpu, site.area);
+    const info = await sites.site(site.tokenId, site.cpu, site.area);
+    if (!info.exists) return { error: errorPage(404, `${label} 不存在`, '这个电路还没有铸造，或处理器编号不存在。') };
+    if (!info.opened || !info.container) return { error: errorPage(404, `${label} 没有开通容器`, '电路持有人还没有开通容器，没有可浏览的网站。') };
+    return { where: `${label} 的容器`, read: (path) => sites.readFile(info.container, path, site.area) };
+  }
+
   return async function handle(request) {
     const url = new URL(request.url);
-    const site = parseHost(url.hostname);
-    if (!site) return errorPage(400, '无法识别的电路地址', url.hostname);
-    const label = siteLabel(site.tokenId, site.cpu, site.area);
+    if (!parseLocalHost(url.hostname) && !parseHost(url.hostname)) return errorPage(400, '无法识别的电路地址', url.hostname);
     if (request.method !== 'GET' && request.method !== 'HEAD') return errorPage(405, '不支持的请求', request.method);
 
     let path;
     try { path = normalizePath(url.pathname); } catch { return errorPage(400, '路径不合法', url.pathname); }
 
     try {
-      const info = await sites.site(site.tokenId, site.cpu, site.area);
-      if (!info.exists) return errorPage(404, `${label} 不存在`, '这个电路还没有铸造，或处理器编号不存在。');
-      if (!info.opened || !info.container) return errorPage(404, `${label} 没有开通容器`, '电路持有人还没有开通容器，没有可浏览的网站。');
-
-      let file = await sites.readFile(info.container, path, site.area);
+      const r = await resolve(url);
+      if (r.error) return r.error;
+      let file = await r.read(path);
       if (!file && !url.pathname.endsWith('/') && !/\.[^/]+$/.test(path)) {
         // /docs → /docs/（目录下有 index.html 时）
-        const dirIndex = await sites.readFile(info.container, path + '/index.html', site.area);
+        const dirIndex = await r.read(path + '/index.html');
         if (dirIndex) return new Response(null, { status: 301, headers: { location: url.pathname + '/' + url.search } });
       }
-      if (!file) return errorPage(404, '文件不存在', `${label} 的容器里没有 /${path}`);
+      if (!file) return errorPage(404, '文件不存在', `${r.where}里没有 /${path}`);
 
       const type = file.info.contentType || guessType(path);
       const headers = {
@@ -56,13 +71,13 @@ export function createTapeHandler(sites, { onServe = () => {} } = {}) {
         'content-length': String(file.bytes.length),
         'cache-control': 'no-cache',
         'x-tape-sha256': file.info.sha256,
-        // chain / cache / stale（读链失败时用的是上次缓存的版本）
+        // chain / cache / stale（读链失败时用的是上次缓存的版本）/ local（本地预览）
         'x-tape-source': file.source || 'chain',
       };
       onServe(`tape://${url.hostname}`, path, file.info.sha256);
       return new Response(request.method === 'HEAD' ? null : file.bytes, { status: 200, headers });
     } catch (e) {
-      return errorPage(502, '读取链上数据失败', String(e?.message || e));
+      return errorPage(502, parseLocalHost(url.hostname) ? '读取本地文件失败' : '读取链上数据失败', String(e?.message || e));
     }
   };
 }

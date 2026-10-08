@@ -151,6 +151,7 @@
   }
 
   const isTape = (u) => /^tape:\/\//i.test(u || '');
+  const isLocal = (u) => /^tape:\/\/local-[0-9a-f]{12}(?:[/?#]|$)/i.test(u || '');
   const shortHex = (h) => (h && h.length > 20 ? h.slice(0, 10) + '…' + h.slice(-8) : h || '—');
   const SOURCE = { chain: tr('从链上下载'), cache: tr('链上哈希未变，使用本机缓存'), stale: tr('读链失败，显示的是上次缓存的版本') };
 
@@ -178,6 +179,7 @@
       if (siteKey !== key) return;
       siteInfo = info;
       renderSite();
+      if (info && info.local) return;
       // 页面读完后再让另外两个节点交叉校验，不拖慢打开网页
       return tb.invoke('verifySite').then((v) => {
         if (siteKey !== key) return;
@@ -188,6 +190,7 @@
   }
 
   function siteState(info) {
+    if (info && info.local) return localState(info);
     if (!info || info.error) return { cls: 'bad', text: tr('读取失败') };
     if (!info.exists) return { cls: 'bad', text: tr('电路不存在') };
     if (!info.opened) return { cls: 'bad', text: tr('未开通容器') };
@@ -202,10 +205,12 @@
   function renderSite() {
     const st = siteState(siteInfo);
     const b = $('site-btn');
-    b.className = st.cls === 'ok' ? '' : st.cls;
-    b.textContent = st.cls === 'ok' ? tr('链上') : st.text;
-    b.title = tr('网站信息：') + st.text;
+    const local = Boolean(siteInfo && siteInfo.local);
+    b.className = (st.cls === 'ok' ? '' : st.cls) + (local ? ' local' : '');
+    b.textContent = local ? tr('本地') : st.cls === 'ok' ? tr('链上') : st.text;
+    b.title = (local ? tr('本地预览：') : tr('网站信息：')) + st.text;
     if (!siteOpen) return;
+    if (local) { renderLocal(siteInfo, st); return; }
     const info = siteInfo || {};
     $('si-label').textContent = info.label || tr('网站信息');
     $('si-status').textContent = st.text;
@@ -248,6 +253,80 @@
     if (info.container && info.opened) tipRow(row, info);
   }
 
+  /** 本地预览的状态：按预检查最严重的一级 */
+  function localState(info) {
+    if (info.error) return { cls: 'bad', text: tr('读取失败') };
+    const items = (info.check && info.check.items) || [];
+    const n = (level) => items.filter((i) => i.level === level).length;
+    if (n('error')) return { cls: 'bad', text: tr('{n} 个错误', { n: n('error') }) };
+    if (n('warn')) return { cls: 'stale', text: tr('{n} 个警告', { n: n('warn') }) };
+    return { cls: 'ok', text: tr('预检查通过') };
+  }
+
+  const LEVELS = { error: tr('错误'), warn: tr('警告'), info: tr('提示') };
+  const size = (n) => (n < 1024 ? n + tr(' 字节') : n < 1024 * 1024 ? (n / 1024).toFixed(1) + ' KB' : (n / 1024 / 1024).toFixed(2) + ' MB');
+
+  /** 本地预览的面板：文件夹、发布内容、预检查结果和目录卡片预览 */
+  function renderLocal(info, st) {
+    $('si-label').textContent = tr('本地预览 · 未上链');
+    $('si-status').textContent = st.text;
+    $('si-status').className = st.cls;
+    const dl = $('si-list');
+    dl.textContent = '';
+    const row = (name) => {
+      const dd = document.createElement('dd');
+      dl.append(Object.assign(document.createElement('dt'), { textContent: name }), dd);
+      return dd;
+    };
+    const text = (dd, value) => dd.append(Object.assign(document.createElement('span'), { className: 'v', textContent: value, title: value }));
+    if (info.error) { text(row(tr('错误')), info.error); return; }
+    const folder = row(tr('文件夹'));
+    text(folder, info.root);
+    const reveal = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('打开文件夹') });
+    reveal.addEventListener('click', () => tb.invoke('revealLocal'));
+    folder.append(reveal);
+    const c = info.check;
+    text(row(tr('发布内容')), tr('{files} 个文件，共 {size}，全部上传约 {txs} 笔交易（每 24 KB 一笔）', { files: c.summary.files, size: size(c.summary.bytes), txs: c.summary.txs }));
+    text(row(tr('外部资源')), externalText(info.external || []));
+
+    const checks = row(tr('预检查'));
+    checks.className = 'checks';
+    if (!c.items.length) text(checks, tr('没有发现问题'));
+    else {
+      const ul = Object.assign(document.createElement('ul'), { className: 'check-list' });
+      for (const it of c.items) {
+        const li = Object.assign(document.createElement('li'), { className: it.level });
+        li.append(Object.assign(document.createElement('span'), { className: 'lv', textContent: LEVELS[it.level] }), document.createTextNode(it.text));
+        ul.append(li);
+      }
+      checks.append(ul);
+    }
+    row(tr('卡片预览')).append(localCard(c.card));
+  }
+
+  /** 目录卡片预览：和「DeWEB 应用」里的卡片同样的样式，不能点 */
+  function localCard(card) {
+    const box = Object.assign(document.createElement('div'), { className: 'card preview' });
+    const thumb = Object.assign(document.createElement('div'), { className: 'thumb' + (card.title ? '' : ' untitled') });
+    const hue = hueOf(card.title || 'local');
+    thumb.style.background = `linear-gradient(135deg, hsl(${hue} 62% 58%), hsl(${(hue + 40) % 360} 58% 42%))`;
+    thumb.append(Object.assign(document.createElement('span'), { className: 'initial', textContent: (card.title ? Array.from(card.title.trim())[0] || '#' : '#').toUpperCase() }));
+    thumb.append(catTag(card));
+    const kind = card.cover ? 'cover' : card.logo ? 'logo' : null;
+    if (kind) {
+      tb.invoke('localImage', kind).then((src) => {
+        if (!src) return;
+        const img = Object.assign(document.createElement('img'), { src, alt: '', className: kind });
+        img.addEventListener('load', () => thumb.classList.add('has-' + kind));
+        thumb.append(img);
+      }).catch(() => {});
+    }
+    const body = Object.assign(document.createElement('div'), { className: 'body' });
+    body.append(Object.assign(document.createElement('div'), { className: 't' + (card.title ? '' : ' untitled'), textContent: card.title || tr('（没有标题）') }));
+    box.append(thumb, body);
+    return box;
+  }
+
   /** 容器里的原生币和 BEM：数额按精度显示，小数最多 4 位 */
   function assetsText() {
     const t = active();
@@ -268,7 +347,7 @@
   function loadAssets() {
     const t = active();
     const url = t && t.url;
-    if (!url || !isTape(url)) return;
+    if (!url || !isTape(url) || isLocal(url)) return;
     assets = null;
     tb.invoke('siteAssets').then((r) => {
       if (!r || r.url !== url) return;
@@ -834,6 +913,8 @@
   }
 
   tb.on('notice', (n) => notice(n.text, n.level));
+  // 本地预览的文件夹改了：页面会自动刷新，预检查结果也重新算
+  tb.on('localChanged', () => { if (isLocal(active() && active().url)) { siteKey = ''; refreshSite(); } });
   tb.on('command', (name) => {
     if (name === 'focusAddress') focusAddress();
     else if (name === 'settings') setSettings(!settingsOpen);
