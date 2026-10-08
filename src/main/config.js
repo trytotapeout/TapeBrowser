@@ -126,14 +126,3 @@ export const READ_RANGE = 96000;
 export const MULTICALL_BATCH = 400;
 // 扫描钱包时单个处理器最多扫多少个编号
 export const MAX_IDS_PER_CPU = 50000;
-
-// 浏览器身份：这些处理器下的电路可以作为 TapeBrowser 的登录身份，一枚电路就是一个身份。
-// TapeBrowser 自己的处理器，加上 BNB 上的三个官方处理器（Genesis CPU、Behemoth、TapeOut）。
-// 身份的资产和数据放在电路的容器里，电路转让后身份跟着走（加密数据新持有人解不开）
-export const IDENTITY_PROCESSORS = Object.freeze([
-  Object.freeze({ network: 'bnb', cpu: 1196, circuits: '0xc982844b0f4a42443ba58f267099d128300f86a2', name: 'TapeBrowser' }),
-  Object.freeze({ network: 'xlayer', cpu: 281, circuits: '0xf78251b38aac35d00ccfc5b69c2a35363bf16275', name: 'TapeBrowser' }),
-  Object.freeze({ network: 'bnb', cpu: 0, circuits: '0x50a994e71615474b55559ff4f500928fbc339dd9', name: 'Genesis CPU' }),
-  Object.freeze({ network: 'bnb', cpu: 1, circuits: '0x1f5cb4aeae1807bf60c3b9c0d8adbcc14e91f12c', name: 'Behemoth' }),
-  Object.freeze({ network: 'bnb', cpu: 30, circuits: '0xb1024b89886b9a34aa4ff5f31c411d708b20a14c', name: 'TapeOut' }),
-]);

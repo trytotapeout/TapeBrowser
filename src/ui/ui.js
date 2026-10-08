@@ -30,6 +30,8 @@
   const $ = (id) => document.getElementById(id);
   let state = { tabs: [], activeId: null };
   let wallet = {};
+  // 钱包的 BEM 价格和余额（bem.js 的 view）
+  let bemView = null;
   let library = { history: [], bookmarks: [] };
   let dir = { sites: [], status: { count: 0, lastFullScan: 0, running: false, progress: null } };
   // 用户手动选过的分栏；没选过时有最近访问就显示最近访问，否则显示全部网站
@@ -263,30 +265,20 @@
     }).catch(() => {});
   }
 
-  /** 「去官网开通」链接：在新标签里打开 TapeOut 官网 */
-  function openSiteLink(dd) {
-    const a = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('去官网开通') });
-    a.title = 'https://tapeout.net/';
-    a.addEventListener('click', () => { setIdentityPanel(false); setSite(false); tb.invoke('openContainerSite'); });
-    dd.append(a);
+  /** 打赏一行的来源说明：钱包在这条链上的 BEM */
+  function tipSource(netKey, name) {
+    const here = bemView && bemView.balance && bemView.balance.networks.find((n) => n.key === netKey);
+    return tr('从你的钱包（{name} 上 {amount} BEM）', { name: name || 'BNB Chain', amount: here && here.balance !== null ? here.balance : '…' });
   }
 
-  /** 打赏一行：登录了同一条链上的身份才能打赏 */
+  /** 打赏一行：用当前钱包把 BEM 转进网站的容器 */
   function tipRow(row, info) {
-    const cur = ident && ident.current;
     const netKey = { 'BNB Chain': 'bnb', 'X Layer': 'xlayer', Base: 'base' }[info.network || 'BNB Chain'];
-    if (!cur) { row(tr('打赏'), ident && ident.account ? tr('登录浏览器身份后，可以从身份的容器打赏 BEM 给这个网站') : tr('连接钱包并登录浏览器身份后可以打赏')); return; }
-    if (cur.network !== netKey) {
-      const dd = row(tr('打赏'), tr('当前身份 {id} 在 {a}，这个网站在 {b}，只能打赏同一条链上的网站，点击右上角进行身份 ID 切换', { id: cur.label, a: cur.networkName, b: info.network }));
-      // 直接打开身份面板，不用再去找右上角的按钮
-      const sw = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('切换身份') });
-      sw.addEventListener('click', () => setIdentityPanel(true));
-      dd.append(sw);
-      return;
-    }
-    if (cur.opened === false) { openSiteLink(row(tr('打赏'), tr('身份 {id} 的容器还没开通', { id: cur.label }))); return; }
-    const bem = assetOf(cur, 'BEM');
-    const dd = row(tr('打赏'), tr('从身份 {id} 的容器（{amount} BEM）', { id: cur.label, amount: bem ? bem.text : '…' }));
+    if (!wallet.ready) { row(tr('打赏'), tr('连接钱包后可以打赏 BEM 给这个网站')); return; }
+    const bal = bemView && bemView.balance;
+    if (bal && !bal.networks.some((n) => n.key === netKey)) { row(tr('打赏'), tr('{name} 上没有 BEM，不能打赏', { name: info.network })); return; }
+    const dd = row(tr('打赏'), tipSource(netKey, info.network));
+    dd.firstChild.dataset.tipNet = netKey;
     const input = Object.assign(document.createElement('input'), { type: 'text', inputMode: 'decimal', value: '0.01', className: 'tip-amount', spellcheck: false });
     input.setAttribute('aria-label', tr('打赏数额（BEM）'));
     const go = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('打赏 BEM') });
@@ -345,7 +337,6 @@
     $('siteinfo').hidden = !on;
     $('site-btn').setAttribute('aria-expanded', String(on));
     if (on) {
-      if (idOpen) setIdentityPanel(false);
       // 打开面板时重新读一次，显示最新状态
       siteKey = '';
       renderSite();
@@ -600,12 +591,8 @@
   $('forward').addEventListener('click', () => tb.invoke('forward'));
   $('reload').addEventListener('click', () => tb.invoke(active() && active().loading ? 'stop' : 'reload'));
   $('settings-btn').addEventListener('click', () => setSettings(!settingsOpen));
-  // 连上钱包后点 BEM 按钮打开身份面板；没连钱包时点它只刷新价格
-  $('bem').addEventListener('click', () => {
-    if (ident && ident.account) setIdentityPanel(!idOpen);
-    else tb.invoke('refreshBem');
-  });
-  $('id-close').addEventListener('click', () => setIdentityPanel(false));
+  // 点 BEM 按钮刷新价格和余额
+  $('bem').addEventListener('click', () => tb.invoke('refreshBem'));
   $('wallet').addEventListener('click', () => {
     if (!wallet.ready) { tb.invoke('openBridge'); return; }
     // 红色（链不对）时直接请钱包切到当前网站所在的链
@@ -653,150 +640,33 @@
     // 主进程切换标签时会结束旧标签的查找，在新标签上重新查找
     if (switched && findOpen) runFind(false);
   });
-  tb.on('wallet', (w) => { wallet = w || {}; renderWallet(); });
-  let bemView = null;
-  // 浏览器身份 {account, scanning, error, identities, current}
-  let ident = null;
-  let idOpen = false;
-  tb.on('bem', (v) => { bemView = v; renderBem(v); });
-  tb.on('identity', (v) => { ident = v; renderBem(bemView); renderIdentity(); if (siteOpen) renderSite(); });
-
-  /** 浏览器身份面板：当前身份、容器状态和资产，以及钱包持有的全部身份 */
-  function setIdentityPanel(on) {
-    idOpen = on;
-    $('idpanel').hidden = !on;
-    $('bem').setAttribute('aria-expanded', String(on));
-    if (on) { if (siteOpen) setSite(false); renderIdentity(); tb.invoke('identityRefresh').catch(() => {}); }
-  }
-
-  function renderIdentity() {
-    if (!idOpen) return;
-    const v = ident || {};
-    const cur = v.current;
-    $('id-status').textContent = !v.account ? tr('没有连接钱包') : v.scanning && !v.identities ? tr('正在查找你持有的身份…') : cur ? tr('已登录 {label}', { label: cur.label }) : tr('未登录');
-    const dl = $('id-list');
-    dl.textContent = '';
-    const row = (name, value, copy) => {
-      const dd = document.createElement('dd');
-      dd.append(Object.assign(document.createElement('span'), { className: 'v', textContent: value ?? '—', title: copy || value || '' }));
-      if (copy) {
-        const c = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('复制') });
-        c.addEventListener('click', () => tb.invoke('copy', copy).then(() => { c.textContent = tr('已复制'); setTimeout(() => { c.textContent = tr('复制'); }, 1200); }));
-        dd.append(c);
-      }
-      dl.append(Object.assign(document.createElement('dt'), { textContent: name }), dd);
-      return dd;
-    };
-    if (cur) {
-      row(tr('身份'), `${cur.label}（${cur.networkName}）`);
-      row(tr('容器'), shortHex(cur.container), cur.container);
-      if (cur.opened === false) {
-        openSiteLink(row(tr('容器资产'), tr('容器还没开通，需要持有人先开通，才能存放资产和数据')));
-      } else {
-        row(tr('容器资产'), (cur.assets || []).map((a) => (a.error ? tr('{symbol} 读取失败', { symbol: a.symbol }) : `${units(a.amount, a.decimals)} ${a.symbol}`)).join(tr('，')) || tr('读取中…'));
-      }
-      if (cur.error) row(tr('错误'), cur.error);
-    }
-    if (v.error) row(tr('提示'), tr('有一条链读取失败：{message}', { message: v.error }));
-
-    const box = $('id-choose');
-    box.textContent = '';
-    if (!v.account) {
-      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: tr('连接钱包') });
-      b.addEventListener('click', () => tb.invoke('openBridge'));
-      box.append(b);
-      return;
-    }
-    const list = v.identities;
-    if (!list) { box.append(Object.assign(document.createElement('span'), { className: 'muted', textContent: tr('正在查找…') })); return; }
-    if (!list.length) {
-      box.append(Object.assign(document.createElement('span'), { className: 'muted', textContent: tr('这个钱包还没有可以登录的电路（TapeBrowser、Genesis CPU、Behemoth、TapeOut），暂时不能登录。') }));
-      return;
-    }
-    const byNet = {};
-    for (const x of list) (byNet[x.networkName] ||= []).push(x);
-    for (const [net, items] of Object.entries(byNet)) {
-      const r = Object.assign(document.createElement('div'), { className: 'row' });
-      r.append(Object.assign(document.createElement('span'), { className: 'net-title', textContent: net }));
-      for (const x of items) {
-        const on = Boolean(cur && cur.network === x.network && cur.cpu === x.cpu && cur.tokenId === x.tokenId);
-        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'pick', textContent: x.label });
-        b.setAttribute('aria-pressed', String(on));
-        b.title = on ? tr('当前身份') : tr('用 {label} 登录', { label: x.label });
-        b.addEventListener('click', () => { if (!on) tb.invoke('identityLogin', { network: x.network, cpu: x.cpu, tokenId: x.tokenId }).catch((e) => notice(errText(e), 'error')); });
-        r.append(b);
-      }
-      box.append(r);
-    }
-    if (cur) {
-      const out = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('退出登录') });
-      out.addEventListener('click', () => tb.invoke('identityLogout'));
-      box.append(out);
-    }
-  }
-
-  /** 容器资产里某个币的数量（显示用）；没读到返回 null */
-  const assetOf = (cur, symbol) => {
-    const a = (cur.assets || []).find((x) => x.symbol === symbol && !x.error);
-    return a ? { text: units(a.amount, a.decimals), value: Number(BigInt(a.amount)) / 10 ** a.decimals } : null;
-  };
-
-  /** 人形图标（SVG，跟着文字颜色）；不用 emoji，各个系统上显示不一样 */
-  function personIcon() {
-    const NS = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 16 16');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('class', 'person');
-    const head = document.createElementNS(NS, 'circle');
-    head.setAttribute('cx', '8'); head.setAttribute('cy', '5'); head.setAttribute('r', '3');
-    const body = document.createElementNS(NS, 'path');
-    body.setAttribute('d', 'M2.5 14.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5');
-    for (const el of [head, body]) { el.setAttribute('fill', 'none'); el.setAttribute('stroke', 'currentColor'); el.setAttribute('stroke-width', '1.6'); el.setAttribute('stroke-linecap', 'round'); svg.append(el); }
-    return svg;
-  }
-
-  /** 登录后的按钮：身份编号 · 容器里的 BEM ≈ 美元；鼠标移上去看容器资产、钱包余额和价格 */
-  function renderIdentityButton(b, v, cur, price) {
-    const span = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
-    const bem = assetOf(cur, 'BEM');
-    // 已登录：人形图标 + 绿色边框，一眼和「未登录」分开
-    b.classList.add('signed-in');
-    b.append(personIcon());
-    // 身份只在一条链上，前面写上链名（容器余额也只是这条链上的）
-    b.append(span('unit', NET_SHORT[cur.network] || cur.networkName), document.createTextNode(' '), span('ident', cur.label), span('sep', '·'));
-    if (!cur.opened && cur.opened !== undefined) b.append(span('unit', tr('容器未开通')));
-    else {
-      b.append(document.createTextNode(bem ? bem.text : '…'), span('unit', 'BEM'));
-      if (bem && v && v.price !== null && bem.value > 0) b.append(span('unit', '≈ $' + usd(bem.value * v.price)));
-    }
-    const lines = [tr('身份 {label}（{network}）的容器：', { label: cur.label, network: cur.networkName })];
-    if (cur.opened === false) lines.push('  ' + tr('容器还没开通'));
-    else for (const a of cur.assets || []) lines.push('  ' + (a.error ? tr('{symbol} 读取失败', { symbol: a.symbol }) : `${units(a.amount, a.decimals)} ${a.symbol}`));
-    const bal = v && v.balance;
-    if (bal) lines.push(tr('你的钱包：{amount} BEM', { amount: bal.total ?? '…' }) + ' (' + bal.networks.map((n) => `${n.name} ${n.balance ?? '…'}`).join(' / ') + ')');
-    lines.push(tr('BEM 价格：{price}', { price: price ?? tr('读取失败') }));
-    b.title = lines.join('\n') + '\n' + tr('点击管理身份');
-    b.setAttribute('aria-label', tr('已登录身份 {chain} {label}', { chain: NET_SHORT[cur.network] || cur.networkName, label: cur.label }) + tr('；') + lines.join(tr('；')));
-  }
+  tb.on('wallet', (w) => {
+    const was = Boolean(wallet.ready);
+    wallet = w || {};
+    renderWallet();
+    // 连上或断开钱包时，网站信息面板里的打赏一行要跟着变
+    if (siteOpen && was !== Boolean(wallet.ready)) renderSite();
+  });
+  tb.on('bem', (v) => {
+    bemView = v;
+    renderBem(v);
+    // 只更新打赏一行里的余额，不重画面板，免得清掉正在输入的数额
+    const src = document.querySelector('#si-list [data-tip-net]');
+    if (src) src.textContent = tipSource(src.dataset.tipNet, (siteInfo || {}).network);
+  });
 
   /** 钱包按钮旁的 BEM：没连钱包只显示价格；连上后显示余额和折合美元，鼠标移上去看各条链 */
   const usd = (n) => (n >= 100 ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 4 : 2 }));
   function renderBem(v) {
     const b = $('bem');
-    b.setAttribute('aria-expanded', String(idOpen));
-    b.hidden = !(ident && ident.current) && (!v || (v.price === null && !v.balance));
+    b.hidden = !v || (v.price === null && !v.balance);
     if (b.hidden) return;
     b.textContent = '';
     b.className = '';
     const price = v.price !== null ? '$' + usd(v.price) : null;
-    const cur = ident && ident.current;
-    if (cur) { renderIdentityButton(b, v, cur, price); return; }
     const lines = [tr('BEM 价格：{price}（PancakeSwap BEM/USDT 池的即时价格，仅供参考）', { price: price ?? tr('读取失败') })];
     const bal = v.balance;
     const span = (cls, text) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
-    // 连了钱包还没登录：最前面写「未登录」，提醒可以点这里登录
-    if (bal) b.append(span('unit', tr('未登录')), span('sep', '·'));
     // 价格一直显示在最前面
     b.append(span('unit', 'BEM'), span('price', price ?? '—'));
     if (bal) {
@@ -806,8 +676,8 @@
       if (bal.networks.some((n) => n.error)) b.classList.add('stale');
       for (const n of bal.networks) lines.push(n.error ? tr('{name}：读取失败', { name: n.name }) : tr('{name}：{amount} BEM', { name: n.name, amount: n.balance ?? '…' }));
     }
-    b.title = lines.join('\n') + '\n' + (bal ? tr('点击登录浏览器身份') : tr('点击刷新'));
-    b.setAttribute('aria-label', (bal ? tr('未登录') + tr('；') : '') + lines.join(tr('；')));
+    b.title = lines.join('\n') + '\n' + tr('点击刷新');
+    b.setAttribute('aria-label', lines.join(tr('；')));
   }
 
   tb.on('notice', (n) => notice(n.text, n.level));

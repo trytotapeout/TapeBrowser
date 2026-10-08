@@ -18,7 +18,6 @@ import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
 import { createAnalyzer } from './risk.js';
 import { createPageAudit } from './page-audit.js';
 import { createBemBalances } from './bem.js';
-import { createIdentity } from './identity.js';
 import { prepareTip, parseBem } from './tip.js';
 import { formatBem } from './bem.js';
 import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
@@ -65,8 +64,6 @@ function tokenInfo(net, token) {
 }
 // 钱包在各条链上的 BEM 余额，工具栏钱包按钮旁显示
 const bem = createBemBalances({ chains, networks: NETWORKS, onChange: (v) => send('bem', v) });
-// 浏览器身份：指定处理器下的一枚电路，资产和数据在它的容器里
-const identity = createIdentity({ chains, sites, store: settings.identityStore, onChange: (v) => send('identity', v) });
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
@@ -208,39 +205,35 @@ function registerIpc() {
     if (!win || e.sender !== win.webContents) throw new Error('forbidden');
     return fn(...args);
   });
-  ui('ready', () => { tabs.push(); send('wallet', walletView()); send('bem', bem.view()); send('identity', identity.view()); pushLibrary(); });
-  ui('identityLogin', (x) => identity.login(x || {}));
-  ui('identityLogout', () => identity.logout());
-  ui('identityRefresh', () => identity.refresh());
-  // 打赏：从当前身份的容器把 BEM 转进当前网站的容器
+  ui('ready', () => { tabs.push(); send('wallet', walletView()); send('bem', bem.view()); pushLibrary(); });
+  // 打赏：用当前钱包把 BEM 直接转进当前网站的容器
   ui('tip', async (text) => {
     const t = tabs.active();
     const m = /^tape:\/\/([^/?#]+)/i.exec(t?.url || '');
     const target = m && parseHost(m[1]);
     if (!target) throw new Error(tr('只能打赏电路网站'));
     const net = networkByArea(target.area);
-    const cur = identity.view().current;
-    let amount;
-    amount = parseBem(text, (...a) => tr(...a));
-    const info = await sites.site(target.tokenId, target.cpu, target.area);
-    const label = siteLabel(target.tokenId, target.cpu, target.area);
-    const bemAsset = cur?.assets?.find((a) => a.symbol === 'BEM' && !a.error);
+    const amount = parseBem(text, (...a) => tr(...a));
     if (!bridge?.state.ready) throw new Error(tr('请先连接钱包'));
     if (bridge.state.chainId !== net.chainIdHex) throw new Error(tr('钱包当前不在 {name} 上，请先点红色的钱包按钮切换', { name: net.name }));
-    const prepared = await prepareTip({ rpc: rpcs[net.key], net, identity: cur, site: { network: net.key, container: info.container, opened: info.opened }, account: bridge.state.accounts[0], amount, balance: bemAsset ? bemAsset.amount : null, tr: (...a) => tr(...a) });
-    const fee = Number(prepared.fee) / 1e18;
+    const account = bridge.state.accounts[0];
+    const info = await sites.site(target.tokenId, target.cpu, target.area);
+    const label = siteLabel(target.tokenId, target.cpu, target.area);
+    // 余额读失败就交给 prepareTip 里的模拟去发现
+    const balance = net.bem ? await chains[net.key].tokenBalance(net.bem, account).catch(() => null) : null;
+    const prepared = await prepareTip({ rpc: rpcs[net.key], net, site: info, account, amount, balance, tr: (...a) => tr(...a) });
     const r = await dialog.showMessageBox(win, {
       type: 'question',
       buttons: [tr('去钱包确认'), tr('取消')],
       defaultId: 0,
       cancelId: 1,
       message: tr('打赏 {amount} BEM 给 {site}', { amount: formatBem(amount), site: label }),
-      detail: tr('从身份 {id} 的容器转出 {amount} BEM，转进 {site} 的容器 {container}。\n容器合约另收手续费 {fee} {coin}，由你的钱包支付，另加网络 gas。\n\n打赏会公开记录在链上，转出后无法撤回。', { id: cur.label, amount: formatBem(amount), site: label, container: info.container, fee: String(fee), coin: net.currency }),
+      detail: tr('从你的钱包 {account} 转出 {amount} BEM，转进 {site} 的容器 {container}。\n只需支付 {name} 的网络 gas。\n\n打赏会公开记录在链上，转出后无法撤回。', { account, amount: formatBem(amount), site: label, container: info.container, name: net.name }),
     });
     if (r.response !== 0) return { ok: false };
     const hash = await bridge.request('eth_sendTransaction', [prepared.tx], originOf(t.url));
     notify(tr('已提交打赏 {amount} BEM 给 {site}，等待链上确认', { amount: formatBem(amount), site: label }), 'ok');
-    setTimeout(() => { identity.refresh().catch(() => {}); }, 8000).unref?.();
+    setTimeout(() => { bem.refresh().catch(() => {}); }, 8000).unref?.();
     return { ok: true, hash };
   });
   ui('refreshBem', () => bem.refresh());
@@ -301,7 +294,6 @@ function registerIpc() {
   ui('openBridge', () => shell.openExternal(bridge.url()));
   // 在 TapeBrowser 的新标签里打开官网开通容器：网页里的签名照常经过桥接页交给钱包扩展，
   // 也能用上 TapeBrowser 的确认弹窗和风险解读
-  ui('openContainerSite', () => tabs.open(CONTAINER_URL));
   ui('disconnectWallet', () => disconnectWallet());
   ui('find', (text, opts) => tabs.find(String(text || ''), { forward: opts?.forward !== false, again: Boolean(opts?.again) }));
   ui('stopFind', () => tabs.stopFind());
@@ -420,8 +412,6 @@ async function scanWallet(address) {
 }
 
 const AUTHOR_URL = 'https://x.com/boostbob';
-// TapeOut 官网：开通电路容器的地方（没有单独的子页面）
-const CONTAINER_URL = 'https://tapeout.net/';
 const DONATE_ADDRESS = '0xdda434fe0281ec6bf4f74ea263504bf878d0ee56';
 const REPO = 'github.com/trytotapeout/TapeBrowser';
 
@@ -611,7 +601,7 @@ app.whenReady().then(async () => {
   const port = await bridge.start();
   if (port !== settings.get('bridgePort')) settings.set('bridgePort', port);
   host = createProviderHost({ bridge, rpcs, settings, openBridge: () => shell.openExternal(bridge.url()), confirm, emit });
-  bridge.on('state', (s) => { send('wallet', walletView()); bem.setAccount(s.ready ? s.accounts?.[0] : null); identity.setAccount(s.ready ? s.accounts?.[0] : null); });
+  bridge.on('state', (s) => { send('wallet', walletView()); bem.setAccount(s.ready ? s.accounts?.[0] : null); });
 
   registerIpc();
   // ready 之后系统语言才准
