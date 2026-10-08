@@ -51,6 +51,10 @@
   let editing = false;
   let settingsOpen = false;
   let helpOpen = false;
+  // 分类筛选：'' 是全部
+  let dirCat = '';
+  // 分类的显示名，顺序就是筛选按钮的顺序
+  const CATS = { game: tr('游戏'), finance: tr('金融'), tool: tr('工具'), social: tr('社交与内容'), infra: tr('生态'), other: tr('其他') };
   // DeWEB 应用、新上线的显示方式：cards | list，记在本机
   let dirView = localStorage.getItem('dirView') === 'list' ? 'list' : 'cards';
   let noticeTimer = null;
@@ -448,6 +452,8 @@
     const q = $('dir-search').value.trim().toLowerCase();
     const netFilter = $('dir-net').value;
     let items = netFilter ? dir.sites.filter((s) => (s.network || 'bnb') === netFilter) : dir.sites;
+    renderCats(items);
+    if (dirCat) items = items.filter((s) => (s.category || 'other') === dirCat);
     if (q) {
       items = items.filter((s) => (s.title || '').toLowerCase().includes(q)
         || s.label.toLowerCase().includes(q)
@@ -467,6 +473,36 @@
     $('dir-more').hidden = items.length <= dirLimit;
     $('dir-more').textContent = tr('显示更多（还有 {0} 个）', { 0: items.length - dirLimit });
     renderNewSites();
+  }
+
+  /** 分类筛选按钮，带上当前链筛选下每类的数量；没有网站的分类不显示 */
+  function renderCats(items) {
+    const box = $('dir-cats');
+    const count = {};
+    for (const s of items) count[s.category || 'other'] = (count[s.category || 'other'] || 0) + 1;
+    if (dirCat && !count[dirCat]) dirCat = '';
+    box.textContent = '';
+    const chip = (key, label, n) => {
+      const b = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' });
+      b.append(label, Object.assign(document.createElement('span'), { className: 'n', textContent: String(n) }));
+      b.setAttribute('aria-pressed', String(dirCat === key));
+      b.addEventListener('click', () => { dirCat = key; dirLimit = 200; renderDirectory(); });
+      box.append(b);
+    };
+    chip('', tr('全部'), items.length);
+    for (const [key, label] of Object.entries(CATS)) if (count[key]) chip(key, label, count[key]);
+  }
+
+  /** 卡片上的分类标签：推测的标「推测」，鼠标移上去看依据 */
+  function catTag(it) {
+    const key = it.category || 'other';
+    const tag = Object.assign(document.createElement('span'), { className: 'cat ' + key, textContent: CATS[key] });
+    if (it.categoryFrom === 'declared') tag.title = tr('站长在 web.json 里声明的分类');
+    else {
+      tag.classList.add('guess');
+      tag.title = tr('推测的分类') + (it.categoryWhy && it.categoryWhy.length ? tr('，依据：') + it.categoryWhy.join(tr('，')) : '');
+    }
+    return tag;
   }
 
   /** 占位图的颜色：按网站地址算一个固定的色相，同一个网站每次都一样 */
@@ -539,6 +575,9 @@
       Object.assign(document.createElement('div'), { className: 't' + (it.title ? '' : ' untitled'), textContent: it.title || tr('（没有标题）') }),
       meta,
     );
+    // 图片区对读屏隐藏，分类再放一份只给读屏的文字
+    thumb.append(catTag(it));
+    body.prepend(Object.assign(document.createElement('span'), { className: 'sr-only', textContent: CATS[it.category || 'other'] + tr('：') }));
     a.append(thumb, body);
     openOnClick(a, it.url);
     li.append(a);

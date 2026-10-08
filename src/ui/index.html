@@ -44,8 +44,10 @@
 
   <main id="content">
     <section id="newtab-page" class="page" hidden>
-      <h1>TapeBrowser</h1>
-      <p class="muted">在地址栏输入电路编号、钱包地址或网址。 <button id="open-help" class="link" type="button">使用帮助</button></p>
+      <div class="hero">
+        <h1>TapeBrowser</h1>
+        <p class="muted">链上的 DeWEB 应用，直接从链上读取并校验。在地址栏输入电路编号、钱包地址或网址。 <button id="open-help" class="link" type="button">使用帮助</button></p>
+      </div>
       <div id="quickstart" class="quickstart" hidden>
         <span>第一次使用？试试这几个：</span>
         <button class="q" type="button" data-q="1888">1888</button>
@@ -96,6 +98,7 @@
             <button type="button" data-view="list" title="列表" aria-label="列表" aria-pressed="false">☰</button>
           </div>
         </div>
+        <div id="dir-cats" class="chips" role="group" aria-label="分类"></div>
         <p class="muted dir-status"><span id="dir-status" aria-live="polite"></span> <button id="dir-refresh" class="link" type="button">立即刷新</button></p>
         <ul id="directory" class="list links"></ul>
         <button id="dir-more" class="link" type="button" hidden>显示更多</button>
@@ -130,6 +133,13 @@
         <li><code>logo.png</code> 或 <code>logo.jpg</code>：正方形图标，推荐 256×256，最大 512×512，居中显示，PNG 可以用透明背景</li>
         <li><code>cover.png</code> 或 <code>cover.jpg</code>：16:10 封面，推荐 640×400，铺满卡片的图片区；有封面时不显示 logo</li>
         <li>每张不超过 50 KB，超过的不显示。目录每小时检查一次，换图后最多一小时更新</li>
+      </ul>
+
+      <h2>给站长：DeWEB 应用的分类</h2>
+      <p class="muted">TapeBrowser 会按标题、描述和页面内容推测一个分类，卡片上标「推测」。想指定分类，在网站根目录放一个 web.json：</p>
+      <ul class="examples">
+        <li><code>{"category": "game"}</code></li>
+        <li>可选的值：<code>game</code> 游戏、<code>finance</code> 金融、<code>tool</code> 工具、<code>social</code> 社交与内容、<code>infra</code> 生态、<code>other</code> 其他</li>
       </ul>
 
       <h2>链上校验</h2>

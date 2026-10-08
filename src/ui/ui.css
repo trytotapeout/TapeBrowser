@@ -52,10 +52,14 @@ body.mac #tabstrip { padding-left: 80px; }
 
 #content { flex: 1; position: relative; overflow: auto; }
 .page { max-width: 680px; margin: 48px auto; padding: 0 24px; font-size: 14px; }
-/* 新标签页主要是网站列表（标题、电路名、日期），放宽；开头的说明文字仍限制行宽，方便阅读 */
 /* 新标签页和帮助页铺满窗口宽度 */
-#newtab-page, #help-page { max-width: none; margin: 40px 0; padding: 0 40px; }
-#newtab-page > p, #newtab-page > .examples { max-width: 720px; }
+#newtab-page, #help-page { max-width: none; margin: 0; padding: 0 40px 40px; }
+#help-page { padding-top: 32px; }
+/* 新标签页顶部：浅浅的品牌色渐变，标题用渐变字 */
+#newtab-page .hero { margin: 0 -40px; padding: 36px 40px 22px; background: radial-gradient(1200px 220px at 0% 0%, rgba(31, 111, 235, .13), transparent 70%), radial-gradient(900px 200px at 100% 0%, rgba(240, 185, 11, .12), transparent 70%); }
+#newtab-page .hero h1 { font-size: 30px; letter-spacing: -.01em; margin: 0 0 6px; background: linear-gradient(90deg, var(--accent), #8b5cf6 55%, #f0b90b); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
+#newtab-page .hero p { max-width: 760px; margin: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .page h1 { font-size: 22px; margin: 0 0 8px; }
 .page h2 { font-size: 15px; margin: 28px 0 8px; }
 .muted { color: var(--muted); }
@@ -103,23 +107,33 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 #si-list dd { margin: 0; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 #si-list dd .v { font-family: ui-monospace, Menlo, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.seg { display: flex; gap: 4px; margin: 32px 0 8px; border-bottom: 1px solid var(--line); }
-.seg button { border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 6px 10px; cursor: pointer; margin-bottom: -1px; }
-.seg button[aria-selected="true"] { border-bottom-color: var(--accent); font-weight: 600; }
-.dir-tools { display: flex; gap: 8px; margin-top: 10px; }
-#dir-search { flex: 1; min-width: 0; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--fg); font: inherit; }
-#dir-sort { height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--fg); font: inherit; }
+.seg { display: flex; gap: 2px; margin: 18px 0 12px; padding: 3px; width: fit-content; border-radius: 10px; background: var(--chrome); }
+.seg button { border: 0; border-radius: 8px; background: transparent; padding: 5px 14px; cursor: pointer; color: var(--muted); font: inherit; }
+.seg button:hover { color: var(--fg); }
+.seg button[aria-selected="true"] { background: var(--bg); color: var(--fg); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+.dir-tools { display: flex; gap: 8px; margin-top: 4px; }
+#dir-search { flex: 1; min-width: 0; height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--input); color: var(--fg); font: inherit; }
+#dir-sort { height: 32px; border: 1px solid var(--line); border-radius: 8px; background: var(--input); color: var(--fg); font: inherit; }
+/* 分类筛选 */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; }
+.chip { border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--fg); padding: 3px 12px; cursor: pointer; font: inherit; font-size: 13px; }
+.chip .n { margin-left: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.chip:hover { border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip[aria-pressed="true"] .n { color: rgba(255, 255, 255, .8); }
 .dir-status { margin: 8px 0; font-size: 12px; }
 .links .t.untitled { color: var(--muted); }
 .links .d { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 #dir-more { margin: 10px 0; }
 
 /* 卡片视图：DeWEB 应用和新上线 */
-.cards { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
-.card { min-width: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--tab-active); }
+.cards { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
+.card { min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--tab-active); box-shadow: 0 1px 2px rgba(0, 0, 0, .05); transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
 .card a { display: block; color: inherit; text-decoration: none; }
-.card:hover { border-color: var(--accent); }
+.card a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 12px; }
+.card:hover { transform: translateY(-2px); border-color: transparent; box-shadow: 0 8px 22px rgba(0, 0, 0, .12), 0 0 0 1px var(--accent); }
 .card:hover .thumb .initial { transform: scale(1.08); }
+@media (prefers-reduced-motion: reduce) { .card, .thumb .initial { transition: none; } .card:hover { transform: none; } }
 /* 图片区：还没有真实图片时，用电路编号算出的固定渐变加标题首字作占位 */
 .thumb { position: relative; aspect-ratio: 16 / 10; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .thumb .initial { font-size: 30px; font-weight: 600; color: #fff; opacity: .92; text-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .12s ease; }
@@ -129,7 +143,10 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 .thumb.has-logo .initial, .thumb.has-cover .initial { visibility: hidden; }
 /* 没有标题的网站也一眼能认出来 */
 .thumb.untitled .initial { font-size: 22px; font-weight: 500; opacity: .8; }
-.card .body { padding: 8px 10px 9px; }
+.card .body { padding: 10px 12px 11px; }
+/* 分类标签：图片区左上角，推测的用虚线边 */
+.thumb .cat { position: absolute; top: 8px; left: 8px; z-index: 1; font-size: 11px; line-height: 18px; padding: 0 8px; border-radius: 9px; background: rgba(0, 0, 0, .45); color: #fff; backdrop-filter: blur(6px); }
+.thumb .cat.guess { background: rgba(0, 0, 0, .3); outline: 1px dashed rgba(255, 255, 255, .55); outline-offset: -1px; }
 .card .t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; height: 2.7em; font-weight: 500; }
 .card .t.untitled { color: var(--muted); font-weight: 400; }
 .card .meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); }
@@ -149,7 +166,7 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 .net { flex: none; font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); }
 .net.xlayer { border-color: #3b3b3b; color: var(--fg); }
 .net.base { border-color: #0052ff; color: #0052ff; }
-#dir-net { height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--fg); font: inherit; }
+#dir-net { height: 32px; border-radius: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--fg); font: inherit; }
 .rpc-net h3 { font-size: 13px; margin: 14px 0 6px; }
 /* 当前标签所在的链，颜色取各链 logo 的主色：BNB 黄、X Layer 黑白、Base 蓝 */
 .chain-tag { flex: none; height: 20px; line-height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; -webkit-app-region: no-drag; }

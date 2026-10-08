@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDirectory, extractTitle, FULL_SCAN_EVERY, QUICK_CHECK_EVERY, IMAGE_MAX_BYTES } from '../src/main/directory.js';
+import { createDirectory, extractTitle, FULL_SCAN_EVERY, QUICK_CHECK_EVERY, IMAGE_MAX_BYTES, MANIFEST_PATH } from '../src/main/directory.js';
 
 const enc = (s) => new TextEncoder().encode(s);
 
@@ -285,5 +285,43 @@ test('卡片图片：logo、cover 各取第一个存在的格式；超过 50 KB 
   assert.equal(d.list().find((s) => s.cpu === 0).logo.sha256, '0xnew');
   assert.ok(changes > before);
   assert.equal(new TextDecoder().decode((await d.imageFor('1-0', 'logo')).bytes), 'NEW');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('分类：默认按首页推测；web.json 声明的分类覆盖推测，改了会重新读', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tb-dir-'));
+  const file = join(dir, 'directory.json');
+  let t = 1_000_000;
+  const chain = fakeChain();
+  const html = { '0xc1-0': { sha: '0xaa', body: '<title>五子棋</title>' } };
+  const sites = fakeSites(html);
+  const d = createDirectory({ chains: { bnb: chain }, sites, file, now: () => t, pause: 0 });
+  await d.refresh();
+  const one = () => d.list().find((s) => s.cpu === 0);
+  assert.equal(one().category, 'game');
+  assert.equal(one().categoryFrom, 'guess');
+  assert.deepEqual(one().categoryWhy, ['标题「五子棋」']);
+  // 首页太大没下载的 2.1：只按标题推测，没有标题就是其他
+  assert.equal(d.list().find((s) => s.cpu === 1).category, 'other');
+
+  // 站长声明为工具
+  t += QUICK_CHECK_EVERY;
+  chain.st.files[`0xc1-0/${MANIFEST_PATH}`] = { sha256: '0xm1', size: 30, updatedAt: 1 };
+  html[`0xc1-0/${MANIFEST_PATH}`] = { sha: '0xm1', body: '{"category":"tool"}' };
+  await d.refresh();
+  assert.equal(one().category, 'tool');
+  assert.equal(one().categoryFrom, 'declared');
+  const reads = sites.reads();
+  t += QUICK_CHECK_EVERY;
+  await d.refresh();
+  assert.equal(sites.reads(), reads, '声明文件没变不重新读');
+
+  // 改成不认识的值：退回推测
+  t += QUICK_CHECK_EVERY;
+  chain.st.files[`0xc1-0/${MANIFEST_PATH}`] = { sha256: '0xm2', size: 30, updatedAt: 2 };
+  html[`0xc1-0/${MANIFEST_PATH}`] = { sha: '0xm2', body: '{"category":"casino"}' };
+  await d.refresh();
+  assert.equal(one().category, 'game');
+  assert.equal(one().categoryFrom, 'guess');
   rmSync(dir, { recursive: true, force: true });
 });

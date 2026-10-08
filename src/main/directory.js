@@ -16,6 +16,8 @@
 // 标题：下载 index.html 取 <title>，按首页 sha256 缓存，内容没变不重新下载
 // 图片：查首页时顺带查容器根目录的 logo.png / logo.jpg（正方形图标）和 cover.png / cover.jpg（16:10 封面），
 //   只记文件信息，不下载；超过 50 KB 的不用。界面显示卡片时才按需读取（imageFor）
+// 分类：站长在 web.json 里写了 category 就用它；没写时取首页标题时顺带推测一个（category.js），
+//   按首页 sha256 缓存
 //
 // 标题来自网站自己的 HTML，界面只按纯文本显示。
 
@@ -23,6 +25,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { siteLabel, siteUrl, siteHost } from './address.js';
 import { NETWORKS } from './config.js';
+import { classify, declaredCategory } from './category.js';
 
 export const FULL_SCAN_EVERY = 7 * 24 * 60 * 60 * 1000;
 export const QUICK_CHECK_EVERY = 60 * 60 * 1000;
@@ -33,6 +36,9 @@ const BATCH_PAUSE = 150;
 export const IMAGE_FILES = { logo: ['logo.png', 'logo.jpg'], cover: ['cover.png', 'cover.jpg'] };
 export const IMAGE_MAX_BYTES = 50 * 1024;
 const IMAGE_PATHS = [...IMAGE_FILES.logo, ...IMAGE_FILES.cover];
+// 站长对 DeWEB 应用的声明（目前只有 category），放在网站根目录，和 index.html 同一层
+export const MANIFEST_PATH = 'web.json';
+const MANIFEST_MAX_BYTES = 16 * 1024;
 
 /** 从 HTML 里取 <title> 的纯文本 */
 export function extractTitle(bytes) {
@@ -96,7 +102,7 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
       if (info.exists && info.opened && info.container) live.push({ ...items[i], owner: info.owner, container: info.container });
     });
     // 每个网站查 index.html 和几张卡片图片，放在同一批 multicall 里
-    const paths = ['index.html', ...IMAGE_PATHS];
+    const paths = ['index.html', ...IMAGE_PATHS, MANIFEST_PATH];
     const all = live.length ? await chain.fileInfos(live.flatMap((s) => paths.map((path) => ({ container: s.container, path }))), block) : [];
     const files = live.map((_, i) => all[i * paths.length]);
     const imagesOf = (i) => {
@@ -118,12 +124,19 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
       const key = siteHost(s.tokenId, s.cpu, net.area);
       const prev = data.sites[key];
       const img = imagesOf(i);
+      const man = all[i * paths.length + paths.length - 1];
+      const manifest = man && man.size > 0 && man.size <= MANIFEST_MAX_BYTES ? { sha256: man.sha256, size: man.size } : null;
+      // 声明文件没变就沿用上次读到的分类
+      const sameManifest = manifest && prev?.manifest?.sha256 === manifest.sha256;
       out.set(key, {
         tokenId: s.tokenId, cpu: s.cpu, area: net.area, network: net.key,
         label: siteLabel(s.tokenId, s.cpu, net.area), url: siteUrl(s.tokenId, s.cpu, '', net.area),
         circuits: s.circuits, owner: s.owner, container: s.container,
         sha256: f.sha256, size: f.size, updatedAt: f.updatedAt,
         logo: img.logo ?? null, cover: img.cover ?? null,
+        manifest, declared: sameManifest ? prev.declared ?? null : null, manifestRead: sameManifest ? prev.manifestRead ?? null : null,
+        guess: prev && prev.guessSha === f.sha256 ? prev.guess : null,
+        guessSha: prev && prev.guessSha === f.sha256 ? prev.guessSha : null,
         // 首页没变就沿用已取到的标题
         title: prev && prev.titleSha === f.sha256 ? prev.title : '',
         titleSha: prev && prev.titleSha === f.sha256 ? prev.titleSha : null,
@@ -162,7 +175,8 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
       if (entry) {
         const prev = data.sites[key];
         if (!prev || prev.sha256 !== entry.sha256 || prev.owner !== entry.owner || prev.container !== entry.container
-          || prev.logo?.sha256 !== entry.logo?.sha256 || prev.cover?.sha256 !== entry.cover?.sha256) changed = true;
+          || prev.logo?.sha256 !== entry.logo?.sha256 || prev.cover?.sha256 !== entry.cover?.sha256
+          || prev.manifest?.sha256 !== entry.manifest?.sha256) changed = true;
         data.sites[key] = entry;
       } else if (data.sites[key]) {
         delete data.sites[key];
@@ -243,7 +257,7 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
 
   /** 下载还没有标题（或首页已更新）的网站首页，取 <title> */
   async function fetchTitles(net) {
-    const todo = ofNet(net).map(([, s]) => s).filter((s) => s.titleSha !== s.sha256 && s.size <= TITLE_MAX_BYTES);
+    const todo = ofNet(net).map(([, s]) => s).filter((s) => (s.titleSha !== s.sha256 || s.guessSha !== s.sha256) && s.size <= TITLE_MAX_BYTES);
     if (!todo.length) return;
     let next = 0;
     let done = 0;
@@ -259,6 +273,8 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
           if (f && cur) {
             cur.title = extractTitle(f.bytes);
             cur.titleSha = f.info.sha256;
+            cur.guess = classify(cur.title, f.bytes);
+            cur.guessSha = f.info.sha256;
             dirty++;
           }
         } catch { /* 取不到标题就先留空，下次再试 */ }
@@ -273,6 +289,31 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
     onChange();
   }
 
+  /** 读取有变化的 web.json，取站长声明的分类 */
+  async function fetchManifests(net) {
+    const todo = ofNet(net).map(([, s]) => s).filter((s) => s.manifest && s.manifestRead !== s.manifest.sha256);
+    if (!todo.length) return;
+    for (const s of todo) {
+      let declared = null;
+      try {
+        const f = await sites.readFile(s.container, MANIFEST_PATH, net.area);
+        if (f && f.bytes.length <= MANIFEST_MAX_BYTES) declared = declaredCategory(JSON.parse(new TextDecoder().decode(f.bytes)));
+      } catch { /* 不是合法 JSON 就当没声明 */ }
+      const cur = data.sites[siteHost(s.tokenId, s.cpu, net.area)];
+      if (cur) { cur.declared = declared; cur.manifestRead = s.manifest.sha256; }
+      await sleep(pause);
+    }
+    save();
+    onChange();
+  }
+
+  /** 列表里给界面的分类：站长声明的优先，其次是按首页推测的，首页太大没下载的只按标题推测 */
+  function categoryOf(s) {
+    if (s.declared) return { category: s.declared, categoryFrom: 'declared', categoryWhy: [] };
+    const g = s.guess && s.guessSha === s.sha256 ? s.guess : classify(s.title, null);
+    return { category: g.category, categoryFrom: 'guess', categoryWhy: g.why };
+  }
+
   async function refreshNet(net, force) {
     try {
       const t = now();
@@ -281,6 +322,7 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
       if (force || !sc.lastFullScan || !sc.seen || t - sc.lastFullScan >= FULL_SCAN_EVERY) await fullScan(net);
       else if (t - sc.lastQuickCheck >= QUICK_CHECK_EVERY) await incremental(net);
       await fetchTitles(net);
+      await fetchManifests(net);
       delete progress[net.key];
     } catch (e) {
       progress[net.key] = { stage: 'error', message: String(e?.message || e) };
@@ -338,7 +380,7 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
   return {
     refresh,
     imageFor,
-    list: () => Object.values(data.sites).map((s) => ({ network: 'bnb', area: null, ...s })),
+    list: () => Object.values(data.sites).map((s) => ({ network: 'bnb', area: null, ...s, ...categoryOf(s) })),
     status,
   };
 }
