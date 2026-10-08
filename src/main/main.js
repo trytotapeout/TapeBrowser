@@ -333,6 +333,15 @@ function registerIpc() {
   ui('cacheUsage', () => contentStore.usage());
   ui('directory', () => ({ sites: directory.list(), status: directory.status() }));
   ui('scanDirectory', () => { refreshDirectory(true); return directory.status(); });
+  // DeWEB 应用卡片上的 logo / cover：外壳界面不走 tape:// 协议，读出来（校验过 sha256）转成 data: 网址
+  ui('siteImage', async (url, kind) => {
+    const m = /^tape:\/\/([^/]+)\/$/.exec(String(url));
+    if (!m || (kind !== 'logo' && kind !== 'cover')) return null;
+    try {
+      const img = await directory.imageFor(m[1], kind);
+      return img ? `data:${img.type};base64,${Buffer.from(img.bytes).toString('base64')}` : null;
+    } catch { return null; }
+  });
   ui('clearCache', () => contentStore.clear());
   ui('openUrl', (url, opts) => {
     url = String(url || '');
@@ -516,8 +525,15 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu', label: tr('窗口') },
-    // Windows、Linux 没有应用菜单，关于放在帮助里
-    ...(isMac ? [] : [{ label: tr('帮助'), submenu: [{ label: tr('关于 TapeBrowser'), click: () => showAbout() }] }]),
+    {
+      label: tr('帮助'),
+      role: 'help',
+      submenu: [
+        { label: tr('使用帮助'), click: ui('help') },
+        // Windows、Linux 没有应用菜单，关于放在帮助里
+        ...(isMac ? [] : [{ type: 'separator' }, { label: tr('关于 TapeBrowser'), click: () => showAbout() }]),
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -527,11 +543,15 @@ function createWindow() {
     height: 820,
     minWidth: 640,
     minHeight: 400,
+    // 先不显示，最大化以后再显示，免得启动时窗口闪一下再变大
+    show: false,
     title: 'TapeBrowser',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#ffffff',
     webPreferences: { preload: join(SRC, 'preload/ui.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
+  // 启动时铺满屏幕（不是全屏，菜单栏和 Dock 还在）；还原后回到上面的 1280×820
+  win.once('ready-to-show', () => { win.maximize(); win.show(); });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   tabs = createTabs({

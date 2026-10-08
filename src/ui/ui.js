@@ -34,7 +34,7 @@
   let bemView = null;
   let library = { history: [], bookmarks: [] };
   let dir = { sites: [], status: { count: 0, lastFullScan: 0, running: false, progress: null } };
-  // 用户手动选过的分栏；没选过时有最近访问就显示最近访问，否则显示全部网站
+  // 用户手动选过的分栏；没选过时显示排在第一个的 DeWEB 应用
   let panel = null;
   let dirLimit = 200;
   let findOpen = false;
@@ -50,6 +50,9 @@
   let siteKey = '';
   let editing = false;
   let settingsOpen = false;
+  let helpOpen = false;
+  // DeWEB 应用、新上线的显示方式：cards | list，记在本机
+  let dirView = localStorage.getItem('dirView') === 'list' ? 'list' : 'cards';
   let noticeTimer = null;
 
   if (tb.platform === 'darwin') document.body.classList.add('mac');
@@ -102,7 +105,7 @@
   }
 
   function select(id) {
-    if (settingsOpen) setSettings(false);
+    closePages();
     editing = false;
     tb.invoke('activate', id);
   }
@@ -115,7 +118,7 @@
     $('reload').title = t && t.loading ? tr('停止') : tr('重新加载');
     if (!editing) $('address').value = t && t.url ? t.url : '';
     document.title = t ? t.title + ' - TapeBrowser' : 'TapeBrowser';
-    $('newtab-page').hidden = settingsOpen || Boolean(t && t.url);
+    $('newtab-page').hidden = settingsOpen || helpOpen || Boolean(t && t.url);
     if (pendingOwner && t && !t.url) {
       $('dir-search').value = pendingOwner;
       $('dir-net').value = '';
@@ -126,6 +129,8 @@
       renderDirectory();
     }
     $('settings-page').hidden = !settingsOpen;
+    $('help-page').hidden = !helpOpen;
+    $('quickstart').hidden = library.history.length > 0;
     const zoom = t ? t.zoom : 100;
     // 新标签页画在外壳界面里，只缩放这一块，标签栏和地址栏不变
     $('newtab-page').style.zoom = t && !t.url && zoom !== 100 ? String(zoom / 100) : '';
@@ -316,16 +321,16 @@
       + tr('。可能是节点数据有问题，或网站刚好在更新，请刷新后再看；签名、交易前请核对。');
   }
 
-  /** 持有人一行后面加「持有的全部网站」：在新标签页的全部网站里按持有人筛选 */
+  /** 持有人一行后面加「持有的全部网站」：在新标签页的 DeWEB 应用里按持有人筛选 */
   function ownerLink(owner) {
     const dd = $('si-list').lastElementChild;
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('持有的全部网站') });
-    b.title = tr('在全部网站里查看这个地址持有的网站');
+    b.title = tr('在 DeWEB 应用里查看这个地址持有的网站');
     b.addEventListener('click', () => showOwner(owner));
     dd.append(b);
   }
 
-  /** 打开新标签页，全部网站按持有人筛选 */
+  /** 打开新标签页，DeWEB 应用按持有人筛选 */
   function showOwner(owner) {
     pendingOwner = owner.toLowerCase();
     setSite(false);
@@ -382,7 +387,7 @@
   }
 
   function renderPanels() {
-    const cur = panel || (library.history.length ? 'history' : 'directory');
+    const cur = panel || 'directory';
     for (const b of document.querySelectorAll('#lib-tabs [role="tab"]')) {
       const on = b.dataset.panel === cur;
       b.setAttribute('aria-selected', String(on));
@@ -421,7 +426,7 @@
     return tr('已收录 {count} 个网站{0} · {1}更新', { count: st.count, 0: per ? tr('（{per}）', { per }) : '', 1: ago(st.lastUpdate || st.lastFullScan) });
   }
 
-  /** 全部网站：按搜索词过滤、排序，只渲染前 dirLimit 条 */
+  /** DeWEB 应用：按搜索词过滤、排序，只渲染前 dirLimit 条 */
   function renderDirectory() {
     const st = dir.status;
     $('dir-count').textContent = st.count ? String(st.count) : '';
@@ -443,14 +448,91 @@
         : (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || a.tokenId - b.tokenId);
     const ul = $('directory');
     ul.textContent = '';
+    ul.className = dirView === 'cards' ? 'cards' : 'list links';
     for (const it of items.slice(0, dirLimit)) ul.append(dirItem(it, it.updatedAt));
+    for (const b of document.querySelectorAll('#dir-view button')) b.setAttribute('aria-pressed', String(b.dataset.view === dirView));
     $('dir-more').hidden = items.length <= dirLimit;
     $('dir-more').textContent = tr('显示更多（还有 {0} 个）', { 0: items.length - dirLimit });
     renderNewSites();
   }
 
-  /** 目录里的一行；date 是右边显示的上链时间（秒） */
+  /** 占位图的颜色：按网站地址算一个固定的色相，同一个网站每次都一样 */
+  function hueOf(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h % 360;
+  }
+
+  // 卡片图片按 网址 + 种类 + sha256 缓存在内存里，重新渲染列表不重复读取
+  const images = new Map();
+  function loadThumb(thumb) {
+    const { url, kind, sha } = thumb.dataset;
+    const key = `${url}|${kind}|${sha}`;
+    if (!images.has(key)) images.set(key, tb.invoke('siteImage', url, kind).catch(() => null));
+    images.get(key).then((src) => {
+      if (!src || !thumb.isConnected) return;
+      const img = Object.assign(document.createElement('img'), { src, alt: '', className: kind });
+      img.addEventListener('load', () => thumb.classList.add('has-' + kind));
+      img.addEventListener('error', () => img.remove());
+      thumb.append(img);
+    });
+  }
+  const thumbObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      thumbObserver.unobserve(e.target);
+      loadThumb(e.target);
+    }
+  }, { rootMargin: '300px' });
+
+  /** 目录里的一个网站：卡片或一行；date 是显示的上链时间（秒） */
   function dirItem(it, date) {
+    return dirView === 'cards' ? dirCard(it, date) : dirRow(it, date);
+  }
+
+  function openOnClick(a, url) {
+    // ⌘ 点击或中键在后台标签打开
+    a.addEventListener('click', (e) => { e.preventDefault(); tb.invoke('openUrl', url, { background: e.metaKey || e.ctrlKey }); });
+    a.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); tb.invoke('openUrl', url, { background: true }); } });
+  }
+
+  function dirCard(it, date) {
+    const li = Object.assign(document.createElement('li'), { className: 'card' });
+    const net = it.network || 'bnb';
+    const a = Object.assign(document.createElement('a'), { href: it.url, title: tr('{url}\n持有人 {owner}', { url: it.url, owner: it.owner }) });
+    const thumb = Object.assign(document.createElement('div'), { className: 'thumb' + (it.title ? '' : ' untitled') });
+    const hue = hueOf(it.url);
+    thumb.style.background = `linear-gradient(135deg, hsl(${hue} 62% 58%), hsl(${(hue + 40) % 360} 58% 42%))`;
+    // 首字取自标题（按字符，不会切开 emoji）；没有标题显示电路编号
+    const first = it.title ? Array.from(it.title.trim())[0] || '#' : '#' + it.tokenId;
+    thumb.append(Object.assign(document.createElement('span'), { className: 'initial', textContent: first.toUpperCase() }));
+    thumb.setAttribute('aria-hidden', 'true');
+    // 站长放了 cover（铺满）或 logo（居中）就显示，滚动到附近才读取；读不到保留占位
+    const pic = it.cover ? ['cover', it.cover] : it.logo ? ['logo', it.logo] : null;
+    if (pic) {
+      thumb.dataset.url = it.url;
+      thumb.dataset.kind = pic[0];
+      thumb.dataset.sha = pic[1].sha256;
+      thumbObserver.observe(thumb);
+    }
+    const body = Object.assign(document.createElement('div'), { className: 'body' });
+    const meta = Object.assign(document.createElement('div'), { className: 'meta' });
+    meta.append(
+      Object.assign(document.createElement('span'), { className: 'net ' + net, textContent: NET_SHORT[net] }),
+      Object.assign(document.createElement('span'), { className: 'u', textContent: it.label }),
+      Object.assign(document.createElement('span'), { className: 'd', textContent: day(date) }),
+    );
+    body.append(
+      Object.assign(document.createElement('div'), { className: 't' + (it.title ? '' : ' untitled'), textContent: it.title || tr('（没有标题）') }),
+      meta,
+    );
+    a.append(thumb, body);
+    openOnClick(a, it.url);
+    li.append(a);
+    return li;
+  }
+
+  function dirRow(it, date) {
     const li = document.createElement('li');
     // 标题来自网站自己的 HTML，只用 textContent
     const a = Object.assign(document.createElement('a'), { href: it.url, title: tr('{url}\n持有人 {owner}', { url: it.url, owner: it.owner }) });
@@ -460,8 +542,7 @@
       Object.assign(document.createElement('span'), { className: 'u', textContent: it.label }),
       Object.assign(document.createElement('span'), { className: 'd', textContent: day(date) }),
     );
-    a.addEventListener('click', (e) => { e.preventDefault(); tb.invoke('openUrl', it.url, { background: e.metaKey || e.ctrlKey }); });
-    a.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); tb.invoke('openUrl', it.url, { background: true }); } });
+    openOnClick(a, it.url);
     li.append(a);
     return li;
   }
@@ -474,6 +555,7 @@
     const items = dir.sites.filter((it) => pub(it) >= since).sort((a, b) => pub(b) - pub(a));
     const ul = $('newsites');
     ul.textContent = '';
+    ul.className = dirView === 'cards' ? 'cards' : 'list links';
     for (const it of items.slice(0, 100)) ul.append(dirItem(it, pub(it)));
     $('newsites-empty').hidden = items.length > 0;
     $('tab-new').textContent = tr('新上线');
@@ -536,8 +618,22 @@
     noticeTimer = setTimeout(() => { n.hidden = true; }, level === 'error' ? 12000 : 6000);
   }
 
+  /** 关掉设置页和帮助页，回到当前标签 */
+  function closePages() {
+    if (settingsOpen) setSettings(false);
+    if (helpOpen) setHelp(false);
+  }
+
+  function setHelp(on) {
+    helpOpen = on;
+    if (on && settingsOpen) settingsOpen = false;
+    tb.invoke('overlay', on || settingsOpen);
+    renderNav();
+  }
+
   async function setSettings(on) {
     settingsOpen = on;
+    if (on) helpOpen = false;
     tb.invoke('overlay', on);
     renderNav();
     if (on) await loadSettings();
@@ -577,7 +673,7 @@
     e.preventDefault();
     const text = $('address').value;
     editing = false;
-    if (settingsOpen) setSettings(false);
+    closePages();
     $('address').blur();
     tb.invoke('submit', text);
   });
@@ -622,8 +718,13 @@
       box.append(sec);
     }
   }
-  for (const b of document.querySelectorAll('.examples button')) {
-    b.addEventListener('click', () => { $('address').value = b.dataset.q; tb.invoke('submit', b.dataset.q); });
+  for (const b of document.querySelectorAll('.examples button, .quickstart button')) {
+    b.addEventListener('click', () => { closePages(); $('address').value = b.dataset.q; tb.invoke('submit', b.dataset.q); });
+  }
+  $('open-help').addEventListener('click', () => setHelp(true));
+  $('help-close').addEventListener('click', () => setHelp(false));
+  for (const b of document.querySelectorAll('#dir-view button')) {
+    b.addEventListener('click', () => { dirView = b.dataset.view; localStorage.setItem('dirView', dirView); renderDirectory(); });
   }
 
   function focusAddress() {
@@ -684,6 +785,7 @@
   tb.on('command', (name) => {
     if (name === 'focusAddress') focusAddress();
     else if (name === 'settings') setSettings(!settingsOpen);
+    else if (name === 'help') setHelp(!helpOpen);
     else if (name === 'find') { if (active() && active().url) setFind(true); }
     else if (name === 'findNext' || name === 'findPrev') {
       if (!findOpen) { if (active() && active().url) setFind(true); return; }

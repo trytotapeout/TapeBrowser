@@ -14,6 +14,8 @@
 //   新铸造但一直没开通的电路留在 watch 里每小时查，直到下一次完整扫描；早就铸造、很久以后才开通容器的，
 //   要等下一次完整扫描（最多一周）才会收录
 // 标题：下载 index.html 取 <title>，按首页 sha256 缓存，内容没变不重新下载
+// 图片：查首页时顺带查容器根目录的 logo.png / logo.jpg（正方形图标）和 cover.png / cover.jpg（16:10 封面），
+//   只记文件信息，不下载；超过 50 KB 的不用。界面显示卡片时才按需读取（imageFor）
 //
 // 标题来自网站自己的 HTML，界面只按纯文本显示。
 
@@ -27,6 +29,10 @@ export const QUICK_CHECK_EVERY = 60 * 60 * 1000;
 const TITLE_MAX_BYTES = 256 * 1024;
 const TITLE_CONCURRENCY = 2;
 const BATCH_PAUSE = 150;
+// 站长放在网站根目录的卡片图片，按顺序取第一个存在的
+export const IMAGE_FILES = { logo: ['logo.png', 'logo.jpg'], cover: ['cover.png', 'cover.jpg'] };
+export const IMAGE_MAX_BYTES = 50 * 1024;
+const IMAGE_PATHS = [...IMAGE_FILES.logo, ...IMAGE_FILES.cover];
 
 /** 从 HTML 里取 <title> 的纯文本 */
 export function extractTitle(bytes) {
@@ -89,7 +95,21 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
     infos.forEach((info, i) => {
       if (info.exists && info.opened && info.container) live.push({ ...items[i], owner: info.owner, container: info.container });
     });
-    const files = live.length ? await chain.fileInfos(live.map((s) => ({ container: s.container, path: 'index.html' })), block) : [];
+    // 每个网站查 index.html 和几张卡片图片，放在同一批 multicall 里
+    const paths = ['index.html', ...IMAGE_PATHS];
+    const all = live.length ? await chain.fileInfos(live.flatMap((s) => paths.map((path) => ({ container: s.container, path }))), block) : [];
+    const files = live.map((_, i) => all[i * paths.length]);
+    const imagesOf = (i) => {
+      const got = Object.fromEntries(IMAGE_PATHS.map((path, j) => [path, all[i * paths.length + 1 + j]]));
+      const out = {};
+      for (const [kind, names] of Object.entries(IMAGE_FILES)) {
+        const path = names.find((n) => got[n]);
+        const f = path && got[path];
+        // 超过 50 KB 的直接不用，不往下找下一个格式：站长应该把图片压小，而不是被另一张旧图顶上
+        if (f && f.size > 0 && f.size <= IMAGE_MAX_BYTES) out[kind] = { path, sha256: f.sha256, size: f.size };
+      }
+      return out;
+    };
     const out = new Map(items.map((s) => [siteHost(s.tokenId, s.cpu, net.area), null]));
     const waiting = [];
     live.forEach((s, i) => {
@@ -97,11 +117,13 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
       if (!f) { waiting.push(s); return; }
       const key = siteHost(s.tokenId, s.cpu, net.area);
       const prev = data.sites[key];
+      const img = imagesOf(i);
       out.set(key, {
         tokenId: s.tokenId, cpu: s.cpu, area: net.area, network: net.key,
         label: siteLabel(s.tokenId, s.cpu, net.area), url: siteUrl(s.tokenId, s.cpu, '', net.area),
         circuits: s.circuits, owner: s.owner, container: s.container,
         sha256: f.sha256, size: f.size, updatedAt: f.updatedAt,
+        logo: img.logo ?? null, cover: img.cover ?? null,
         // 首页没变就沿用已取到的标题
         title: prev && prev.titleSha === f.sha256 ? prev.title : '',
         titleSha: prev && prev.titleSha === f.sha256 ? prev.titleSha : null,
@@ -139,7 +161,8 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
     for (const [key, entry] of results) {
       if (entry) {
         const prev = data.sites[key];
-        if (!prev || prev.sha256 !== entry.sha256 || prev.owner !== entry.owner || prev.container !== entry.container) changed = true;
+        if (!prev || prev.sha256 !== entry.sha256 || prev.owner !== entry.owner || prev.container !== entry.container
+          || prev.logo?.sha256 !== entry.logo?.sha256 || prev.cover?.sha256 !== entry.cover?.sha256) changed = true;
         data.sites[key] = entry;
       } else if (data.sites[key]) {
         delete data.sites[key];
@@ -299,8 +322,22 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
     };
   }
 
+  /**
+   * 读取某个网站的卡片图片（kind 是 logo / cover），返回 {bytes, type} 或 null。
+   * 只读目录里记下的那个文件，sha256 对不上（图片刚更新、目录还没检查到）就不显示
+   */
+  async function imageFor(host, kind) {
+    const s = data.sites[host];
+    const img = s && IMAGE_FILES[kind] && s[kind];
+    if (!img) return null;
+    const f = await sites.readFile(s.container, img.path, areaKey(s.area));
+    if (!f || f.info.sha256 !== img.sha256 || f.bytes.length > IMAGE_MAX_BYTES) return null;
+    return { bytes: f.bytes, type: img.path.endsWith('.png') ? 'image/png' : 'image/jpeg' };
+  }
+
   return {
     refresh,
+    imageFor,
     list: () => Object.values(data.sites).map((s) => ({ network: 'bnb', area: null, ...s })),
     status,
   };

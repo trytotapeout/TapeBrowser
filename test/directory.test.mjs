@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDirectory, extractTitle, FULL_SCAN_EVERY, QUICK_CHECK_EVERY } from '../src/main/directory.js';
+import { createDirectory, extractTitle, FULL_SCAN_EVERY, QUICK_CHECK_EVERY, IMAGE_MAX_BYTES } from '../src/main/directory.js';
 
 const enc = (s) => new TextEncoder().encode(s);
 
@@ -20,6 +20,8 @@ function fakeChain(tag = '') {
     down: false,
     opened: new Set(['1-0', '3-0', '2-1']),
     index: { [`0x${tag}c1-0`]: { sha256: '0xaa', size: 10, updatedAt: 100 }, [`0x${tag}c2-1`]: { sha256: '0xbb', size: 999999, updatedAt: 200 } },
+    // 首页以外的文件：'容器/路径' → 文件信息（卡片图片）
+    files: {},
     multicalls: 0,
     flagged: 0,
     ids: [3, 2],
@@ -36,7 +38,7 @@ function fakeChain(tag = '') {
       up();
       return items.map((s) => ({ exists: true, owner: '0xOwner', container: container(s.tokenId, s.cpu), opened: st.opened.has(`${s.tokenId}-${s.cpu}`) }));
     },
-    async fileInfos(pairs) { up(); return pairs.map((p) => st.index[p.container] ?? null); },
+    async fileInfos(pairs) { up(); return pairs.map((p) => (p.path === 'index.html' ? st.index[p.container] : st.files[`${p.container}/${p.path}`]) ?? null); },
   };
 }
 
@@ -46,7 +48,12 @@ function fakeSites(html) {
   return {
     reads: () => reads,
     areas,
-    async readFile(c, _path, area) { reads++; areas.push(area); return { info: { sha256: html[c].sha }, bytes: enc(html[c].body) }; },
+    async readFile(c, path, area) {
+      reads++;
+      areas.push(area);
+      const f = html[path === 'index.html' ? c : `${c}/${path}`];
+      return f ? { info: { sha256: f.sha }, bytes: enc(f.body) } : null;
+    },
   };
 }
 
@@ -233,5 +240,50 @@ test('firstPublished：记首页最早的上链时间，首页更新后不变', 
   const after = d.list().find((s) => s.label === '1.0.tape');
   assert.equal(after.updatedAt, 900);
   assert.equal(after.firstPublished, 100, '首页更新后发布时间不变');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('卡片图片：logo、cover 各取第一个存在的格式；超过 50 KB 不用；按记下的 sha256 读取', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tb-dir-'));
+  const file = join(dir, 'directory.json');
+  let t = 1_000_000;
+  const chain = fakeChain();
+  // 1.0：logo 有 png 也有 jpg（用 png），cover 只有 jpg；2.1：logo.png 太大，不退回 logo.jpg
+  chain.st.files = {
+    '0xc1-0/logo.png': { sha256: '0xl1', size: 2000, updatedAt: 1 },
+    '0xc1-0/logo.jpg': { sha256: '0xl2', size: 1000, updatedAt: 1 },
+    '0xc1-0/cover.jpg': { sha256: '0xv1', size: 3000, updatedAt: 1 },
+    '0xc2-1/logo.png': { sha256: '0xl3', size: IMAGE_MAX_BYTES + 1, updatedAt: 1 },
+    '0xc2-1/logo.jpg': { sha256: '0xl4', size: 100, updatedAt: 1 },
+  };
+  const html = { '0xc1-0': { sha: '0xaa', body: '<title>A</title>' }, '0xc1-0/logo.png': { sha: '0xl1', body: 'PNG' }, '0xc1-0/cover.jpg': { sha: '0xv1', body: 'JPG' } };
+  let changes = 0;
+  const d = createDirectory({ chains: { bnb: chain }, sites: fakeSites(html), file, now: () => t, pause: 0, onChange: () => changes++ });
+  await d.refresh();
+  const [a, b] = d.list().sort((x, y) => x.cpu - y.cpu);
+  assert.deepEqual(a.logo, { path: 'logo.png', sha256: '0xl1', size: 2000 });
+  assert.deepEqual(a.cover, { path: 'cover.jpg', sha256: '0xv1', size: 3000 });
+  assert.equal(b.logo, null, '太大的 logo.png 不用，也不换成 logo.jpg');
+  assert.equal(b.cover, null);
+
+  const logo = await d.imageFor('1-0', 'logo');
+  assert.equal(logo.type, 'image/png');
+  assert.equal(new TextDecoder().decode(logo.bytes), 'PNG');
+  assert.equal((await d.imageFor('1-0', 'cover')).type, 'image/jpeg');
+  assert.equal(await d.imageFor('2-1', 'logo'), null);
+  assert.equal(await d.imageFor('1-0', 'index'), null, '只能取 logo / cover');
+  assert.equal(await d.imageFor('9-9', 'logo'), null);
+  // 链上图片已经换了、目录还没检查到：sha256 对不上就不显示
+  html['0xc1-0/logo.png'] = { sha: '0xnew', body: 'NEW' };
+  assert.equal(await d.imageFor('1-0', 'logo'), null);
+
+  // 只换了图片、首页没变，增量检查也会更新并通知界面
+  t += QUICK_CHECK_EVERY;
+  chain.st.files['0xc1-0/logo.png'] = { sha256: '0xnew', size: 2100, updatedAt: 2 };
+  const before = changes;
+  await d.refresh();
+  assert.equal(d.list().find((s) => s.cpu === 0).logo.sha256, '0xnew');
+  assert.ok(changes > before);
+  assert.equal(new TextDecoder().decode((await d.imageFor('1-0', 'logo')).bytes), 'NEW');
   rmSync(dir, { recursive: true, force: true });
 });

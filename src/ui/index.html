@@ -45,20 +45,19 @@
   <main id="content">
     <section id="newtab-page" class="page" hidden>
       <h1>TapeBrowser</h1>
-      <p class="muted">浏览 TapeKit 电路容器里的 DeWEB 网站。在上方地址栏输入：</p>
-      <ul class="examples">
-        <li><button type="button" data-q="1888">1888</button> 直接输数字就行：自动查找 1.888、18.88、188.8 所有组合，有首页的都打开，也可以写 1888.tape。数字更长时还会查带区号的组合，比如 12330 会查到 1.2.330（X Layer）、12.3.30（Base）</li>
-        <li><button type="button" data-q="4454.0">4454.0</button> 打开 BNB Chain 上电路 #4454（处理器 0）的网站，也可以写 tape://4454-0、#4454@0</li>
-        <li><button type="button" data-q="1.2.230">1.2.230</button> X Layer 和 Base 的网站在处理器编号前加区号：X Layer 是 2，Base 是 3。1.2.230 就是 X Layer 上 230 号处理器的 #1，也可以写 #1@2.230</li>
-        <li><code>0x…</code> 钱包地址：在三条链上扫描这个钱包持有的全部电路，有首页的都打开</li>
-        <li>普通网址：https://… 照常打开</li>
-      </ul>
+      <p class="muted">在地址栏输入电路编号、钱包地址或网址。 <button id="open-help" class="link" type="button">使用帮助</button></p>
+      <div id="quickstart" class="quickstart" hidden>
+        <span>第一次使用？试试这几个：</span>
+        <button class="q" type="button" data-q="1888">1888</button>
+        <button class="q" type="button" data-q="4454.0">4454.0</button>
+        <button class="q" type="button" data-q="1.2.230">1.2.230</button>
+      </div>
 
       <div id="lib-tabs" class="seg" role="tablist" aria-label="网站列表">
+        <button id="tab-directory" type="button" role="tab" data-panel="directory" aria-controls="panel-directory">DeWEB 应用 <span id="dir-count" class="muted"></span></button>
         <button id="tab-history" type="button" role="tab" data-panel="history" aria-controls="panel-history">最近访问</button>
         <button id="tab-bookmarks" type="button" role="tab" data-panel="bookmarks" aria-controls="panel-bookmarks">书签</button>
         <button id="tab-new" type="button" role="tab" data-panel="new" aria-controls="panel-new">新上线</button>
-        <button id="tab-directory" type="button" role="tab" data-panel="directory" aria-controls="panel-directory">全部网站 <span id="dir-count" class="muted"></span></button>
       </div>
 
       <section id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
@@ -92,11 +91,48 @@
             <option value="id">电路编号</option>
             <option value="cpu">处理器</option>
           </select>
+          <div id="dir-view" class="view-toggle" role="group" aria-label="显示方式">
+            <button type="button" data-view="cards" title="卡片" aria-label="卡片" aria-pressed="true">▦</button>
+            <button type="button" data-view="list" title="列表" aria-label="列表" aria-pressed="false">☰</button>
+          </div>
         </div>
         <p class="muted dir-status"><span id="dir-status" aria-live="polite"></span> <button id="dir-refresh" class="link" type="button">立即刷新</button></p>
         <ul id="directory" class="list links"></ul>
         <button id="dir-more" class="link" type="button" hidden>显示更多</button>
       </section>
+    </section>
+
+    <section id="help-page" class="page" hidden>
+      <button id="help-close" class="link" type="button">← 返回</button>
+      <h1>使用帮助</h1>
+
+      <h2>地址栏能输入什么</h2>
+      <p class="muted">浏览 TapeKit 电路容器里的 DeWEB 网站。在上方地址栏输入：</p>
+      <ul class="examples">
+        <li><button type="button" data-q="1888">1888</button> 直接输数字就行：自动查找 1.888、18.88、188.8 所有组合，有首页的都打开，也可以写 1888.tape。数字更长时还会查带区号的组合，比如 12330 会查到 1.2.330（X Layer）、12.3.30（Base）</li>
+        <li><button type="button" data-q="4454.0">4454.0</button> 打开 BNB Chain 上电路 #4454（处理器 0）的网站，也可以写 tape://4454-0、#4454@0</li>
+        <li><button type="button" data-q="1.2.230">1.2.230</button> X Layer 和 Base 的网站在处理器编号前加区号：X Layer 是 2，Base 是 3。1.2.230 就是 X Layer 上 230 号处理器的 #1，也可以写 #1@2.230</li>
+        <li><code>0x…</code> 钱包地址：在三条链上扫描这个钱包持有的全部电路，有首页的都打开</li>
+        <li>普通网址：https://… 照常打开</li>
+      </ul>
+
+      <h2>从其他程序打开</h2>
+      <p class="muted">浏览器地址栏或网页链接里的 tape:// 地址会直接用 TapeBrowser 打开，第一次会询问是否允许。</p>
+      <ul class="examples">
+        <li>网页链接：<code>&lt;a href="tape://4454.0"&gt;</code></li>
+        <li>macOS 终端：<code>open "tape://4454.0"</code></li>
+      </ul>
+
+      <h2>给站长：DeWEB 应用卡片的图片</h2>
+      <p class="muted">在网站根目录（和 index.html 同一层）放下面的图片，DeWEB 应用里就会显示。没有图片时显示标题首字。</p>
+      <ul class="examples">
+        <li><code>logo.png</code> 或 <code>logo.jpg</code>：正方形图标，推荐 256×256，最大 512×512，居中显示，PNG 可以用透明背景</li>
+        <li><code>cover.png</code> 或 <code>cover.jpg</code>：16:10 封面，推荐 640×400，铺满卡片的图片区；有封面时不显示 logo</li>
+        <li>每张不超过 50 KB，超过的不显示。目录每小时检查一次，换图后最多一小时更新</li>
+      </ul>
+
+      <h2>链上校验</h2>
+      <p class="muted">打开电路网站后，点地址栏左边的「链上」按钮，查看持有人、文件的 SHA-256、上链时间和多节点校验结果。</p>
     </section>
 
     <section id="settings-page" class="page" hidden>
