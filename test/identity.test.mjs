@@ -97,3 +97,25 @@ test('身份所在的链读取失败时不退出登录，只提示', async () =>
   assert.ok(f.saved(), '保留登录');
   assert.match(id.view().error, /rpc down/);
 });
+
+test('官方处理器（Genesis CPU 0 号等）的电路也能登录；同一条链上多个处理器分开扫描', async () => {
+  const { IDENTITY_PROCESSORS } = await import('../src/main/config.js');
+  const bnb = IDENTITY_PROCESSORS.filter((p) => p.network === 'bnb');
+  assert.deepEqual(bnb.map((p) => [p.cpu, p.name]), [[1196, 'TapeBrowser'], [0, 'Genesis CPU'], [1, 'Behemoth'], [30, 'TapeOut']]);
+  // 按电路合约记持有人：{ 合约: { 编号: 地址 } }
+  const held = { [bnb[1].circuits]: { 7: ME }, [bnb[3].circuits]: { 2: ME, 3: OTHER } };
+  const chain = {
+    async holdings(wallet, [c]) { const n = Object.values(held[c] || {}).filter((a) => a === wallet).length; return n ? [{ cpu: 0, circuits: c, balance: n }] : []; },
+    async maxTokenId() { return 9; },
+    async ownedIds(c, wallet, from, to) { const out = []; for (let i = from; i <= to; i++) if (held[c]?.[i] === wallet) out.push(i); return out; },
+  };
+  const f = fakes({ owners: {} });
+  const id = createIdentity({ chains: { bnb: chain }, sites: f.sites, store: f.store, processors: bnb });
+  id.setAccount(ME);
+  await settle(id);
+  assert.deepEqual(id.view().identities.map((x) => x.label), ['7.0', '2.30']);
+  const v = await id.login({ network: 'bnb', cpu: 0, tokenId: 7 });
+  id.stop();
+  assert.equal(v.current.label, '7.0');
+  assert.equal(f.saved().cpu, 0);
+});

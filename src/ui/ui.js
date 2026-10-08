@@ -710,7 +710,7 @@
     const list = v.identities;
     if (!list) { box.append(Object.assign(document.createElement('span'), { className: 'muted', textContent: tr('正在查找…') })); return; }
     if (!list.length) {
-      box.append(Object.assign(document.createElement('span'), { className: 'muted', textContent: tr('这个钱包还没有 TapeBrowser 电路，暂时不能登录。') }));
+      box.append(Object.assign(document.createElement('span'), { className: 'muted', textContent: tr('这个钱包还没有可以登录的电路（TapeBrowser、Genesis CPU、Behemoth、TapeOut），暂时不能登录。') }));
       return;
     }
     const byNet = {};
