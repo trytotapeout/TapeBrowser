@@ -433,11 +433,10 @@ test('store 拒绝旧 nonce 时 operator 不广播', async () => {
   const { store, chain, op, done } = setup({ latest: 5n });
   try {
     const o = op();
-    // 让 send 里第一次读 lastNonce 时还看不到，setPending 时 store 已经记了 5
-    chain.onNonce = () => { store.setLastNonce(BSC.chainId, C, 5n); };
+    store.setLastNonce(BSC.chainId, C, 5n);
+    // operator 读到的 lastNonce 一律藏掉，绕过它自己的检查；store.setPending 仍按盘上的 5 拒绝
     const realGet = store.get;
-    let calls = 0;
-    store.get = (...a) => { const r = realGet(...a); return ++calls === 2 ? { ...r, lastNonce: null } : r; };
+    store.get = (...a) => { const r = realGet(...a); return r && { ...r, lastNonce: null }; };
     await assert.rejects(o.send(upload(0), { kind: 'upload' }), /nonce 不比已确认的大/);
     assert.equal(chain.sent.length, 0);
     assert.equal(realGet(BSC.chainId, C).pending, null);

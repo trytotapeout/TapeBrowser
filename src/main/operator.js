@@ -72,6 +72,7 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
   }
 
   /** 处理 pending：没有时返回 null；确认后返回回执摘要（status 0 也返回，交给调用方判断） */
+  // timeoutMs 限制的是轮询轮数；看似 nonce 被用掉时的复查还可能多等一个 pollMs
   async function settle(opts) {
     enter();
     try { return await settleInner(opts); } finally { busy = false; }
