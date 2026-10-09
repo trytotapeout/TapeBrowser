@@ -42,7 +42,8 @@
 
 `createOperatorStore({ dir, encrypt, decrypt, now = Date.now })`。每个（chainId, 容器）一个 JSON 文件：`<dir>/<chainId>-<container 小写>.json`，权限 0600，写入时先写 `.tmp` 再 rename（和 `settings.js` 一样）。
 
-记录：`{ v: 1, chainId, container, owner, address, key, pending, createdAt }`
+记录：`{ v: 1, chainId, container, owner, address, key, pending, lastNonce, createdAt }`
+- `lastNonce` 是最后一笔已确认交易的 nonce（十进制字符串，没有时为 `null`）。只能往大改：`setLastNonce` 传进比现有值小的数时忽略。它是防止「公共节点落后、读到旧 nonce」的真正防线（Task 6 审查意见）。
 - `key` 是 `encrypt(私钥 hex)` 的结果，用 base64 存；明文私钥不落盘、不出现在任何返回值或错误信息里。
 - `pending` 是 `null`，或者 `{ raw, hash, kind: 'upload' | 'refund', path?, index?, nonce }`（nonce 存成十进制字符串）。
 
@@ -50,7 +51,7 @@
 - `create({ chainId, container, owner })`：已有记录就返回已有的（`owner` 不同时抛出「这个容器已有另一个持有人的临时钱包」）；没有就用 `eth-tx.js` 的 `newKey()` 新建、写盘，返回 `{ address, ... }`（不含私钥）。`encrypt` 抛错时（钥匙串不可用）原样抛出，不写盘。
 - `get(chainId, container)`：返回记录（不含私钥）或 `null`。
 - `keyOf(chainId, container)`：返回解密后的私钥 `Uint8Array`，只给 Task 8 的签名入口用。解密失败时抛出「临时钱包无法解密（系统钥匙串可能已重置）」。
-- `setPending(chainId, container, pending)` / `clearPending(chainId, container)`：每次都立即写盘。
+- `setPending(chainId, container, pending)` / `clearPending(chainId, container)` / `setLastNonce(chainId, container, nonce)`：每次都立即写盘。
 - `remove(chainId, container)`：删文件。
 - `list()`：列出全部记录（不含私钥），启动时找残留用。坏掉的 JSON 文件跳过，不抛出。
 
@@ -77,16 +78,19 @@
 - `balance()`：`chain.nativeBalance(address)`。
 - `async send(tx, { kind, path, index })`：唯一的签名入口。
   1. 如果还有 `pending`，先抛出「还有一笔交易在等确认」，调用方要先调 `settle()`。
-  2. 用 `chain.nonceOf(address)` 读 nonce；`latest !== pending` 时抛出「临时钱包有未确认的交易」。
+  2. 用 `chain.nonceOf(address)` 读 nonce（Task 6 已改成取几个节点里的最大值）：
+     - `pending > latest` → 抛出「临时钱包有未确认的交易」；
+     - 记录里有 `lastNonce` 且 `latest <= lastNonce` → 抛出「节点还没同步到最新区块，请稍后再试」；
+     - 否则用 `latest` 作为这笔交易的 nonce。
   3. 把交易复制成新对象 `{ to, value, data, gas, gasPrice, chainId: net.chainId, nonce }`，然后 `Object.freeze`。
   4. 对这个冻结的对象跑 `assertOperatorTx({ address, owner, container }, net, frozen, { refund: kind === 'refund' })`。
   5. 用 `signLegacy(store.keyOf(...), frozen)` 签名。
   6. 先 `store.setPending(...)`（`raw`、`hash`、`kind`、`path`、`index`、`nonce`）写盘，再 `chain.sendRaw(raw)`。
-  7. 返回交易哈希。`sendRaw` 抛出网络错误时不清除 pending，原样抛出。重试由 `settle()` 负责。
+  7. 返回交易哈希。`sendRaw` 抛出网络错误时不清除 pending，原样抛出，重试由 `settle()` 负责。`sendRaw` 返回 `{ known: true, reason: 'pending' }` 算广播成功；返回 `reason: 'nonceUsed'` 时立刻调一次 `settle({ timeoutMs: 0 })`，由它判断是这笔交易已经上链，还是 nonce 被别的交易用掉了。
 - `async settle({ timeoutMs = 120000, pollMs = 3000, sleep })`：处理 pending。
   - 没有 pending → 返回 `null`。
-  - 查回执。有回执就清除 pending，返回 `{ hash, status, gasUsed, ... }`。status 为 0 时不在这里抛出，交给调用方判断。
-  - 没回执就重新广播同一笔 `raw`（`sendRaw` 返回「已知」也算正常），然后按 `pollMs` 轮询，直到超时。
+  - 查回执。有回执就先 `setLastNonce(pending.nonce)`，再清除 pending，返回 `{ hash, status, gasUsed, ... }`。status 为 0 时不在这里抛出，交给调用方判断（status 0 的交易也用掉了 nonce）。
+  - 没回执就重新广播同一笔 `raw`。`sendRaw` 返回 `known`（不管哪种 reason）或者抛出任何错误，都继续轮询，不中止。然后按 `pollMs` 轮询，直到超时。
   - 超时抛出「交易还没确认，可以稍后继续」，pending 保留。
   - 回执没有、但 `nonceOf(address).latest > pending.nonce`：说明这个 nonce 已经被别的交易用掉了（理论上不会发生）。清除 pending，抛出「临时钱包的交易状态异常，请重新检查」。
 
@@ -95,7 +99,10 @@
 - 白名单拒绝时不写 pending、不广播；
 - 广播失败后 `settle` 重发的是同一笔 raw（哈希相同）；
 - 有 pending 时 `send` 被拒；
-- nonce 不一致时被拒；
+- `pending > latest` 时被拒；
+- 节点落后（`latest <= lastNonce`）时被拒；
+- 确认后 `lastNonce` 前进，重建 store 后还在；
+- `sendRaw` 返回 `nonceUsed`、但回执显示就是这笔交易时算成功；
 - 回执 status 0 能正确返回；
 - 超时后 pending 保留；
 - 传进 `send` 的原始 tx 在签名期间被修改，也不影响签出来的交易（签名之后断言 raw 解出来的 data 等于原来的 data）。
