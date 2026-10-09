@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { uploadTx, openTx, grantTx, revokeTx, fundTx, refundTx, assertOperatorTx } from '../src/main/publish-tx.js';
-import { BSC, SEL, OPERATOR_TTL, MAX_GAS_PRICE } from '../src/main/config.js';
+import { BSC, SEL, OPERATOR_TTL, MAX_GAS_PRICE, MAX_UPLOAD_GAS } from '../src/main/config.js';
 import { decodeResult } from '../src/main/abi.js';
 
 const C = '0x3104dccd0000000000000000000000006afff20a';
@@ -60,4 +60,36 @@ test('操作员白名单：拒绝别的合约、别的容器、别的函数、�
   assert.throws(() => assertOperatorTx(op, BSC, { ...refund, to: other }, { refund: true }), /操作员/);
   assert.throws(() => assertOperatorTx(op, BSC, { ...refund, data: '0x00' }, { refund: true }), /操作员/);
   assert.throws(() => assertOperatorTx(op, BSC, { ...refund, value: 0n }, { refund: true }), /操作员/);
+});
+
+test('操作员白名单：字段缺失或格式不严格一律拒绝', () => {
+  const up = signed(uploadTx(BSC, C, step(0)));
+  const ap = signed(uploadTx(BSC, C, step(1)));
+  const other = '0x' + '22'.repeat(20);
+  const { gas, gasPrice, chainId, ...noNums } = up;
+  const bad = [
+    { ...ap, data: uploadTx(BSC, other, step(1)).data },
+    { ...up, gas: 0n },
+    { ...up, gasPrice: 0n },
+    { ...noNums, gasPrice, chainId },
+    { ...noNums, gas, chainId },
+    { ...noNums, gas, gasPrice },
+    { ...up, chainId: '56' },
+    { ...up, data: '0x' + up.data.slice(2).toUpperCase() },
+    { ...up, data: '0X' + up.data.slice(2) },
+    { ...up, data: up.data.slice(0, 73) },
+    { ...up, data: undefined },
+    // 容器地址前面的 12 字节填充不是 0
+    { ...up, data: up.data.slice(0, 10) + 'ff' + up.data.slice(12) },
+  ];
+  for (const tx of bad) assert.throws(() => assertOperatorTx(op, BSC, tx), /操作员/);
+  const { value, ...refundNoValue } = { ...refundTx(OWNER, 10n), gas: 21000n, gasPrice: 1n, chainId: 56 };
+  assert.throws(() => assertOperatorTx(op, BSC, refundNoValue, { refund: true }), /操作员/);
+});
+
+test('操作员白名单：value 缺省当 0、上限边界值、十六进制 chainId 都放行', () => {
+  const { value, ...up } = signed(uploadTx(BSC, C, step(0)));
+  assertOperatorTx(op, BSC, up);
+  assertOperatorTx(op, BSC, { ...up, gas: MAX_UPLOAD_GAS, gasPrice: MAX_GAS_PRICE });
+  assertOperatorTx(op, BSC, { ...up, chainId: '0x38' });
 });

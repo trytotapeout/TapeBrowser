@@ -22,7 +22,7 @@ function concat(...parts) {
 }
 
 /** 严格解析整数字段：只收 bigint >= 0、安全非负整数、0x 十六进制串，其余一律报 bad <name> */
-function uint(name, x) {
+export function uint(name, x) {
   if (typeof x === 'bigint' && x >= 0n) return x;
   if (typeof x === 'number' && Number.isSafeInteger(x) && x >= 0) return BigInt(x);
   if (typeof x === 'string' && /^0x[0-9a-fA-F]+$/.test(x)) return BigInt(x);

@@ -4,9 +4,11 @@
 import { encodeCall } from './abi.js';
 import { SEL, OPERATOR_TTL, MAX_GAS_PRICE, MAX_UPLOAD_GAS } from './config.js';
 import { chunkOf } from './publish-plan.js';
+import { uint } from './eth-tx.js';
 
 const ZERO = '0x' + '0'.repeat(40);
 const lower = (a) => String(a).toLowerCase();
+const UPLOAD_DATA = /^0x[0-9a-f]{8}0{24}[0-9a-f]{40}(?:[0-9a-f]{2})*$/;
 
 /** 上传一块：第 0 块 putFile（同时写类型和哈希），后面的块 appendChunk（expectIndex 防止重复追加） */
 export function uploadTx(net, container, { path, index, row }) {
@@ -45,17 +47,26 @@ export const refundTx = (owner, amount) => ({ to: owner, value: amount, data: '0
  */
 export function assertOperatorTx(op, net, tx, { refund = false } = {}) {
   const fail = () => { throw new Error('操作员交易不在允许范围内'); };
-  if (BigInt(tx.chainId) !== BigInt(net.chainId)) fail();
-  const gas = BigInt(tx.gas);
-  const price = BigInt(tx.gasPrice);
+  // 数值字段和 signLegacy 用同一套严格解析，解析不了就按不在白名单处理
+  let chainId, gas, price, value;
+  try {
+    chainId = uint('chainId', tx.chainId);
+    gas = uint('gas', tx.gas);
+    price = uint('gasPrice', tx.gasPrice);
+    // 上传的 value 缺省当 0（和 signLegacy 一致）；退款必须给出金额
+    value = !refund && tx.value === undefined ? 0n : uint('value', tx.value);
+  } catch { fail(); }
+  if (chainId !== BigInt(net.chainId)) fail();
   if (gas <= 0n || gas > MAX_UPLOAD_GAS || price <= 0n || price > MAX_GAS_PRICE) fail();
   if (refund) {
-    if (lower(tx.to) !== lower(op.owner) || (tx.data || '0x') !== '0x' || BigInt(tx.value) <= 0n) fail();
+    if (lower(tx.to) !== lower(op.owner) || (tx.data || '0x') !== '0x' || value <= 0n) fail();
     return;
   }
-  const sel = String(tx.data).slice(0, 10);
-  if (lower(tx.to) !== lower(net.registry) || BigInt(tx.value ?? 0) !== 0n) fail();
+  if (lower(tx.to) !== lower(net.registry) || value !== 0n) fail();
+  // calldata 形状：小写、偶数长度、选择器 + 第一个参数（容器地址，前 12 字节填充必须是 0）
+  if (typeof tx.data !== 'string' || !UPLOAD_DATA.test(tx.data)) fail();
+  const sel = tx.data.slice(0, 10);
   if (sel !== SEL.putFile && sel !== SEL.appendChunk) fail();
-  // 第一个参数（容器地址）在 calldata 的 10..74 位，地址占后 40 位
-  if ('0x' + lower(tx.data.slice(34, 74)) !== lower(op.container)) fail();
+  // 容器地址在 calldata 的 34..74 位。只锁容器不锁路径：按设计，操作员可以写这个容器里的任意路径
+  if ('0x' + tx.data.slice(34, 74) !== lower(op.container)) fail();
 }
