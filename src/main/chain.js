@@ -6,6 +6,8 @@ import { RpcError } from './rpc.js';
 import { BSC, SEL, MULTICALL_BATCH, MAX_FILE_BYTES, READ_RANGE, PATHS_PAGE } from './config.js';
 
 const lower = (a) => String(a).toLowerCase();
+// estimateGas 里允许用普通数字传的数值字段
+const NUMERIC_TX_FIELDS = new Set(['value', 'gas', 'gasPrice', 'nonce']);
 
 export function createChain(rpc, net = BSC) {
   async function pinBlock() {
@@ -269,34 +271,52 @@ export function createChain(rpc, net = BSC) {
     return v;
   }
 
-  /** 操作员状态：一次 multicall 读 canEdit 和 operatorUntil → {canEdit, until（秒）}；读失败按无权限 / 0 处理 */
+  /**
+   * 操作员状态：一次 multicall 读 canEdit 和 operatorUntil → {canEdit, until（秒）}。
+   * 任一项读不到就抛出，不能当成「没有授权」；block 可以传回执的区块号，读那一刻的状态
+   */
   async function operatorState(container, operator, block = 'latest') {
     const res = await multicall([
       { target: net.registry, callData: encodeCall(SEL.canEdit, ['address', 'address'], [container, operator]) },
       { target: net.registry, callData: encodeCall(SEL.operatorUntil, ['address'], [container]) },
     ], block);
-    return { canEdit: Boolean(take(res[0], ['bool'])?.[0]), until: Number(take(res[1], ['uint'])?.[0] ?? 0n) };
+    const edit = take(res[0], ['bool']);
+    const until = take(res[1], ['uint']);
+    if (!edit || !until) throw new Error('读不到操作员授权状态');
+    return { canEdit: edit[0], until: Number(until[0]) };
   }
 
   async function gasPrice() {
     return BigInt(await rpc('eth_gasPrice', []));
   }
 
-  /** 地址的 nonce：已上链的（latest）和含交易池的（pending） */
-  async function nonceOf(address) {
-    const [latest, pending] = await Promise.all([
-      rpc('eth_getTransactionCount', [address, 'latest']),
-      rpc('eth_getTransactionCount', [address, 'pending']),
-    ]);
-    return { latest: BigInt(latest), pending: BigInt(pending) };
+  /** 一个 nonce 标签在最多 2 个不同节点上的读数 → {value: 最大值, nodes: 用了几个节点} */
+  async function countOn(address, tag) {
+    const params = [address, tag];
+    const res = typeof rpc.distinct === 'function' ? await rpc.distinct('eth_getTransactionCount', params, 2) : [];
+    const values = res.length ? res.map((r) => BigInt(r.result)) : [BigInt(await rpc('eth_getTransactionCount', params))];
+    return { value: values.reduce((a, b) => (b > a ? b : a)), nodes: values.length };
   }
 
-  /** 估算 gas：tx 里的 BigInt 字段转成 0x 十六进制，undefined 字段去掉 */
+  /**
+   * 地址的 nonce：已上链的（latest）和含交易池的（pending），nodes 为 latest 用了几个节点的读数。
+   * 公共节点可能落后几个块，取几个节点里最大的值；真正的防线是 operator-store 里记的 lastNonce
+   */
+  async function nonceOf(address) {
+    const [latest, pending] = await Promise.all([countOn(address, 'latest'), countOn(address, 'pending')]);
+    return { latest: latest.value, pending: pending.value, nodes: latest.nodes };
+  }
+
+  /**
+   * 估算 gas：tx 里的 BigInt 字段，以及数字形式的 value / gas / gasPrice / nonce 转成 0x 十六进制，undefined 字段去掉。
+   * tx.from 必须是真正的发送方：registry 按 from 检查 canEdit，填错会估出 revert
+   */
   async function estimateGas(tx) {
     const params = {};
     for (const [k, v] of Object.entries(tx)) {
       if (v === undefined) continue;
-      params[k] = typeof v === 'bigint' ? '0x' + v.toString(16) : v;
+      const numeric = NUMERIC_TX_FIELDS.has(k) && Number.isSafeInteger(v) && v >= 0;
+      params[k] = typeof v === 'bigint' || numeric ? '0x' + BigInt(v).toString(16) : v;
     }
     return BigInt(await rpc('eth_estimateGas', [params]));
   }
@@ -306,6 +326,7 @@ export function createChain(rpc, net = BSC) {
     const r = await rpc('eth_getTransactionReceipt', [hash]);
     if (!r) return null;
     return {
+      transactionHash: lower(r.transactionHash),
       status: BigInt(r.status) === 1n ? 1 : 0,
       blockNumber: BigInt(r.blockNumber),
       gasUsed: BigInt(r.gasUsed),
@@ -313,21 +334,27 @@ export function createChain(rpc, net = BSC) {
     };
   }
 
-  /** 广播已签名交易 → 交易哈希。节点说这笔交易已经见过（或 nonce 已用掉）时返回 {known: true}，由调用方去查回执 */
+  /**
+   * 广播已签名交易 → 交易哈希。节点认得这笔交易时不抛出，由调用方去查回执：
+   * reason 'pending' 表示这笔交易已在交易池里；'nonceUsed' 表示这个 nonce 已经被某笔交易用掉（不一定是这一笔）
+   */
   async function sendRaw(raw) {
     try {
       return await rpc('eth_sendRawTransaction', [raw]);
     } catch (e) {
-      if (e instanceof RpcError && /already known|known transaction|nonce too low/i.test(e.message)) return { known: true };
+      if (e instanceof RpcError) {
+        if (/already known|known transaction|already imported|already exists/i.test(e.message)) return { known: true, reason: 'pending' };
+        if (/nonce too low/i.test(e.message)) return { known: true, reason: 'nonceUsed' };
+      }
       throw e;
     }
   }
 
-  /** safe 区块号（BigInt）；节点不支持 safe 标签时为 null */
+  /** safe 区块号（BigInt）；节点不支持 safe 标签时为 null，超时之类的其他节点错误照常抛出 */
   async function safeBlock() {
     let b;
     try { b = await rpc('eth_getBlockByNumber', ['safe', false]); } catch (e) {
-      if (e instanceof RpcError) return null;
+      if (e instanceof RpcError && (e.code === -32601 || e.code === -32602 || /invalid|unsupported|not supported|unknown block|safe/i.test(e.message))) return null;
       throw e;
     }
     return b?.number ? BigInt(b.number) : null;

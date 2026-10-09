@@ -116,15 +116,61 @@ test('operatorState 没有操作员时为 { canEdit: false, until: 0 }', async (
   assert.deepEqual(await createChain(rpc, NET).operatorState(CONTAINER, OPERATOR), { canEdit: false, until: 0 });
 });
 
+test('operatorState 任一子调用失败时抛出，不当成没有授权', async () => {
+  const noUntil = fakeRpc({ calls: { [`${NET.registry}:${SEL.canEdit}`]: () => ret(1) } });
+  await assert.rejects(createChain(noUntil, NET).operatorState(CONTAINER, OPERATOR), /读不到操作员授权状态/);
+  const noEdit = fakeRpc({ calls: { [`${NET.registry}:${SEL.operatorUntil}`]: () => ret(5) } });
+  await assert.rejects(createChain(noEdit, NET).operatorState(CONTAINER, OPERATOR), /读不到操作员授权状态/);
+});
+
+test('operatorState 按传入的区块读', async () => {
+  const rpc = fakeRpc({
+    calls: {
+      [`${NET.registry}:${SEL.canEdit}`]: () => ret(1),
+      [`${NET.registry}:${SEL.operatorUntil}`]: () => ret(9),
+    },
+  });
+  await createChain(rpc, NET).operatorState(CONTAINER, OPERATOR, '0x10');
+  assert.equal(rpc.log[0].params[1], '0x10');
+});
+
 test('gasPrice 返回 bigint', async () => {
   const rpc = fakeRpc({ handlers: { eth_gasPrice: () => '0x3b9aca00' } });
   assert.equal(await createChain(rpc, NET).gasPrice(), 1000000000n);
 });
 
-test('nonceOf 同时读 latest 和 pending', async () => {
+test('nonceOf 没有 rpc.distinct 时各读一次 latest 和 pending', async () => {
   const rpc = fakeRpc({ handlers: { eth_getTransactionCount: ([, tag]) => (tag === 'pending' ? '0x5' : '0x3') } });
-  assert.deepEqual(await createChain(rpc, NET).nonceOf(OPERATOR), { latest: 3n, pending: 5n });
-  assert.deepEqual(rpc.log.map((l) => l.params), [[OPERATOR, 'latest'], [OPERATOR, 'pending']]);
+  assert.deepEqual(await createChain(rpc, NET).nonceOf(OPERATOR), { latest: 3n, pending: 5n, nodes: 1 });
+  assert.deepEqual(rpc.log.map((l) => l.params).sort(), [[OPERATOR, 'latest'], [OPERATOR, 'pending']]);
+});
+
+test('nonceOf 用 rpc.distinct 读两个节点，取最大值', async () => {
+  const rpc = fakeRpc();
+  const asked = [];
+  rpc.distinct = async (method, params, n) => {
+    asked.push([method, params, n]);
+    return params[1] === 'latest'
+      ? [{ url: 'a', result: '0x7' }, { url: 'b', result: '0x4' }]
+      : [{ url: 'a', result: '0x7' }, { url: 'b', result: '0x9' }];
+  };
+  assert.deepEqual(await createChain(rpc, NET).nonceOf(OPERATOR), { latest: 7n, pending: 9n, nodes: 2 });
+  assert.deepEqual(asked.sort(), [
+    ['eth_getTransactionCount', [OPERATOR, 'latest'], 2],
+    ['eth_getTransactionCount', [OPERATOR, 'pending'], 2],
+  ]);
+  assert.equal(rpc.log.length, 0);
+});
+
+test('nonceOf 的 rpc.distinct 只有一个节点时 nodes 为 1；没有结果时退回 rpc', async () => {
+  const one = fakeRpc();
+  one.distinct = async () => [{ url: 'a', result: '0x2' }];
+  assert.deepEqual(await createChain(one, NET).nonceOf(OPERATOR), { latest: 2n, pending: 2n, nodes: 1 });
+
+  const none = fakeRpc({ handlers: { eth_getTransactionCount: ([, tag]) => (tag === 'pending' ? '0x6' : '0x6') } });
+  none.distinct = async () => [];
+  assert.deepEqual(await createChain(none, NET).nonceOf(OPERATOR), { latest: 6n, pending: 6n, nodes: 1 });
+  assert.equal(none.log.length, 2);
 });
 
 test('estimateGas 把 bigint 字段转成十六进制、去掉 undefined', async () => {
@@ -135,17 +181,24 @@ test('estimateGas 把 bigint 字段转成十六进制、去掉 undefined', async
   assert.deepEqual(sent, { from: OPERATOR, to: CONTAINER, value: '0xde0b6b3a7640000', data: '0xabcd' });
 });
 
-test('receipt 解析状态、区块号、gas', async () => {
+test('estimateGas 把数字形式的 value / gas / gasPrice / nonce 也转成十六进制', async () => {
+  let sent;
+  const rpc = fakeRpc({ handlers: { eth_estimateGas: ([tx]) => { sent = tx; return '0x5208'; } } });
+  await createChain(rpc, NET).estimateGas({ from: OPERATOR, to: CONTAINER, value: 0, gas: 30000, gasPrice: 1000000000, nonce: 3, data: '0x' });
+  assert.deepEqual(sent, { from: OPERATOR, to: CONTAINER, value: '0x0', gas: '0x7530', gasPrice: '0x3b9aca00', nonce: '0x3', data: '0x' });
+});
+
+test('receipt 解析哈希、状态、区块号、gas', async () => {
   const rpc = fakeRpc({
     handlers: {
       eth_getTransactionReceipt: ([h]) => (h === '0xaa'
-        ? { status: '0x1', blockNumber: '0x10', gasUsed: '0x5208', effectiveGasPrice: '0x3b9aca00' }
-        : { status: '0x0', blockNumber: '0x11', gasUsed: '0x100' }),
+        ? { transactionHash: '0xAA' + 'Cd'.repeat(31), status: '0x1', blockNumber: '0x10', gasUsed: '0x5208', effectiveGasPrice: '0x3b9aca00' }
+        : { transactionHash: '0x' + 'bb'.repeat(32), status: '0x0', blockNumber: '0x11', gasUsed: '0x100' }),
     },
   });
   const chain = createChain(rpc, NET);
-  assert.deepEqual(await chain.receipt('0xaa'), { status: 1, blockNumber: 16n, gasUsed: 21000n, effectiveGasPrice: 1000000000n });
-  assert.deepEqual(await chain.receipt('0xbb'), { status: 0, blockNumber: 17n, gasUsed: 256n, effectiveGasPrice: null });
+  assert.deepEqual(await chain.receipt('0xaa'), { transactionHash: '0xaa' + 'cd'.repeat(31), status: 1, blockNumber: 16n, gasUsed: 21000n, effectiveGasPrice: 1000000000n });
+  assert.deepEqual(await chain.receipt('0xbb'), { transactionHash: '0x' + 'bb'.repeat(32), status: 0, blockNumber: 17n, gasUsed: 256n, effectiveGasPrice: null });
 });
 
 test('receipt 还没上链时返回 null', async () => {
@@ -158,10 +211,17 @@ test('sendRaw 返回交易哈希', async () => {
   assert.equal(await createChain(rpc, NET).sendRaw('0xf8'), '0x' + 'ab'.repeat(32));
 });
 
-for (const msg of ['already known', 'Known transaction: 0xabc', 'nonce too low: next nonce 5, tx nonce 4']) {
-  test(`sendRaw 遇到「${msg}」返回 { known: true }`, async () => {
+for (const [msg, reason] of [
+  ['already known', 'pending'],
+  ['Known transaction: 0xabc', 'pending'],
+  ['transaction already imported', 'pending'],
+  ['tx already exists in cache', 'pending'],
+  ['nonce too low: next nonce 5, tx nonce 4', 'nonceUsed'],
+  ['Nonce too low', 'nonceUsed'],
+]) {
+  test(`sendRaw 遇到「${msg}」返回 { known: true, reason: '${reason}' }`, async () => {
     const rpc = fakeRpc({ handlers: { eth_sendRawTransaction: () => { throw new RpcError(msg, -32000); } } });
-    assert.deepEqual(await createChain(rpc, NET).sendRaw('0xf8'), { known: true });
+    assert.deepEqual(await createChain(rpc, NET).sendRaw('0xf8'), { known: true, reason });
   });
 }
 
@@ -176,8 +236,24 @@ test('safeBlock 返回 safe 区块号', async () => {
 });
 
 test('safeBlock 节点不支持 safe 时返回 null', async () => {
-  const bad = fakeRpc({ handlers: { eth_getBlockByNumber: () => { throw new RpcError('invalid block tag', -32602); } } });
-  assert.equal(await createChain(bad, NET).safeBlock(), null);
+  const cases = [
+    new RpcError('invalid block tag', -32000),
+    new RpcError('whatever', -32602),
+    new RpcError('the method eth_getBlockByNumber does not exist', -32601),
+    new RpcError('safe block not found', -32000),
+    new RpcError('tag not supported', -32000),
+  ];
+  for (const err of cases) {
+    const bad = fakeRpc({ handlers: { eth_getBlockByNumber: () => { throw err; } } });
+    assert.equal(await createChain(bad, NET).safeBlock(), null, err.message);
+  }
   const empty = fakeRpc({ handlers: { eth_getBlockByNumber: () => null } });
   assert.equal(await createChain(empty, NET).safeBlock(), null);
+});
+
+test('safeBlock 其他节点错误照常抛出', async () => {
+  const rpc = fakeRpc({ handlers: { eth_getBlockByNumber: () => { throw new RpcError('RPC timeout', -32603); } } });
+  await assert.rejects(createChain(rpc, NET).safeBlock(), /RPC timeout/);
+  const http = fakeRpc({ handlers: { eth_getBlockByNumber: () => { throw new RpcError('HTTP 502', -32603); } } });
+  await assert.rejects(createChain(http, NET).safeBlock(), /HTTP 502/);
 });
