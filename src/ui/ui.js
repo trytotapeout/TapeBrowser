@@ -417,8 +417,7 @@
   function localCard(card) {
     const box = Object.assign(document.createElement('div'), { className: 'card preview' });
     const thumb = Object.assign(document.createElement('div'), { className: 'thumb' + (card.title ? '' : ' untitled') });
-    const hue = hueOf(card.title || 'local');
-    thumb.style.background = `linear-gradient(135deg, hsl(${hue} 62% 58%), hsl(${(hue + 40) % 360} 58% 42%))`;
+    thumb.style.setProperty('--hue', hueOf(card.title || 'local'));
     thumb.append(Object.assign(document.createElement('span'), { className: 'initial', textContent: (card.title ? Array.from(card.title.trim())[0] || '#' : '#').toUpperCase() }));
     thumb.append(catTag(card));
     const kind = card.cover ? 'cover' : card.logo ? 'logo' : null;
@@ -685,7 +684,7 @@
   function catTag(it) {
     const key = it.category || 'other';
     const tag = Object.assign(document.createElement('span'), { className: 'cat ' + key, textContent: CATS[key] });
-    if (it.categoryFrom === 'declared') tag.title = tr('站长在 web.json 里声明的分类');
+    if (it.categoryFrom === 'declared') tag.title = tr('站长在 deweb.json 里声明的分类');
     else {
       tag.classList.add('guess');
       tag.title = tr('推测的分类') + (it.categoryWhy && it.categoryWhy.length ? tr('，依据：') + it.categoryWhy.join(tr('，')) : '');
@@ -693,7 +692,7 @@
     return tag;
   }
 
-  /** 占位图的颜色：按网站地址算一个固定的色相，同一个网站每次都一样 */
+  /** 占位图的色相：按网站地址算，同一个网站每次都一样 */
   function hueOf(s) {
     let h = 0;
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
@@ -738,8 +737,8 @@
     const net = it.network || 'bnb';
     const a = Object.assign(document.createElement('a'), { href: it.url, title: tr('{url}\n持有人 {owner}', { url: it.url, owner: it.owner }) });
     const thumb = Object.assign(document.createElement('div'), { className: 'thumb' + (it.title ? '' : ' untitled') });
-    const hue = hueOf(it.url);
-    thumb.style.background = `linear-gradient(135deg, hsl(${hue} 62% 58%), hsl(${(hue + 40) % 360} 58% 42%))`;
+    // 占位底色：按网站地址算一个固定的色相，只取很淡的一层，同一个网站每次都一样
+    thumb.style.setProperty('--hue', hueOf(it.url));
     // 首字取自标题（按字符，不会切开 emoji）；没有标题显示电路编号
     const first = it.title ? Array.from(it.title.trim())[0] || '#' : '#' + it.tokenId;
     thumb.append(Object.assign(document.createElement('span'), { className: 'initial', textContent: first.toUpperCase() }));

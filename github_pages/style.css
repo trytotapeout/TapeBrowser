@@ -1,13 +1,14 @@
+/* 参照 TapeOut 官网的朴素风格：暖白底、白色卡片、细边框、深色字；主按钮用深色底，不用渐变和阴影 */
 :root {
-  --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --card: #f6f8fa;
-  --accent: #1f6feb; --ok: #1a7f37; --bad: #c62828;
+  --bg: #faf9f7; --fg: #1c1b19; --muted: #77746d; --line: #e8e6e1; --line-strong: #d9d6cf; --card: #ffffff;
+  --accent: #1c1b19; --link: #2f5bd3; --ok: #1a7f37; --bad: #c62828; --on-accent: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #30363d; --card: #161b22; --accent: #4493f8; --ok: #3fb950; --bad: #f85149; }
+  :root { --bg: #1a1918; --fg: #ecebe8; --muted: #9a968e; --line: #33312e; --line-strong: #44413c; --card: #232220; --accent: #ecebe8; --link: #8fb0ff; --ok: #3fb950; --bad: #f85149; --on-accent: #1a1918; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
-a { color: var(--accent); }
+a { color: var(--link); }
 a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wrap { max-width: 920px; margin: 0 auto; padding: 0 24px; }
 code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.9em; background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
@@ -25,15 +26,17 @@ nav a:hover { color: var(--fg); }
 
 .hero { padding: 72px 0 48px; text-align: center; }
 .hero img { width: 96px; height: 96px; }
-.hero h1 { font-size: 40px; line-height: 1.2; margin: 16px 0 12px; }
+.hero h1 { font-size: 36px; line-height: 1.2; font-weight: 600; letter-spacing: -.01em; margin: 16px 0 12px; }
 .hero p { color: var(--muted); font-size: 18px; max-width: 640px; margin: 0 auto 28px; }
 .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-.btn { display: inline-block; padding: 10px 20px; border-radius: 8px; border: 1px solid var(--line); color: var(--fg); text-decoration: none; font-weight: 500; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn { display: inline-block; padding: 9px 18px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--card); color: var(--fg); text-decoration: none; font-weight: 500; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { opacity: .88; }
 .hero .version { color: var(--muted); font-size: 14px; margin: 24px auto 0; }
 
 section { padding: 48px 0; border-top: 1px solid var(--line); }
-section h2 { font-size: 28px; margin: 0 0 8px; }
+section h2 { font-size: 24px; font-weight: 600; margin: 0 0 8px; }
 section > .wrap > p.lead { color: var(--muted); margin: 0 0 28px; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
@@ -41,7 +44,7 @@ section > .wrap > p.lead { color: var(--muted); margin: 0 0 28px; }
 .card h3 { font-size: 17px; margin: 0 0 6px; }
 .card p { margin: 0; color: var(--muted); font-size: 15px; }
 
-.note { margin-top: 20px; padding: 14px 18px; border-left: 3px solid var(--accent); background: var(--card); border-radius: 0 8px 8px 0; color: var(--muted); font-size: 15px; }
+.note { margin-top: 20px; padding: 14px 18px; border: 1px solid var(--line); background: var(--card); border-radius: 10px; color: var(--muted); font-size: 15px; }
 
 table { width: 100%; border-collapse: collapse; font-size: 15px; }
 th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -64,15 +67,20 @@ th { color: var(--muted); font-weight: 500; }
 /* 分享链接落地页 open/ */
 .open-page { padding: 72px 0 80px; }
 .open-page h1 { font-size: 36px; line-height: 1.2; margin: 4px 0 10px; font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-all; }
+.open-page { padding: 56px 0 72px; }
+.open-page .wrap > div { max-width: 600px; margin: 0 auto; padding: 32px 36px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+.open-page h1 { font-size: 28px; font-weight: 600; margin: 4px 0 8px; font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: -.01em; word-break: break-all; }
 .open-page .eyebrow { color: var(--muted); font-size: 14px; margin: 0; }
-.open-page .status { font-size: 17px; max-width: 640px; margin: 20px 0; }
-.open-page .addr { margin-top: 28px; word-break: break-all; }
+.open-page .chain { margin: 0; }
+.open-page .status { font-size: 16px; margin: 20px 0; }
+.open-page .addr { margin: 24px 0 0; padding-top: 16px; border-top: 1px solid var(--line); word-break: break-all; }
 .cta.left { justify-content: flex-start; }
-.chain-pill { display: inline-block; font-size: 13px; font-weight: 600; padding: 1px 10px; border-radius: 10px; }
-.chain-pill.bnb { background: #f0b90b; color: #181a20; }
-.chain-pill.xlayer { background: #000; color: #fff; }
-.chain-pill.base { background: #0052ff; color: #fff; }
-@media (prefers-color-scheme: dark) { .chain-pill.xlayer { background: #fff; color: #000; } }
+.chain-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+.chain-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.chain-pill.bnb::before { background: #f0b90b; }
+.chain-pill.xlayer::before { background: #1c1b19; }
+.chain-pill.base::before { background: #0052ff; }
+@media (prefers-color-scheme: dark) { .chain-pill.xlayer::before { background: #ecebe8; } }
 
 footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 14px; }
 footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
