@@ -673,7 +673,9 @@ git commit -m "Warn in precheck when index.html can't be replaced later"
 
 ---
 
-## 阶段 2：临时钱包存储 + 发布引擎（开始前再细化成逐步任务）
+## 阶段 2：临时钱包存储 + 发布引擎
+
+> 已细化成逐步任务，见 `docs/plans/2026-10-09-publish-phase2.md`（Task 6–10，以那份为准）。下面是最初的概要。
 
 **Task 6：`operator-store.js`**：临时钱包的持久化。
 - 每个（链, 容器, 持有人）一个记录：`{chainId, container, owner, address, key, pending, createdAt}`，存到 `userData/publish/<chainId>-<container>.json`。
