@@ -246,9 +246,9 @@ function fakeChain({ clock, store, opened = true, chainId = BSC.chainId }) {
     /** 出几个空块（别人的交易） */
     mineEmpty(n = 1) { for (let i = 0; i < n; i++) { c.snaps.set(c.head, cloneState(c)); c.head += 1n; } },
     async nonceOf(a) {
-      if (lower(a) === lower(c.circuit.owner)) return { latest: c.owner.latest, pending: c.owner.pending, nodes: 2 };
+      if (lower(a) === lower(c.circuit.owner)) return { latest: c.owner.latest, pending: c.owner.pending };
       const n = c.nonces.get(lower(a)) ?? 0n;
-      return { latest: n, pending: n + c.opQueued(lower(a)), nodes: 2 };
+      return { latest: n, pending: n + c.opQueued(lower(a)) };
     },
     async nativeBalance(a, block) {
       c.calls.push(['nativeBalance', block]);

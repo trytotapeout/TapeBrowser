@@ -28,7 +28,7 @@ function fakeChain({ latest = 0n, pending } = {}) {
     latest, pending: pending ?? latest, sent: [], receipts: new Map(), sendImpl: null, onNonce: null,
     async nonceOf() {
       if (c.onNonce) c.onNonce();
-      return { latest: c.latest, pending: c.pending, nodes: 2 };
+      return { latest: c.latest, pending: c.pending };
     },
     async sendRaw(raw) {
       c.sent.push(raw);

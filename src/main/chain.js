@@ -290,21 +290,21 @@ export function createChain(rpc, net = BSC) {
     return BigInt(await rpc('eth_gasPrice', []));
   }
 
-  /** 一个 nonce 标签在最多 2 个不同节点上的读数 → {value: 最大值, nodes: 用了几个节点} */
+  /** 一个 nonce 标签在最多 2 个不同节点上的读数里的最大值 */
   async function countOn(address, tag) {
     const params = [address, tag];
     const res = typeof rpc.distinct === 'function' ? await rpc.distinct('eth_getTransactionCount', params, 2) : [];
     const values = res.length ? res.map((r) => BigInt(r.result)) : [BigInt(await rpc('eth_getTransactionCount', params))];
-    return { value: values.reduce((a, b) => (b > a ? b : a)), nodes: values.length };
+    return values.reduce((a, b) => (b > a ? b : a));
   }
 
   /**
-   * 地址的 nonce：已上链的（latest）和含交易池的（pending），nodes 为 latest 用了几个节点的读数。
+   * 地址的 nonce：已上链的（latest）和含交易池的（pending）。
    * 公共节点可能落后几个块，取几个节点里最大的值；真正的防线是 operator-store 里记的 lastNonce
    */
   async function nonceOf(address) {
     const [latest, pending] = await Promise.all([countOn(address, 'latest'), countOn(address, 'pending')]);
-    return { latest: latest.value, pending: pending.value, nodes: latest.nodes };
+    return { latest, pending };
   }
 
   /** 地址在某个区块（0x 十六进制或标签）上的 nonce，只问一个节点：和同一区块上的其他读取对得上 */

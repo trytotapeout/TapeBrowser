@@ -175,7 +175,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     assertFiles(files, snapshot);
 
     let block = await chain.pinBlock();
-    if (minBlock !== undefined && BigInt(block) < minBlock) block = '0x' + minBlock.toString(16);
+    if (minBlock !== undefined && BigInt(block) < minBlock) block = hexBlock(minBlock);
     const [info] = await chain.circuitInfos([{ circuits: target.circuits, tokenId: target.tokenId }], block);
     if (!info || !info.exists) throw fail(E.CIRCUIT_MISSING, '这个电路不存在');
     const { owner, container, opened } = info;
@@ -511,7 +511,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   /**
    * 第 5 步：逐笔上传。每笔先读 gas 单价、估 gasLimit、检查余额，再由临时钱包签名发出并等确认。
    * 每传完一个文件、每 10 笔，按 minBlock 重新检查，用链上的最新状态继续（不信任本地进度），
-   * 核对剩下的笔数确实减少了，并再检查一次授权（长时间的上传可能跨过授权到期）。返回最后一次检查的结果
+   * 核对剩下的笔数确实减少了，并再检查一次授权（长时间的上传可能跨过授权到期）
    */
   async function uploadAll(ctx, cur, operator) {
     let first = true;
@@ -550,7 +550,6 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
         cur = { ...cur, steps: cur.steps.slice(1), stepGas: cur.stepGas.slice(1) };
       }
     }
-    return cur;
   }
 
   // ---- 核验 → 退款 ----
@@ -650,10 +649,6 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   }
 
   /**
-   * 余额为 0 时删除记录，但只在持有人没有在途交易的时候：一笔已经广播、还没记下或还看不到的充值，
-   * 删掉记录以后到账就取不出来了。返回是否删了
-   */
-  /**
    * 重签用的单价：max(当前单价, 旧单价 × 1.125)，不超过 MAX_GAS_PRICE。
    * 封顶后不比旧单价高就没法替换，抛出（pending 保留）
    */
@@ -664,6 +659,10 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     throw fail(E.GAS_PRICE, '退款交易一直没有打包，Gas 单价已到上限');
   }
 
+  /**
+   * 余额为 0 时删除记录，但只在持有人没有在途交易的时候：一笔已经广播、还没记下或还看不到的充值，
+   * 删掉记录以后到账就取不出来了。返回是否删了
+   */
   async function removeIfEmpty(ctx, balance) {
     if (balance !== 0n || store.get(net.chainId, ctx.container)?.ownerPending) return false;
     const { latest, pending } = await chain.nonceOf(ctx.owner);

@@ -141,7 +141,7 @@ test('gasPrice 返回 bigint', async () => {
 
 test('nonceOf 没有 rpc.distinct 时各读一次 latest 和 pending', async () => {
   const rpc = fakeRpc({ handlers: { eth_getTransactionCount: ([, tag]) => (tag === 'pending' ? '0x5' : '0x3') } });
-  assert.deepEqual(await createChain(rpc, NET).nonceOf(OPERATOR), { latest: 3n, pending: 5n, nodes: 1 });
+  assert.deepEqual(await createChain(rpc, NET).nonceOf(OPERATOR), { latest: 3n, pending: 5n });
   assert.deepEqual(rpc.log.map((l) => l.params).sort(), [[OPERATOR, 'latest'], [OPERATOR, 'pending']]);
 });
 
@@ -154,7 +154,7 @@ test('nonceOf 用 rpc.distinct 读两个节点，取最大值', async () => {
       ? [{ url: 'a', result: '0x7' }, { url: 'b', result: '0x4' }]
       : [{ url: 'a', result: '0x7' }, { url: 'b', result: '0x9' }];
   };
-  assert.deepEqual(await createChain(rpc, NET).nonceOf(OPERATOR), { latest: 7n, pending: 9n, nodes: 2 });
+  assert.deepEqual(await createChain(rpc, NET).nonceOf(OPERATOR), { latest: 7n, pending: 9n });
   assert.deepEqual(asked.sort(), [
     ['eth_getTransactionCount', [OPERATOR, 'latest'], 2],
     ['eth_getTransactionCount', [OPERATOR, 'pending'], 2],
@@ -162,14 +162,14 @@ test('nonceOf 用 rpc.distinct 读两个节点，取最大值', async () => {
   assert.equal(rpc.log.length, 0);
 });
 
-test('nonceOf 的 rpc.distinct 只有一个节点时 nodes 为 1；没有结果时退回 rpc', async () => {
+test('nonceOf 的 rpc.distinct 只有一个节点时用它的读数；没有结果时退回 rpc', async () => {
   const one = fakeRpc();
   one.distinct = async () => [{ url: 'a', result: '0x2' }];
-  assert.deepEqual(await createChain(one, NET).nonceOf(OPERATOR), { latest: 2n, pending: 2n, nodes: 1 });
+  assert.deepEqual(await createChain(one, NET).nonceOf(OPERATOR), { latest: 2n, pending: 2n });
 
   const none = fakeRpc({ handlers: { eth_getTransactionCount: ([, tag]) => (tag === 'pending' ? '0x6' : '0x6') } });
   none.distinct = async () => [];
-  assert.deepEqual(await createChain(none, NET).nonceOf(OPERATOR), { latest: 6n, pending: 6n, nodes: 1 });
+  assert.deepEqual(await createChain(none, NET).nonceOf(OPERATOR), { latest: 6n, pending: 6n });
   assert.equal(none.log.length, 2);
 });
 
