@@ -43,16 +43,20 @@ export function stepGasBound(step) {
 
 /** 节点返回的是合约回滚（模拟执行失败），而不是超时、限流之类的节点问题 */
 function isRevert(e) {
+  // data 只认 0x 开头的返回数据；有的节点限流时在 data 里放对象
   const d = e?.data;
-  return e?.code === 3 || /revert/i.test(String(e?.message || '')) || (d != null && d !== '' && d !== '0x');
+  return e?.code === 3 || /revert/i.test(String(e?.message || '')) || (typeof d === 'string' && d.startsWith('0x') && d.length > 2);
 }
 
 const SHA = /^0x[0-9a-f]{64}$/;
 const badPath = (p) => typeof p !== 'string' || !p || p.startsWith('/') || p.includes('\\')
   || p.split('/').some((seg) => !seg || seg === '.' || seg === '..');
 
-/** 本地文件再核对一遍（读文件那一层已经查过，这里防御一下）：路径不重复、合法，大小在范围内，sha256 和内容一致 */
-function assertFiles(files) {
+/**
+ * 本地文件再核对一遍（读文件那一层已经查过，这里防御一下）：路径不重复、合法，大小在范围内，sha256 格式正确并和内容一致。
+ * snapshot 为 true 时不重算 sha256：快照在第一次 inspect 已经核对过
+ */
+function assertFiles(files, snapshot) {
   const seen = new Set();
   for (const f of files) {
     const fail = () => { throw new Error(`本地文件异常：${f?.path}`); };
@@ -60,26 +64,31 @@ function assertFiles(files) {
     seen.add(f.path);
     const n = f.bytes?.length;
     if (!(n > 0 && n <= MAX_FILE_BYTES)) fail();
-    if (!SHA.test(String(f.sha256)) || f.sha256 !== '0x' + createHash('sha256').update(f.bytes).digest('hex')) fail();
+    if (!SHA.test(String(f.sha256))) fail();
+    if (!snapshot && f.sha256 !== '0x' + createHash('sha256').update(f.bytes).digest('hex')) fail();
   }
 }
 
 export function createPublisher({ chain, net, ownerSend, store, readFiles, precheck, now = Date.now, sleep = defaultSleep }) {
   /**
-   * 估算上传的 gas：每笔先按上限算；已开通时用节点模拟第一笔 putFile 和第一笔 appendChunk，
+   * 估算上传的 gas：每笔先按上限算；已开通时用节点模拟第一笔 putFile 和第一笔能成功的 appendChunk
+   * （只有续传那一行的下一块和链上状态对得上；新文件、整个替换的后续块要等 putFile 上链，模拟必然回滚，就只用上限），
    * 算出这类交易除字节以外的固定开销，套到同类型的每一笔，和上限取较大的；每笔再乘 1.25。
    * 模拟遇到合约回滚返回 { revert }，节点问题就只用上限。
    */
-  async function estimateUpload({ owner, container, opened, steps, block }) {
+  async function estimateUpload({ owner, container, opened, steps }) {
     const gasPrice = await chain.gasPrice();
     if (gasPrice <= 0n) throw new Error('读不到有效的 Gas 单价，请稍后再试');
     if (gasPrice > MAX_GAS_PRICE) throw new Error('当前 Gas 单价太高，请稍后再试');
     const overhead = {};
     if (opened) {
-      for (const [type, first] of [['put', steps.find((s) => s.index === 0)], ['append', steps.find((s) => s.index > 0)]]) {
+      const firstPut = steps.find((s) => s.index === 0);
+      const firstAppend = steps.find((s) => s.row.action === 'append' && s.index === s.row.from);
+      for (const [type, first] of [['put', firstPut], ['append', firstAppend]]) {
         if (!first) continue;
         try {
-          const est = BigInt(await chain.estimateGas({ from: owner, ...uploadTx(net, container, first) }, block));
+          // 故意在 latest 上模拟：要的是当前链上状态下能不能执行
+          const est = BigInt(await chain.estimateGas({ from: owner, ...uploadTx(net, container, first) }));
           overhead[type] = est - bytePart(lenOf(first));
         } catch (e) {
           if (isRevert(e)) return { revert: String(e?.message || e) };
@@ -89,7 +98,8 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     const stepGas = steps.map((s) => {
       const extra = overhead[s.index === 0 ? 'put' : 'append'];
       const gas = extra === undefined ? stepGasBound(s) : maxOf(stepGasBound(s), bytePart(lenOf(s)) + extra);
-      return gas * PAD_NUM / PAD_DEN;
+      const padded = gas * PAD_NUM / PAD_DEN;
+      return padded > MAX_UPLOAD_GAS ? MAX_UPLOAD_GAS : padded;
     });
     const uploadGas = stepGas.reduce((a, b) => a + b, 0n);
     return { gasPrice, stepGas, uploadGas, uploadCost: uploadGas * gasPrice };
@@ -98,20 +108,22 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   /**
    * 发布前检查：返回 blocked / conflicts / ready 三种结果之一；网络不支持、电路不存在、本地文件异常、gas 单价不对直接抛出。
    * 传了 files（上一次 inspect 的快照）就跳过预检查和读文件，保证上传途中改了文件也不影响计划。
-   * 同一次检查里的链上读取都钉在同一个区块。
+   * 同一次检查里的链上读取都钉在同一个区块；给了 minBlock（bigint）就不早于它，节点落后时直接用 minBlock（读不到由调用方重试）。
    */
-  async function inspect({ target, files }) {
+  async function inspect({ target, files, minBlock }) {
     if (!PUBLISH_NETWORKS.includes(net.key)) throw new Error('这条链暂时不支持发布');
 
-    if (!files) {
+    const snapshot = Boolean(files);
+    if (!snapshot) {
       const { items } = await precheck();
       const errors = items.filter((i) => i.level === 'error');
       if (errors.length) return { stage: 'blocked', errors };
       files = await readFiles();
     }
-    assertFiles(files);
+    assertFiles(files, snapshot);
 
-    const block = await chain.pinBlock();
+    let block = await chain.pinBlock();
+    if (minBlock !== undefined && BigInt(block) < minBlock) block = '0x' + minBlock.toString(16);
     const [info] = await chain.circuitInfos([{ circuits: target.circuits, tokenId: target.tokenId }], block);
     if (!info || !info.exists) throw new Error('这个电路不存在');
     const { owner, container, opened } = info;
@@ -129,7 +141,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     if (plan.conflicts.length) return { stage: 'conflicts', conflicts: plan.conflicts, plan };
 
     const steps = stepsOf(plan);
-    const est = await estimateUpload({ owner, container, opened, steps, block });
+    const est = await estimateUpload({ owner, container, opened, steps });
     if (est.revert) return { stage: 'blocked', errors: [{ level: 'error', text: '链上模拟上传失败：' + est.revert }] };
     const { gasPrice, stepGas, uploadGas, uploadCost } = est;
     return {

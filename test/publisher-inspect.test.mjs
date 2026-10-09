@@ -18,18 +18,33 @@ const target = { circuits: CIRCUITS, tokenId: 7, cpu: '#7', label: 'demo' };
 const FEE = 5000000000000000n;
 const PRICE = 50000000n;
 
-// 假链：记录调用（含 block 参数），返回可配置的结果；estimate 可以是数值、Error 或 (tx) => 数值
-function fakeChain({ exists = true, opened = true, infos = {}, gasPrice = PRICE, estimate = null } = {}) {
+// 从 appendChunk 的 calldata 里取出路径和块序号（address, string, uint, bytes）
+function decodeAppend(data) {
+  const word = (i) => BigInt('0x' + data.slice(10 + i * 64, 10 + (i + 1) * 64));
+  const at = Number(word(1)) * 2 + 10;
+  const len = Number(BigInt('0x' + data.slice(at, at + 64)));
+  const path = Buffer.from(data.slice(at + 64, at + 64 + len * 2), 'hex').toString('utf8');
+  return { path, index: Number(word(2)) };
+}
+
+// 假链：记录调用（含 block 参数），返回可配置的结果；estimate 可以是数值、Error 或 (tx) => 数值。
+// 和真合约一样，appendChunk 只有在链上已有这个文件、块数正好等于 index 时才能模拟成功，否则回滚
+function fakeChain({ exists = true, opened = true, infos = {}, gasPrice = PRICE, estimate = null, pinned = BLOCK } = {}) {
   const calls = [];
   return {
     calls,
-    async pinBlock() { calls.push(['pinBlock']); return BLOCK; },
+    async pinBlock() { calls.push(['pinBlock']); return pinned; },
     async circuitInfos(list, block) { calls.push(['circuitInfos', list, block]); return [{ exists, owner: OWNER, container: CONTAINER, opened }]; },
     async fileInfos(list, block) { calls.push(['fileInfos', list, block]); return list.map((q) => infos[q.path] ?? null); },
     async openFee(block) { calls.push(['openFee', block]); return FEE; },
     async gasPrice() { calls.push(['gasPrice']); return gasPrice; },
-    async estimateGas(tx, block) {
-      calls.push(['estimateGas', tx, block]);
+    async estimateGas(...args) {
+      calls.push(['estimateGas', ...args]);
+      const [tx] = args;
+      if (tx.data.startsWith(SEL.appendChunk)) {
+        const { path, index } = decodeAppend(tx.data);
+        if (infos[path]?.chunkCount !== index) throw new RpcError('execution reverted: bad chunk index', 3, '0x08c379a0');
+      }
       if (estimate instanceof Error) throw estimate;
       if (typeof estimate === 'function') return estimate(tx);
       return estimate ?? 1n;
@@ -57,7 +72,7 @@ const bytePart = (len) => BigInt(len) * 16n + (BigInt(len) + 1n) * 200n;
 const cap = (g) => (g > MAX_UPLOAD_GAS ? MAX_UPLOAD_GAS : g);
 const putBound = (path, len) => cap(21000n + 32000n + 150000n + 22100n * slots(utf8(path)) + 22100n * slots(utf8(guessType(path))) + bytePart(len));
 const appendBound = (len) => cap(21000n + 32000n + 80000n + bytePart(len));
-const pad = (g) => g * 125n / 100n;
+const pad = (g) => cap(g * 125n / 100n);
 const sum = (xs) => xs.reduce((a, b) => a + b, 0n);
 const resumed = (f, count) => ({ size: count * CHUNK_BYTES, contentType: '', sha256: f.sha256, updatedAt: 1, chunkCount: count });
 const done = (f) => ({ size: f.bytes.length, contentType: '', sha256: f.sha256, updatedAt: 1, chunkCount: 1 });
@@ -139,10 +154,8 @@ test('已开通正常：fileInfos 钉在同一区块，交易笔数和费用对�
   assert.deepEqual(called(chain, 'fileInfos')[0], ['fileInfos', files.map((f) => ({ container: CONTAINER, path: f.path })), BLOCK]);
   assert.equal(r.plan.transactions, 4);
   assert.equal(r.steps.length, 4);
-  // 第一笔 putFile 和第一笔 appendChunk 各估一次
-  const est = called(chain, 'estimateGas');
-  assert.deepEqual(est.map((c) => c[1]), [r.steps[0], r.steps[1]].map((s) => ({ from: OWNER, ...uploadTx(BSC, CONTAINER, s) })));
-  assert.deepEqual(est.map((c) => c[2]), [BLOCK, BLOCK]);
+  // 只模拟第一笔 putFile：b.css 是新文件，它的 appendChunk 要等 putFile 上链后才能成功，不模拟；模拟不带区块参数
+  assert.deepEqual(called(chain, 'estimateGas'), [['estimateGas', { from: OWNER, ...uploadTx(BSC, CONTAINER, r.steps[0]) }]]);
   const stepGas = [putBound('b.css', CHUNK_BYTES), appendBound(CHUNK_BYTES), appendBound(50000 - 2 * CHUNK_BYTES), putBound('index.html', 200)].map(pad);
   assert.deepEqual(r.stepGas, stepGas);
   assert.equal(r.uploadGas, sum(stepGas));
@@ -166,6 +179,9 @@ test('校准：节点估得比上限大时，putFile 和 appendChunk 各按自�
   const r = await make({ chain, files }).inspect({ target });
   assert.deepEqual(r.steps.map((s) => [s.path, s.index]), [['big.js', 1], ['big.js', 2], ['c.css', 0], ['index.html', 0]]);
   const [firstApp, , firstPut] = r.steps;
+  // 续传的那一行：模拟的就是链上下一块，index === from
+  assert.equal(firstApp.row.action, 'append');
+  assert.equal(firstApp.index, firstApp.row.from);
   const est = called(chain, 'estimateGas').map((c) => c[1]);
   assert.deepEqual(est, [firstPut, firstApp].map((s) => ({ from: OWNER, ...uploadTx(BSC, CONTAINER, s) })));
   const expected = r.steps.map((s) => {
@@ -187,7 +203,7 @@ test('estimateGas 遇到合约回滚：返回 blocked，带上模拟失败的原
 });
 
 test('estimateGas 遇到节点错误（超时、限流）：静默退回上限', async () => {
-  for (const err of [new RpcError('RPC timeout', -32603), new RpcError('rate limit', -32005), new Error('fetch failed')]) {
+  for (const err of [new RpcError('RPC timeout', -32603), new RpcError('rate limit', -32005), new RpcError('rate limit', -32005, { retryAfter: 1 }), new RpcError('bad', -32000, '0x'), new Error('fetch failed')]) {
     const r = await make({ chain: fakeChain({ estimate: err }), files: [file('a.js', 10), file('index.html', 20)] }).inspect({ target });
     assert.equal(r.stage, 'ready');
     assert.deepEqual(r.stepGas, [pad(putBound('a.js', 10)), pad(putBound('index.html', 20))]);
@@ -222,6 +238,16 @@ test('传入文件快照：跳过预检查和读文件，直接用快照', async
   assert.deepEqual(p.seen, { readFiles: 0, precheck: 0 });
 });
 
+test('文件快照不再重算 sha256，其他检查照做', async () => {
+  // 内容被改过但 sha 还是旧的：快照在第一次 inspect 已经核对过，这里不重算
+  const f = file('index.html', 10);
+  const changed = { ...f, bytes: new Uint8Array(10).fill(7) };
+  assert.equal((await make().inspect({ target, files: [changed] })).stage, 'ready');
+  await assert.rejects(make().inspect({ target, files: [{ ...f, path: '../index.html' }] }), /本地文件异常/);
+  await assert.rejects(make().inspect({ target, files: [f, f] }), /本地文件异常/);
+  await assert.rejects(make().inspect({ target, files: [{ ...f, sha256: 'abc' }] }), /本地文件异常/);
+});
+
 test('本地文件异常就抛出，不读文件信息', async () => {
   const ok = file('index.html', 10);
   const bad = [
@@ -247,4 +273,39 @@ test('本地文件异常就抛出，不读文件信息', async () => {
   // 正好 MAX_FILE_BYTES 可以
   const r = await make({ chain: fakeChain({ opened: false }), files: [file('index.html', MAX_FILE_BYTES)] }).inspect({ target });
   assert.equal(r.stage, 'ready');
+});
+
+test('新的多块文件：不模拟 appendChunk，不会误判成 blocked', async () => {
+  const chain = fakeChain();
+  const r = await make({ chain, files: [file('a.bin', 2 * CHUNK_BYTES + 5), file('index.html', 10)] }).inspect({ target });
+  assert.equal(r.stage, 'ready');
+  const est = called(chain, 'estimateGas');
+  assert.equal(est.length, 1);
+  assert.ok(est[0][1].data.startsWith(SEL.putFile));
+  assert.deepEqual(r.stepGas.slice(1, 3), [appendBound(CHUNK_BYTES), appendBound(5)].map(pad));
+});
+
+test('多块 index.html 整个替换：不模拟 appendChunk，不会误判成 blocked', async () => {
+  const old = file('index.html', 10, 1);
+  const chain = fakeChain({ infos: { 'index.html': done(old) } });
+  const r = await make({ chain, files: [file('index.html', CHUNK_BYTES + 100, 2)] }).inspect({ target });
+  assert.equal(r.stage, 'ready');
+  assert.deepEqual(r.steps.map((s) => [s.row.action, s.index]), [['replace', 0], ['replace', 1]]);
+  assert.equal(called(chain, 'estimateGas').length, 1);
+});
+
+test('minBlock：节点钉的区块比它旧就用 minBlock，比它新就用节点的', async () => {
+  const chain = fakeChain({ opened: false });
+  const r = await make({ chain, files: [file('index.html', 10)] }).inspect({ target, minBlock: 20n });
+  assert.equal(r.block, '0x14');
+  assert.equal(called(chain, 'circuitInfos')[0][2], '0x14');
+  assert.equal(called(chain, 'openFee')[0][1], '0x14');
+  const r2 = await make({ chain: fakeChain({ opened: false }), files: [file('index.html', 10)] }).inspect({ target, minBlock: 5n });
+  assert.equal(r2.block, BLOCK);
+});
+
+test('乘 1.25 之后每笔仍然不超过 MAX_UPLOAD_GAS', async () => {
+  const path = 'p'.repeat(32 * 700);
+  const r = await make({ chain: fakeChain({ opened: false }), files: [file(path, 10)] }).inspect({ target });
+  assert.deepEqual(r.stepGas, [MAX_UPLOAD_GAS]);
 });
