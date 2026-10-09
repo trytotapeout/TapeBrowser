@@ -11,7 +11,7 @@ const MIME = {
   txt: 'text/plain; charset=utf-8', wasm: 'application/wasm', mp3: 'audio/mpeg', mp4: 'video/mp4', webm: 'video/webm',
 };
 
-function guessType(path) {
+export function guessType(path) {
   const ext = path.split('.').pop().toLowerCase();
   return MIME[ext] || 'application/octet-stream';
 }
