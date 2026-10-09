@@ -9,7 +9,7 @@
 **Tech Stack:** Electron 44、Node ESM、node:test、项目自带的 abi.js / keccak.js，新增唯一依赖 `@noble/secp256k1@3.2.0`（零依赖，用于可恢复签名）。
 
 **已定的规则（2026-10-09 用户确认）：**
-- 文件只增不改：链上已有同名但内容不同的文件，拒绝发布；只有 `index.html` 可以在最后替换，且只能单块（≤24000 字节）
+- 文件只增不改：链上已有同名但内容不同的文件，拒绝发布；只有根目录的 `index.html` 可以在最后整个替换，大小不限（2026-10-09 用户改定：首页必须能替换，否则网站没法更新）。超过一块时替换要分几笔，传完之前网站会暂时打不开
 - 不删除链上旧文件
 - 临时私钥不导出；用 Electron `safeStorage` 加密存盘，只为崩溃后续传和退款
 - 第一版只支持 BSC 和 X Layer，Base 不开放；不做铸造新电路
@@ -32,6 +32,8 @@
 ---
 
 ## 阶段 1：纯模块
+
+> 阶段 1 已完成。下面的代码是最初的计划稿，审查后有多处修改（严格整数解析、contentType 宽松比较、块大小统一放在 config.js、首页不限大小可替换等），以仓库里的代码为准。
 
 ### Task 1：新增函数选择器和发布常量
 
@@ -271,8 +273,7 @@ git commit -m "Add RLP and EIP-155 transaction signing for the upload operator"
 | 没有这个文件 | — | `create`：从第 0 块传起 |
 | sha256 和 contentType 一致，块数相同 | — | `reuse`：不传 |
 | sha256 和 contentType 一致，块数较少 | — | `append`：从链上块数接着传（断点续传） |
-| 内容不同，是 `index.html`，本地 ≤ 24000 字节 | — | `replace`：最后用一笔 putFile 整个替换 |
-| 内容不同，是 `index.html`，本地 > 24000 字节 | — | 冲突：首页太大，无法替换 |
+| 内容不同，是根目录 `index.html` | — | `replace`：最后从第 0 块连续传完（第 0 块 putFile 整个替换） |
 | 内容不同，其他文件 | — | 冲突：拒绝覆盖，提示改文件名 |
 | 一致但链上 size / 块数对不上 | — | 冲突：链上分块异常 |
 
@@ -733,7 +734,8 @@ git commit -m "Warn in precheck when index.html can't be replaced later"
 
 ## 已知风险
 
-- 链上的 index.html 是多块、本地是单块且内容不同时，计划给出的是 `replace`。这要求合约允许用 putFile 覆盖已有的多块文件（SPEC 写的是「replaces the whole file if it exists」），要在阶段 4 实测确认。
+- 替换首页要求合约允许用 putFile 覆盖已有文件（SPEC 写的是「replaces the whole file if it exists」），包括覆盖多块的旧首页，要在阶段 4 实测确认。
+- 多块首页替换期间网站暂时打不开：引擎开始替换首页前，要先确认临时钱包余额够把首页的所有块传完，避免停在半路。
 
 - 系统钥匙串被重置时，`safeStorage` 解不开，临时钱包里的余额就找不回来了。所以充值只按估算值乘 1.2，不预充大额。
 - 公共节点限速：广播要依次尝试多个节点，等回执之间加间隔。
