@@ -324,12 +324,15 @@
   const LEVEL_TEXT = { danger: tr('高危'), warn: tr('留意'), info: tr('信息') };
   const KIND_TEXT = { contract: tr('合约'), wallet: tr('普通钱包'), unknown: tr('未知') };
 
+  // 钱包操作只说明网站「能」请你做什么，正规应用也会用到，最高一级叫「警告」，不和体检结论里的「高危」混在一起
+  const ABILITY_TEXT = { ...LEVEL_TEXT, danger: tr('警告') };
+
   /** 一组带级别的条目：[{level, text, where}] */
-  function levelList(items) {
+  function levelList(items, text = LEVEL_TEXT) {
     const ul = Object.assign(document.createElement('ul'), { className: 'check-list' });
     for (const it of items) {
       const li = Object.assign(document.createElement('li'), { className: it.level === 'danger' ? 'error' : it.level });
-      li.append(Object.assign(document.createElement('span'), { className: 'lv', textContent: LEVEL_TEXT[it.level] }), document.createTextNode(it.text));
+      li.append(Object.assign(document.createElement('span'), { className: 'lv', textContent: text[it.level] }), document.createTextNode(it.text));
       if (it.where && it.where.length) li.append(Object.assign(document.createElement('span'), { className: 'where', textContent: ' ' + it.where.join(tr('、')) }));
       ul.append(li);
     }
@@ -365,7 +368,7 @@
       dd.append(node);
     };
     if (r.findings.length || (r.context || []).length) section(tr('发现'), levelList([...r.findings, ...(r.context || [])]));
-    section(tr('这个网站可能请你做的钱包操作'), r.abilities.length ? levelList(r.abilities) : Object.assign(document.createElement('p'), { className: 'hint', textContent: tr('代码里没有找到钱包调用') }));
+    section(tr('这个网站可能请你做的钱包操作'), r.abilities.length ? levelList(r.abilities, ABILITY_TEXT) : Object.assign(document.createElement('p'), { className: 'hint', textContent: tr('代码里没有找到钱包调用') }));
     if (r.addresses.length) {
       const ul = Object.assign(document.createElement('ul'), { className: 'addr-list' });
       for (const a of r.addresses.slice(0, 12)) {
