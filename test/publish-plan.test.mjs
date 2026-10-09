@@ -133,18 +133,32 @@ test('没传完但块数比本地还多，算分块异常', () => {
   assert.deepEqual(p.conflicts, [{ path: 'big.png', reason: 'corrupt' }]);
 });
 
-test('冲突里 index.html 也排最后；子目录的 index.html 是普通文件', () => {
+test('冲突按路径排序，根目录首页不会成为冲突；子目录的 index.html 是普通文件', () => {
   const big = file('index.html', CHUNK_BYTES + 1, 2);
   const sub = file('sub/index.html', CHUNK_BYTES + 1, 2);
   const z = file('z.js', 10, 2);
+  const c = file('c.png', 30000);
   const old = (path) => ({ size: 10, contentType: '', sha256: sha(new Uint8Array(10).fill(9)), updatedAt: 1, chunkCount: 1, path });
-  const p = planPublish([big, sub, z], [old(), old(), old()]);
-  assert.deepEqual(p.conflicts.map((x) => [x.path, x.reason]), [['sub/index.html', 'changed'], ['z.js', 'changed']]);
+  const p = planPublish([z, big, sub, c], [old(), old(), old(), { ...onChain(c, 1, ''), size: 5 }]);
+  assert.deepEqual(p.conflicts.map((x) => [x.path, x.reason]), [['c.png', 'corrupt'], ['sub/index.html', 'changed'], ['z.js', 'changed']]);
   assert.equal(row(p, 'index.html').action, 'replace');
-  // 首页的冲突也排最后（损坏的链上分块）
+});
+
+test('首页内容相同但链上分块异常：整个重传；其他文件同样情况还是 corrupt', () => {
   const idx = file('index.html', 30000);
-  const q = planPublish([idx, z], [{ ...onChain(idx, 1, ''), size: 5 }, old()]);
-  assert.deepEqual(q.conflicts.map((x) => [x.path, x.reason]), [['z.js', 'changed'], ['index.html', 'corrupt']]);
+  const bad = (f) => ({ size: 5, contentType: '', sha256: f.sha256, updatedAt: 1, chunkCount: 1 });
+  const p = planPublish([idx], [bad(idx)]);
+  assert.deepEqual(p.conflicts, []);
+  const r = row(p, 'index.html');
+  assert.equal(r.action, 'replace');
+  assert.equal(r.from, 0);
+  assert.equal(r.remaining, 2);
+  assert.equal(r.uploadBytes, 30000);
+  assert.deepEqual(stepsOf(p).map((s) => s.index), [0, 1]);
+  const other = file('page.html', 30000);
+  const q = planPublish([other], [bad(other)]);
+  assert.deepEqual(q.conflicts.map((x) => [x.path, x.reason]), [['page.html', 'corrupt']]);
+  assert.deepEqual(q.rows, []);
 });
 
 test('stepsOf：多块的新文件从第 0 块开始', () => {

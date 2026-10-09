@@ -53,6 +53,8 @@ export function planPublish(files, infos) {
     if (info.size === f.bytes.length && count >= 1) rows.push({ ...base, action: 'reuse', from: count, remaining: 0, uploadBytes: 0 });
     // 没传完：只有按 24000 分的前 count 块能接着传
     else if (count < chunks && info.size === count * CHUNK_BYTES) rows.push({ ...base, action: 'append', from: count, remaining: chunks - count, uploadBytes: f.bytes.length - info.size });
+    // 首页的分块异常也直接整个重传，putFile 会覆盖旧文件
+    else if (f.path === INDEX) rows.push({ ...base, action: 'replace', from: 0, remaining: chunks, uploadBytes: f.bytes.length });
     else conflicts.push({ path: f.path, reason: 'corrupt' });
   });
   const order = (a, b) => (a.path === INDEX) - (b.path === INDEX) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
