@@ -124,6 +124,7 @@ test('pending 写入后重建 store 还能读到；clearPending 清掉', () => {
     store.setPending(CHAIN, C, p);
     const r = make().get(CHAIN, C);
     assert.deepEqual(r.pending, p);
+    store.clearPending(CHAIN, C);
     store.setPending(CHAIN, C, { raw: '0x01', hash: '0x02', kind: 'refund', nonce: 8 });
     assert.deepEqual(make().get(CHAIN, C).pending, { raw: '0x01', hash: '0x02', kind: 'refund', nonce: 8n });
     store.clearPending(CHAIN, C);
@@ -254,12 +255,30 @@ test('setPending 拒绝不比 lastNonce 大的 nonce', () => {
     const p = { raw: '0x01', hash: '0x02', kind: 'upload', nonce: 5n };
     store.setPending(CHAIN, C, p); // 还没有 lastNonce，可以
     store.setLastNonce(CHAIN, C, 5n);
+    store.clearPending(CHAIN, C);
     const MSG = '交易的 nonce 不比已确认的大，节点可能落后';
     assert.throws(() => store.setPending(CHAIN, C, p), (e) => e.message === MSG);
     assert.throws(() => store.setPending(CHAIN, C, { ...p, nonce: 4 }), (e) => e.message === MSG);
-    assert.equal(store.get(CHAIN, C).pending.nonce, 5n);
+    assert.equal(store.get(CHAIN, C).pending, null);
     store.setPending(CHAIN, C, { ...p, nonce: 6n });
     assert.equal(store.get(CHAIN, C).pending.nonce, 6n);
+  } finally { done(); }
+});
+
+test('已有 pending 时 setPending 拒绝，必须先 clearPending', () => {
+  const { store, make, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    const p = { raw: '0x01', hash: '0x02', kind: 'upload', nonce: 3n };
+    store.setPending(CHAIN, C, p);
+    assert.throws(() => store.setPending(CHAIN, C, { ...p, raw: '0x03', hash: '0x04', nonce: 4n }),
+      (e) => e.message === '临时钱包还有一笔交易在等确认');
+    // 同一笔也不行，原来的 pending 不变
+    assert.throws(() => store.setPending(CHAIN, C, p), /还有一笔交易在等确认/);
+    assert.deepEqual(make().get(CHAIN, C).pending, p);
+    store.clearPending(CHAIN, C);
+    store.setPending(CHAIN, C, { ...p, nonce: 4n });
+    assert.equal(store.get(CHAIN, C).pending.nonce, 4n);
   } finally { done(); }
 });
 

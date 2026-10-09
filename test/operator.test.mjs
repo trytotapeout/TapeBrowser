@@ -34,7 +34,11 @@ function fakeChain({ latest = 0n, pending } = {}) {
       c.sent.push(raw);
       return c.sendImpl ? c.sendImpl(raw) : hashOf(raw);
     },
-    async receipt(hash) { return c.receipts.get(hash) ?? null; },
+    receiptCalls: 0, receiptImpl: null,
+    async receipt(hash) {
+      c.receiptCalls++;
+      return c.receiptImpl ? c.receiptImpl(hash, c.receiptCalls) : c.receipts.get(hash) ?? null;
+    },
     async nativeBalance(a) { c.balanceOf = a; return 123n; },
     /** 让这笔交易上链 */
     mine(hash, status = 1) {
@@ -338,5 +342,104 @@ test('没有临时钱包或持有人不一致时 createOperator 抛出', () => {
     assert.doesNotThrow(mk({ owner: OWNER.toUpperCase().replace('0X', '0x') }));
     assert.throws(mk({ owner: '0x' + '22'.repeat(20) }), /持有人/);
     assert.throws(mk({ container: '0x' + '33'.repeat(20) }), /临时钱包不存在/);
+  } finally { done(); }
+});
+
+test('同时两次 send：只签一笔、只广播一次，另一次报正在处理', async () => {
+  const { store, chain, op, done } = setup({ latest: 3n });
+  try {
+    const o = op();
+    const results = await Promise.allSettled([
+      o.send(upload(0), { kind: 'upload', path: 'a.js', index: 0 }),
+      o.send(upload(1), { kind: 'upload', path: 'a.js', index: 1 }),
+    ]);
+    assert.equal(results[0].status, 'fulfilled');
+    assert.equal(results[1].status, 'rejected');
+    assert.match(results[1].reason.message, /临时钱包正在处理另一笔交易/);
+    assert.equal(chain.sent.length, 1);
+    assert.equal(store.get(BSC.chainId, C).pending.hash, results[0].value);
+    // send 进行中时 settle 也被拒；send 结束后可以 settle
+    const p = o.send(upload(0), { kind: 'upload' });
+    await assert.rejects(o.settle(), /临时钱包正在处理另一笔交易/);
+    await assert.rejects(p, /还有一笔交易在等确认/);
+    chain.mine(results[0].value);
+    assert.equal((await o.settle()).hash, results[0].value);
+  } finally { done(); }
+});
+
+test('同时两次 settle：第二次报正在处理', async () => {
+  const { chain, op, done } = setup();
+  try {
+    const o = op();
+    const hash = await o.send(upload(0), { kind: 'upload' });
+    chain.mine(hash);
+    const [a, b] = await Promise.allSettled([o.settle(), o.settle()]);
+    assert.equal(a.value.hash, hash);
+    assert.match(b.reason.message, /临时钱包正在处理另一笔交易/);
+  } finally { done(); }
+});
+
+test('回执节点落后：第一次查不到回执、nonce 已前进，复查查到后正常确认', async () => {
+  const { store, chain, clock, op, done } = setup({ latest: 2n });
+  try {
+    const o = op();
+    const hash = await o.send(upload(0), { kind: 'upload' });
+    chain.mine(hash);
+    const real = chain.receipts.get(hash);
+    chain.receiptImpl = (h, n) => (n === 1 ? null : real);
+    const before = clock.sleeps;
+    const r = await o.settle({ timeoutMs: 0 });
+    assert.equal(r.hash, hash);
+    assert.equal(r.status, 1);
+    assert.equal(chain.receiptCalls, 2);
+    // timeoutMs 0 也多等一轮再复查
+    assert.equal(clock.sleeps, before + 1);
+    const rec = store.get(BSC.chainId, C);
+    assert.equal(rec.pending, null);
+    assert.equal(rec.lastNonce, 2n);
+  } finally { done(); }
+});
+
+test('nonceUsed 时回执节点落后：复查查到就是这笔，send 算成功', async () => {
+  const { store, chain, op, done } = setup({ latest: 1n });
+  try {
+    let real;
+    chain.sendImpl = (raw) => { chain.mine(hashOf(raw)); real = chain.receipts.get(hashOf(raw)); return { known: true, reason: 'nonceUsed' }; };
+    chain.receiptImpl = (h, n) => (n === 1 ? null : real);
+    const hash = await op().send(upload(0), { kind: 'upload' });
+    assert.equal(hash, hashOf(chain.sent[0]));
+    assert.equal(store.get(BSC.chainId, C).pending, null);
+    assert.equal(store.get(BSC.chainId, C).lastNonce, 1n);
+  } finally { done(); }
+});
+
+test('setLastNonce 之后、clearPending 之前崩溃：重新 settle 幂等确认', async () => {
+  const { store, chain, op, done } = setup({ latest: 6n });
+  try {
+    const hash = await op().send(upload(0), { kind: 'upload' });
+    chain.mine(hash);
+    // 模拟崩溃：只做了第一步
+    store.setLastNonce(BSC.chainId, C, 6n);
+    assert.ok(store.get(BSC.chainId, C).pending);
+    const r = await op().settle();
+    assert.equal(r.hash, hash);
+    const rec = store.get(BSC.chainId, C);
+    assert.equal(rec.pending, null);
+    assert.equal(rec.lastNonce, 6n);
+  } finally { done(); }
+});
+
+test('store 拒绝旧 nonce 时 operator 不广播', async () => {
+  const { store, chain, op, done } = setup({ latest: 5n });
+  try {
+    const o = op();
+    // 让 send 里第一次读 lastNonce 时还看不到，setPending 时 store 已经记了 5
+    chain.onNonce = () => { store.setLastNonce(BSC.chainId, C, 5n); };
+    const realGet = store.get;
+    let calls = 0;
+    store.get = (...a) => { const r = realGet(...a); return ++calls === 2 ? { ...r, lastNonce: null } : r; };
+    await assert.rejects(o.send(upload(0), { kind: 'upload' }), /nonce 不比已确认的大/);
+    assert.equal(chain.sent.length, 0);
+    assert.equal(realGet(BSC.chainId, C).pending, null);
   } finally { done(); }
 });

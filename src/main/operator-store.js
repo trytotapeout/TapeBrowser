@@ -9,6 +9,7 @@
 //   key        encrypt(私钥 hex) 的 base64；明文私钥不落盘、不出现在返回值和错误信息里
 //   pending    null，或最后一笔已发出、还没确认的交易
 //              { raw, hash, kind: 'upload' | 'refund', path?, index?, nonce }，nonce 存十进制字符串
+//              已有 pending 时 setPending 拒绝，要先 clearPending
 //   lastNonce  最后一笔已确认交易的 nonce（十进制字符串，没有时为 null），只能往大改：
 //              防止公共节点落后、读到旧 nonce 后重发
 //   createdAt  创建时间（毫秒）
@@ -178,6 +179,8 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
     setPending(chainId, container, pending) {
       const p = pendingToDisk(pending);
       update(chainId, container, (rec) => {
+        // 一次只能有一笔未确认的交易：覆盖掉旧的会丢掉它的 raw，没法再重发或确认
+        if (rec.pending != null) throw new Error('临时钱包还有一笔交易在等确认');
         // 不比已确认的 nonce 大：节点落后读到了旧 nonce，签出来的交易会冲掉已确认的
         if (rec.lastNonce != null && BigInt(p.nonce) <= BigInt(rec.lastNonce)) {
           throw new Error('交易的 nonce 不比已确认的大，节点可能落后');
