@@ -698,6 +698,8 @@ git commit -m "Warn in precheck when index.html can't be replaced later"
 6. `verify`：用 `chain.readVerified` 逐个回读，核对 sha256。X Layer 要等 `safe` 区块覆盖到上传完成的那个区块。
 7. `refund`：余额减去 21000 × gasPrice 后转回持有人，然后删除记录。授权不主动撤销，6 小时后自然过期，省用户一次签名。界面上提供「立即撤销授权」按钮。
 
+操作员签名只暴露一个入口 `signOperatorTx(op, net, tx, opts)`：内部先把字段复制成一个新对象并冻结，再过 `assertOperatorTx`，最后用这个对象 `signLegacy`。不要把「检查」和「签名」分开导出给 IPC 或别的模块用，否则调用方可能在两步之间改掉 tx，绕过白名单（Task 4 审查意见）。
+
 暂停和恢复：每一步都从链上状态重新算，不信任本地进度。重新 `inspect` 一次，就自然接上断点。
 
 ## 阶段 3：接入应用（开始前再细化）
