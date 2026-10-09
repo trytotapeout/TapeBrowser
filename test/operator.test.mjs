@@ -39,7 +39,7 @@ function fakeChain({ latest = 0n, pending } = {}) {
       c.receiptCalls++;
       return c.receiptImpl ? c.receiptImpl(hash, c.receiptCalls) : c.receipts.get(hash) ?? null;
     },
-    async nativeBalance(a) { c.balanceOf = a; return 123n; },
+    async nativeBalance(a, block) { c.balanceOf = a; c.balanceBlock = block; return 123n; },
     /** 让这笔交易上链 */
     mine(hash, status = 1) {
       c.receipts.set(hash, { transactionHash: hash, status, blockNumber: 100n, gasUsed: 21000n, effectiveGasPrice: 50000000n });
@@ -104,6 +104,9 @@ test('正常上传一笔：用 latest 作 nonce，先写 pending 再广播，确
     assert.equal(o.address, store.get(BSC.chainId, C).address);
     assert.equal(await o.balance(), 123n);
     assert.equal(chain.balanceOf, o.address);
+    // 余额可以钉在指定区块读
+    assert.equal(await o.balance('0x64'), 123n);
+    assert.equal(chain.balanceBlock, '0x64');
 
     const tx = upload(0);
     // 广播时 pending 必须已经落盘
@@ -118,7 +121,8 @@ test('正常上传一笔：用 latest 作 nonce，先写 pending 再广播，确
     assert.deepEqual(d, { nonce: 5n, gasPrice: 50000000n, gas: 5000000n, to: BSC.registry, value: 0n, data: tx.data, chainId: 56n });
 
     const p = store.get(BSC.chainId, C).pending;
-    assert.deepEqual(p, { raw: chain.sent[0], hash, kind: 'upload', path: 'a.js', index: 0, nonce: 5n });
+    // 签名用的 gasPrice 也记下来：回执没有 effectiveGasPrice 时按它算花费
+    assert.deepEqual(p, { raw: chain.sent[0], hash, kind: 'upload', path: 'a.js', index: 0, nonce: 5n, gasPrice: 50000000n });
 
     chain.mine(hash);
     const r = await o.settle();

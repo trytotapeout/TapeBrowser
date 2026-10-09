@@ -6,7 +6,7 @@
 // nonce 取几个节点里的最大值，并且必须比 store 里记的 lastNonce 大，防止节点落后时签出旧 nonce。
 // 错误信息和返回值里不会出现私钥。
 
-import { signLegacy } from './eth-tx.js';
+import { signLegacy, uint } from './eth-tx.js';
 import { assertOperatorTx } from './publish-tx.js';
 
 const lower = (a) => String(a).toLowerCase();
@@ -103,7 +103,7 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
     try { signed = signLegacy(sk, frozen); } finally { sk.fill(0); }
     const { raw, hash } = signed;
 
-    store.setPending(chainId, container, { raw, hash, kind, path, index, nonce: latest });
+    store.setPending(chainId, container, { raw, hash, kind, path, index, nonce: latest, gasPrice: uint('gasPrice', frozen.gasPrice) });
     // 网络错误原样抛出，pending 保留，由 settle 重发
     const res = await chain.sendRaw(raw);
     if (typeof res === 'string') {
@@ -122,7 +122,8 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
 
   return {
     address,
-    balance: () => chain.nativeBalance(address),
+    // block 可以钉在最近一笔确认交易的区块上，防止落后的节点读到充值之前的余额
+    balance: (block) => chain.nativeBalance(address, block),
     send,
     settle,
   };

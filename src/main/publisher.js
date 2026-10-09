@@ -186,13 +186,13 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
 
   // ---- run：开通 → 临时钱包 → 授权 → 充值 → 上传 ----
 
-  /** 轮询持有人交易的回执：超时抛出，让用户稍后继续（下次 run 会重新读链，交易上了链就不会重发） */
-  async function waitReceipt(hash, { timeoutMs = 300000, pollMs = 3000 } = {}) {
+  /** 轮询交易回执，超时抛出 message（下次 run 会重新读链，交易上了链就不会重发） */
+  async function waitReceipt(hash, { timeoutMs = 300000, pollMs = 3000, message = '持有人的交易还没确认，可以稍后继续' } = {}) {
     const deadline = now() + timeoutMs;
     for (;;) {
       const r = await chain.receipt(hash);
       if (r) return r;
-      if (now() >= deadline) throw new Error('持有人的交易还没确认，可以稍后继续');
+      if (now() >= deadline) throw new Error(message);
       await sleep(pollMs);
     }
   }
@@ -218,6 +218,8 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     const ctx = {
       target: inspected.target,
       files: inspected.files,
+      container: inspected.container,
+      owner: inspected.owner,
       // 最近一笔已确认交易的区块；之后的读取都不早于它
       minBlock: BigInt(inspected.block),
       lastBlock: null,
@@ -226,40 +228,75 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       progress: (e) => onProgress?.(e),
       checkAbort: () => { if (signal?.aborted) throw PAUSED; },
     };
-    let cur = inspected;
+    // 临时钱包记录要在任何持有人交易之前就建好：持有人交易的在途记录（ownerPending）存在里面
+    const operator = openOperator(ctx);
+    // 上次 run 确认过的区块：落后的节点不会让已开通的容器看起来没开通
+    const saved = store.get(net.chainId, ctx.container)?.minBlock;
+    if (saved != null && saved > ctx.minBlock) ctx.minBlock = saved;
+    await settleOwnerPending(ctx);
+    await settleOperator(ctx, operator);
+    // 处理完上次留下的交易，再按最新状态决定从哪一步开始
+    let cur = await reinspect(ctx);
     if (!cur.opened) cur = await openContainer(ctx, cur);
-    const operator = await prepareOperator(ctx, cur);
-    await ensureGrant(ctx, cur, operator);
-    cur = await reinspect(ctx);
+    await ensureGrant(ctx, operator);
+    // reused 按开始上传时的计划算：传完以后再看，这次传的文件也都成了复用
+    const { reused } = cur.plan;
     await uploadAll(ctx, cur, operator);
     // 10b：在这里接核验和退款
     return {
-      stage: 'uploaded', container: cur.container, label: ctx.target.label,
-      uploaded: ctx.uploaded, reused: cur.plan.reused, spent: ctx.spent, lastBlock: ctx.lastBlock,
+      stage: 'uploaded', container: ctx.container, label: ctx.target.label,
+      uploaded: ctx.uploaded, reused, spent: ctx.spent, lastBlock: ctx.lastBlock,
     };
   }
 
-  /** 记下一笔已确认的交易：推进 minBlock / lastBlock */
+  /** 记下一笔已确认的交易：推进 minBlock / lastBlock，minBlock 同时落盘 */
   function confirmed(ctx, r) {
     const b = BigInt(r.blockNumber);
     if (b > ctx.minBlock) ctx.minBlock = b;
     if (ctx.lastBlock === null || b > ctx.lastBlock) ctx.lastBlock = b;
+    store.setMinBlock(net.chainId, ctx.container, ctx.minBlock);
   }
 
   /** 临时钱包交易的花费：gasUsed × effectiveGasPrice（节点没给就用签名时的 gasPrice） */
   function charge(ctx, r, gasPrice) {
-    ctx.spent += BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice ?? gasPrice);
+    ctx.spent += BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice ?? gasPrice ?? 0n);
   }
 
-  /** 持有人发一笔交易并等确认；status 0 抛出 failMsg */
-  async function ownerTx(ctx, stage, tx, failMsg) {
-    ctx.checkAbort();
-    const hash = await ownerSend(tx);
-    ctx.progress({ stage, hash });
+  const OWNER_FAIL = { open: '开通容器失败', grant: '授权失败', fund: '充值失败' };
+
+  /** 等一笔持有人交易确认：有回执（不管成败）就清掉在途记录；超时保留记录并抛出 */
+  async function awaitOwner(ctx, { kind, hash }) {
     const r = await waitReceipt(hash);
-    if (r.status !== 1) throw new Error(failMsg);
+    store.clearOwnerPending(net.chainId, ctx.container);
+    if (r.status !== 1) throw new Error(OWNER_FAIL[kind]);
     confirmed(ctx, r);
     return r;
+  }
+
+  /** 上次留下的持有人交易：不重发，等它确认。返回是否处理了一笔 */
+  async function settleOwnerPending(ctx) {
+    const p = store.get(net.chainId, ctx.container)?.ownerPending;
+    if (!p) return false;
+    ctx.progress({ stage: p.kind, hash: p.hash });
+    await awaitOwner(ctx, p);
+    return true;
+  }
+
+  /**
+   * 持有人发一笔交易并等确认。返回回执；如果先处理了一笔在途的持有人交易就不发，返回 null，调用方重新判断这一步还要不要做。
+   * 发之前钱包不能有未确认的交易：ownerSend 广播之后却没把哈希交回来（窗口被关、桥接断开）时，
+   * 没有可记的在途记录，只能靠这个 nonce 检查拦住重复的开通、充值；它的确认要等节点交易池同步，不是完全没有空档
+   */
+  async function ownerTx(ctx, kind, tx) {
+    if (await settleOwnerPending(ctx)) return null;
+    ctx.checkAbort();
+    const { latest, pending } = await chain.nonceOf(ctx.owner);
+    if (pending > latest) throw new Error('钱包里还有一笔未确认的交易，请等它确认后再继续');
+    const hash = await ownerSend(tx);
+    // 拿到哈希先落盘，再去等确认：中途崩溃、超时，下次 run 都会等这一笔，不会再发一次
+    store.setOwnerPending(net.chainId, ctx.container, { kind, hash, at: now() });
+    ctx.progress({ stage: kind, hash });
+    return awaitOwner(ctx, { kind, hash });
   }
 
   /** 按 minBlock 重新检查（不模拟），不是 ready 就停下 */
@@ -275,7 +312,12 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   /** 第 1 步：开通容器，确认后在回执区块上核对开通状态、容器地址、合约已部署，再重新检查 */
   async function openContainer(ctx, cur) {
     const { circuits, tokenId } = ctx.target;
-    await ownerTx(ctx, 'open', openTx(net, cur.owner, { circuits, tokenId }, cur.openFee), '开通容器失败');
+    const r = await ownerTx(ctx, 'open', openTx(net, cur.owner, { circuits, tokenId }, cur.openFee));
+    if (r === null) {
+      // 先等完了一笔在途的持有人交易：重新看还要不要开通
+      const next = await reinspect(ctx);
+      return next.opened ? next : openContainer(ctx, next);
+    }
     const block = hexBlock(ctx.minBlock);
     const [info] = await chain.circuitInfos([{ circuits, tokenId }], block);
     const deployed = await chain.isDeployed(circuits, tokenId, block);
@@ -286,47 +328,58 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   }
 
   /**
-   * 第 2 步：取出或新建这个容器的临时钱包，先处理上次留下的 pending。
-   * 上次停在一笔上传上时，它确认了也算这次的上传；status 0 照常报错。
+   * 第 2 步：取出或新建这个容器的临时钱包。
    * OPERATOR_OWNER_MISMATCH（电路换了持有人）原样抛出，由后续任务处理
    */
-  async function prepareOperator(ctx, cur) {
-    store.create({ chainId: net.chainId, container: cur.container, owner: cur.owner });
-    const operator = createOperator({ store, chain, net, container: cur.container, owner: cur.owner, sleep, now });
-    const pending = store.get(net.chainId, cur.container)?.pending;
-    const r = await operator.settle();
-    if (r) {
-      confirmed(ctx, r);
-      charge(ctx, r, 0n);
-      if (pending?.kind === 'upload') {
-        if (r.status !== 1) throw new Error(`上传 ${pending.path} 第 ${pending.index} 块失败`);
-        ctx.uploaded++;
-      }
-    }
-    return operator;
+  function openOperator(ctx) {
+    store.create({ chainId: net.chainId, container: ctx.container, owner: ctx.owner });
+    return createOperator({ store, chain, net, container: ctx.container, owner: ctx.owner, sleep, now });
   }
 
-  /** 第 3 步：没有编辑权限或授权快到期就重新授权，确认后在回执区块上再读一次，必须已经生效 */
-  async function ensureGrant(ctx, cur, operator) {
-    const state = await chain.operatorState(cur.container, operator.address, hexBlock(ctx.minBlock));
+  /**
+   * 处理临时钱包上次留下的 pending。上次停在一笔上传上时，它确认了也算这次的上传；status 0 照常报错。
+   * 回执没有 effectiveGasPrice 时按 pending 里记下的签名单价算花费
+   */
+  async function settleOperator(ctx, operator) {
+    const pending = store.get(net.chainId, ctx.container)?.pending;
+    const r = await operator.settle();
+    if (!r) return;
+    confirmed(ctx, r);
+    charge(ctx, r, pending?.gasPrice);
+    if (pending?.kind === 'upload') {
+      if (r.status !== 1) throw new Error(`上传 ${pending.path} 第 ${pending.index} 块失败`);
+      ctx.uploaded++;
+    }
+  }
+
+  /**
+   * 第 3 步：在 minBlock 上读授权，没有编辑权限或剩下不到 5 分钟就重新授权，
+   * 确认后在回执区块上再读一次，必须已经生效。上传途中每次重新检查都会再跑一遍
+   */
+  async function ensureGrant(ctx, operator) {
+    const state = await chain.operatorState(ctx.container, operator.address, hexBlock(ctx.minBlock));
     if (state.canEdit && state.until >= now() / 1000 + GRANT_MARGIN_SEC) return;
-    const r = await ownerTx(ctx, 'grant', grantTx(net, cur.owner, cur.container, operator.address), '授权失败');
-    const after = await chain.operatorState(cur.container, operator.address, hexBlock(BigInt(r.blockNumber)));
+    const r = await ownerTx(ctx, 'grant', grantTx(net, ctx.owner, ctx.container, operator.address));
+    if (r === null) return ensureGrant(ctx, operator);
+    const after = await chain.operatorState(ctx.container, operator.address, hexBlock(BigInt(r.blockNumber)));
     if (!after.canEdit) throw new Error('授权没有生效');
   }
 
   /**
    * 第 4 步：充值。节点广播前检查「余额 ≥ gasLimit × gasPrice」，所以每笔上传前都要检查。
+   * 余额钉在 minBlock 上读：落后的节点会读到充值之前的余额，再充一次。
    * 第一笔之前（first）按剩下的全部算；之后只在余额不够这一笔时才补。
    * 金额 = max(剩下各步 stepGas 之和 × gasPrice − 余额, 这一笔 gasLimit × gasPrice − 余额)：
    * 节点估出的 gas 比 stepGas 大时也一定能往前走。首页的块在剩下的 steps 里，总是算进去
    */
-  async function ensureFunds(ctx, cur, operator, { rest, gasLimit, gasPrice, first }) {
-    const balance = await operator.balance();
+  async function ensureFunds(ctx, operator, { rest, gasLimit, gasPrice, first }) {
+    const balance = await operator.balance(hexBlock(ctx.minBlock));
     if (!first && balance >= gasLimit * gasPrice) return;
     const amount = maxOf(sumOf(rest) * gasPrice, gasLimit * gasPrice) - balance;
     if (amount <= 0n) return;
-    await ownerTx(ctx, 'fund', fundTx(cur.owner, operator.address, amount), '充值失败');
+    const r = await ownerTx(ctx, 'fund', fundTx(ctx.owner, operator.address, amount));
+    // 先等完了一笔在途的持有人交易（可能就是上次的充值）：按新余额重新算
+    if (r === null) return ensureFunds(ctx, operator, { rest, gasLimit, gasPrice, first: false });
   }
 
   /**
@@ -350,7 +403,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   /**
    * 第 5 步：逐笔上传。每笔先读 gas 单价、估 gasLimit、检查余额，再由临时钱包签名发出并等确认。
    * 每传完一个文件、每 10 笔，按 minBlock 重新检查，用链上的最新状态继续（不信任本地进度），
-   * 并核对剩下的笔数确实减少了
+   * 核对剩下的笔数确实减少了，并再检查一次授权（长时间的上传可能跨过授权到期）。返回最后一次检查的结果
    */
   async function uploadAll(ctx, cur, operator) {
     let first = true;
@@ -360,15 +413,16 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       ctx.checkAbort();
       const gasPrice = await currentGasPrice();
       const gasLimit = await uploadGasLimit(cur, operator, step, cur.stepGas[0]);
-      await ensureFunds(ctx, cur, operator, { rest: cur.stepGas, gasLimit, gasPrice, first });
+      await ensureFunds(ctx, operator, { rest: cur.stepGas, gasLimit, gasPrice, first });
       first = false;
       ctx.checkAbort();
 
       const { path, index } = step;
       const hash = await operator.send({ ...uploadTx(net, cur.container, step), gas: gasLimit, gasPrice }, { kind: 'upload', path, index });
-      // send 遇到 nonceUsed 时已经在内部确认并清掉了 pending，settle 返回 null，回执直接查
-      const r = (await operator.settle()) ?? (await chain.receipt(hash));
-      if (!r) throw new Error('交易还没确认，可以稍后继续');
+      // send 遇到 nonceUsed 时已经在内部确认并清掉了 pending，settle 返回 null；
+      // 再查回执可能落在落后的节点上，轮询到确认为止，这一笔照样算进上传
+      const r = (await operator.settle())
+        ?? (await waitReceipt(hash, { timeoutMs: 120000, message: '交易还没确认，可以稍后继续' }));
       confirmed(ctx, r);
       charge(ctx, r, gasPrice);
       if (r.status !== 1) throw new Error(`上传 ${path} 第 ${index} 块失败`);
@@ -383,10 +437,12 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
         if (fresh.steps.length > left) throw new Error(`上传后核对失败：${path} 的块数没有增加`);
         cur = fresh;
         sinceCheck = 0;
+        if (cur.steps.length) await ensureGrant(ctx, operator);
       } else {
         cur = { ...cur, steps: cur.steps.slice(1), stepGas: cur.stepGas.slice(1) };
       }
     }
+    return cur;
   }
 
   return { inspect, run };

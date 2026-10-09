@@ -1,19 +1,24 @@
 // 临时钱包（上传操作员）存储：<dir>/<chainId>-<容器地址小写>.json，每个（链, 容器）一个文件，权限 0600。
 // 不依赖 Electron：私钥的加解密由调用方注入（阶段 3 接 safeStorage）。
 //   encrypt(私钥 hex 字符串) → Buffer | Uint8Array；decrypt(Buffer) → 私钥 hex 字符串
-// 文件内容：{ v: 1, chainId, container, owner, address, key, pending, lastNonce, createdAt }
+// 文件内容：{ v: 1, chainId, container, owner, address, key, pending, ownerPending, lastNonce, minBlock, createdAt }
 //   chainId    正整数
 //   container  容器合约地址（小写）
 //   owner      持有人地址（小写），一个容器只能有一个持有人的临时钱包
 //   address    临时钱包地址（小写），keyOf 时用它核对解出来的私钥，发现文件被改过
 //   key        encrypt(私钥 hex) 的 base64；明文私钥不落盘、不出现在返回值和错误信息里
 //   pending    null，或最后一笔已发出、还没确认的交易
-//              { raw, hash, kind: 'upload' | 'refund', path?, index?, nonce }，nonce 存十进制字符串
+//              { raw, hash, kind: 'upload' | 'refund', path?, index?, nonce, gasPrice? }，nonce、gasPrice 存十进制字符串
+//              （gasPrice 是签名用的单价，回执没有 effectiveGasPrice 时按它算花费；旧记录没有）
 //              已有 pending 时 setPending 拒绝，要先 clearPending
+//   ownerPending  null，或持有人已经发出、还没确认的一笔交易 { kind: 'open' | 'grant' | 'fund', hash, at }
+//              下次发布先等它确认，不会再发一次（重复交开通费、重复充值）；旧记录没有这个字段，按 null 处理
 //   lastNonce  最后一笔已确认交易的 nonce（十进制字符串，没有时为 null），只能往大改：
 //              防止公共节点落后、读到旧 nonce 后重发
+//   minBlock   这个容器最近一笔已确认交易（开通、授权、充值、上传）的区块号（十进制字符串，没有时为 null），只能往大改：
+//              下次发布的读取不早于它，落后的节点不会让已开通的容器看起来没开通
 //   createdAt  创建时间（毫秒）
-// get / list / create 返回的记录不含 key，并且 lastNonce 是 bigint | null、pending.nonce 是 bigint。
+// get / list / create 返回的记录不含 key，并且 lastNonce、minBlock 是 bigint | null、pending.nonce / pending.gasPrice 是 bigint。
 // 这个文件关系到临时钱包里的钱，写盘要落实：先删掉残留的 .tmp，新建 .tmp（0600）写入并 fsync，
 // 再 rename，最后尽量 fsync 目录。每次读都直接读文件，不缓存。
 // 读不出来或结构不对的文件不会被当成「没有记录」：get 抛出，list 跳过，broken() 列出文件名。
@@ -25,6 +30,8 @@ import { bytesToHex, hexToBytes } from './abi.js';
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
 const FILE = /^([1-9][0-9]*)-(0x[0-9a-f]{40})\.json$/;
+const HASH = /^0x[0-9a-fA-F]{64}$/;
+const OWNER_KINDS = ['open', 'grant', 'fund'];
 const DECRYPT_FAILED = '临时钱包无法解密（系统钥匙串可能已重置）';
 
 function chainOf(chainId) {
@@ -56,14 +63,35 @@ function pendingToDisk(p) {
     out.index = p.index;
   }
   out.nonce = nonceOf(p.nonce).toString();
+  if (p.gasPrice !== undefined) {
+    if (typeof p.gasPrice !== 'bigint' || p.gasPrice < 0n) throw new Error('临时钱包：待确认交易的 Gas 单价不正确');
+    out.gasPrice = p.gasPrice.toString();
+  }
   return out;
 }
+
+/** 校验持有人的待确认交易并转成落盘形式 */
+function ownerPendingToDisk(p) {
+  if (!p || typeof p !== 'object' || !OWNER_KINDS.includes(p.kind)) throw new Error('临时钱包：持有人的待确认交易不正确');
+  if (typeof p.hash !== 'string' || !HASH.test(p.hash)) throw new Error('临时钱包：持有人的交易哈希不正确');
+  if (!Number.isSafeInteger(p.at) || p.at < 0) throw new Error('临时钱包：持有人的交易时间不正确');
+  return { kind: p.kind, hash: p.hash.toLowerCase(), at: p.at };
+}
+
+const ownerPendingOk = (p) => p == null || (typeof p === 'object' && OWNER_KINDS.includes(p.kind)
+  && typeof p.hash === 'string' && HASH.test(p.hash) && Number.isSafeInteger(p.at));
 
 /** 落盘记录 → 返回给调用方的形式（去掉 key，nonce 转 bigint） */
 function publicView(rec) {
   const { key: _key, ...r } = rec;
   r.lastNonce = rec.lastNonce == null ? null : BigInt(rec.lastNonce);
-  r.pending = rec.pending ? { ...rec.pending, nonce: BigInt(rec.pending.nonce) } : null;
+  r.minBlock = rec.minBlock == null ? null : BigInt(rec.minBlock);
+  r.pending = null;
+  if (rec.pending) {
+    r.pending = { ...rec.pending, nonce: BigInt(rec.pending.nonce) };
+    if (rec.pending.gasPrice != null) r.pending.gasPrice = BigInt(rec.pending.gasPrice);
+  }
+  r.ownerPending = rec.ownerPending ? { ...rec.ownerPending } : null;
   return r;
 }
 
@@ -73,7 +101,10 @@ function looksValid(rec) {
     && typeof rec.container === 'string' && typeof rec.owner === 'string'
     && typeof rec.address === 'string' && typeof rec.key === 'string'
     && (rec.lastNonce == null || /^[0-9]+$/.test(rec.lastNonce))
-    && (rec.pending == null || (typeof rec.pending === 'object' && /^[0-9]+$/.test(rec.pending.nonce)));
+    && (rec.minBlock == null || /^[0-9]+$/.test(rec.minBlock))
+    && (rec.pending == null || (typeof rec.pending === 'object' && /^[0-9]+$/.test(rec.pending.nonce)
+      && (rec.pending.gasPrice == null || /^[0-9]+$/.test(rec.pending.gasPrice))))
+    && ownerPendingOk(rec.ownerPending);
 }
 
 export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
@@ -148,7 +179,7 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
         const key = Buffer.from(encrypt(bytesToHex(sk))).toString('base64');
         rec = {
           v: 1, chainId, container: container.toLowerCase(), owner: o, address: addressOf(sk),
-          key, pending: null, lastNonce: null, createdAt: now(),
+          key, pending: null, ownerPending: null, lastNonce: null, minBlock: null, createdAt: now(),
         };
       } finally { sk.fill(0); }
       write(file, rec);
@@ -193,12 +224,34 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
       update(chainId, container, (rec) => { rec.pending = null; });
     },
 
+    /** 记下持有人刚发出的交易；已有一笔时拒绝（覆盖掉就不知道它有没有上链了） */
+    setOwnerPending(chainId, container, pending) {
+      const p = ownerPendingToDisk(pending);
+      update(chainId, container, (rec) => {
+        if (rec.ownerPending != null) throw new Error('持有人还有一笔交易在等确认');
+        rec.ownerPending = p;
+      });
+    },
+
+    clearOwnerPending(chainId, container) {
+      update(chainId, container, (rec) => { rec.ownerPending = null; });
+    },
+
     /** 只能往大改：比现有值小或相等时忽略 */
     setLastNonce(chainId, container, nonce) {
       const n = nonceOf(nonce);
       update(chainId, container, (rec) => {
         if (rec.lastNonce != null && n <= BigInt(rec.lastNonce)) return false;
         rec.lastNonce = n.toString();
+      });
+    },
+
+    /** 只能往大改：比现有值小或相等时不写盘 */
+    setMinBlock(chainId, container, block) {
+      if (typeof block !== 'bigint' || block < 0n) throw new Error('临时钱包：区块号不正确');
+      update(chainId, container, (rec) => {
+        if (rec.minBlock != null && block <= BigInt(rec.minBlock)) return false;
+        rec.minBlock = block.toString();
       });
     },
 
