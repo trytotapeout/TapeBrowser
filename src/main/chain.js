@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { encodeCall, decodeResult, decodeAggregate3, hexToBytes } from './abi.js';
+import { RpcError } from './rpc.js';
 import { BSC, SEL, MULTICALL_BATCH, MAX_FILE_BYTES, READ_RANGE, PATHS_PAGE } from './config.js';
 
 const lower = (a) => String(a).toLowerCase();
@@ -254,5 +255,83 @@ export function createChain(rpc, net = BSC) {
     return out;
   }
 
-  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, v3Price, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, allPaths, hasCode, readRange, readVerified };
+  // ---- 发布流程用的只读调用 ----
+
+  /** 开通容器的费用（opener.FEE()，最小单位，BigInt） */
+  async function openFee(block = 'latest') {
+    const [v] = await view(net.opener, SEL.openFee, ['uint'], block);
+    return v;
+  }
+
+  /** 电路对应的容器合约是否已经部署 */
+  async function isDeployed(circuits, tokenId, block = 'latest') {
+    const [v] = await view(net.opener, encodeCall(SEL.isDeployed, ['address', 'uint'], [circuits, tokenId]), ['bool'], block);
+    return v;
+  }
+
+  /** 操作员状态：一次 multicall 读 canEdit 和 operatorUntil → {canEdit, until（秒）}；读失败按无权限 / 0 处理 */
+  async function operatorState(container, operator, block = 'latest') {
+    const res = await multicall([
+      { target: net.registry, callData: encodeCall(SEL.canEdit, ['address', 'address'], [container, operator]) },
+      { target: net.registry, callData: encodeCall(SEL.operatorUntil, ['address'], [container]) },
+    ], block);
+    return { canEdit: Boolean(take(res[0], ['bool'])?.[0]), until: Number(take(res[1], ['uint'])?.[0] ?? 0n) };
+  }
+
+  async function gasPrice() {
+    return BigInt(await rpc('eth_gasPrice', []));
+  }
+
+  /** 地址的 nonce：已上链的（latest）和含交易池的（pending） */
+  async function nonceOf(address) {
+    const [latest, pending] = await Promise.all([
+      rpc('eth_getTransactionCount', [address, 'latest']),
+      rpc('eth_getTransactionCount', [address, 'pending']),
+    ]);
+    return { latest: BigInt(latest), pending: BigInt(pending) };
+  }
+
+  /** 估算 gas：tx 里的 BigInt 字段转成 0x 十六进制，undefined 字段去掉 */
+  async function estimateGas(tx) {
+    const params = {};
+    for (const [k, v] of Object.entries(tx)) {
+      if (v === undefined) continue;
+      params[k] = typeof v === 'bigint' ? '0x' + v.toString(16) : v;
+    }
+    return BigInt(await rpc('eth_estimateGas', [params]));
+  }
+
+  /** 交易回执：还没上链时为 null */
+  async function receipt(hash) {
+    const r = await rpc('eth_getTransactionReceipt', [hash]);
+    if (!r) return null;
+    return {
+      status: BigInt(r.status) === 1n ? 1 : 0,
+      blockNumber: BigInt(r.blockNumber),
+      gasUsed: BigInt(r.gasUsed),
+      effectiveGasPrice: r.effectiveGasPrice == null ? null : BigInt(r.effectiveGasPrice),
+    };
+  }
+
+  /** 广播已签名交易 → 交易哈希。节点说这笔交易已经见过（或 nonce 已用掉）时返回 {known: true}，由调用方去查回执 */
+  async function sendRaw(raw) {
+    try {
+      return await rpc('eth_sendRawTransaction', [raw]);
+    } catch (e) {
+      if (e instanceof RpcError && /already known|known transaction|nonce too low/i.test(e.message)) return { known: true };
+      throw e;
+    }
+  }
+
+  /** safe 区块号（BigInt）；节点不支持 safe 标签时为 null */
+  async function safeBlock() {
+    let b;
+    try { b = await rpc('eth_getBlockByNumber', ['safe', false]); } catch (e) {
+      if (e instanceof RpcError) return null;
+      throw e;
+    }
+    return b?.number ? BigInt(b.number) : null;
+  }
+
+  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, v3Price, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, allPaths, hasCode, readRange, readVerified, openFee, isDeployed, operatorState, gasPrice, nonceOf, estimateGas, receipt, sendRaw, safeBlock };
 }
