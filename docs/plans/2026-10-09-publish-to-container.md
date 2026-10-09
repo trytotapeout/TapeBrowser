@@ -737,6 +737,7 @@ git commit -m "Warn in precheck when index.html can't be replaced later"
 ## 已知风险
 
 - 替换首页要求合约允许用 putFile 覆盖已有文件（SPEC 写的是「replaces the whole file if it exists」），包括覆盖多块的旧首页，要在阶段 4 实测确认。
+- X Layer 的手续费：如果 X Layer 按 OP Stack 方式另收 L1 数据费，满块 calldata 的这部分费用不在 gasUsed × gasPrice 里，充值和总价会偏低。阶段 4 实测时看回执里的 `l1Fee`（Task 9 审查意见，未核实）。
 - 多块首页替换期间网站暂时打不开：引擎开始替换首页前，要先确认临时钱包余额够把首页的所有块传完，避免停在半路。
 
 - 系统钥匙串被重置时，`safeStorage` 解不开，临时钱包里的余额就找不回来了。所以充值只按估算值乘 1.2，不预充大额。

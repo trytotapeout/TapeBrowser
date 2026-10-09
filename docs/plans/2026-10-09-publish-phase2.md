@@ -150,10 +150,11 @@
    - 同一个（chainId, 容器）同时只能有一个 `run` / `refund` 在执行：publisher 里按这个键做内存互斥，第二个调用直接抛出「这个容器正在发布」。主进程已经用 `app.requestSingleInstanceLock()` 保证只有一个应用实例。
 3. **授权**：`chain.operatorState(container, op)`：`!canEdit`，或者 `until < now/1000 + 300` → 持有人 `ownerSend(grantTx(...))`，等确认，再读一次确认已经生效。
 4. **充值**：
-   - 需要的金额 = 剩余每块 gas 上限 × gasPrice × 1.2，再减去临时钱包现有余额。
+   - 需要的金额 = 剩余各步 `stepGas`（inspect 返回，已含 ×1.25）之和 × gasPrice，再减去临时钱包现有余额。
+   - 节点广播前检查的是「余额 ≥ gasLimit × gasPrice」，所以每笔上传前还要保证余额 ≥ 这一笔的 gasLimit × gasPrice；不够就按剩余各步重新算充值金额，算出来 ≤ 0 时至少充够这一笔（防止死循环，Task 9 审查意见）。
    - 计划里有首页要替换时，要确保余额够传完首页的全部块，所以首页的块总是算进剩余金额里。
    - 金额大于 0 时，持有人 `ownerSend(fundTx(...))`，等确认。
-5. **上传**：重新 `inspect` 得到最新的 `steps`，然后逐笔处理：
+5. **上传**：用第一次 inspect 的文件快照重新 `inspect({ target, files })` 得到最新的 `steps`（上传中途本地文件改了也不影响这次发布），然后逐笔处理：
    - 先用 `chain.estimateGas` 估算，乘 1.25，再和 `MAX_UPLOAD_GAS` 取较小值；
    - `operator.send(uploadTx(...))`，然后 `operator.settle()`；
    - status 0 抛出「上传 {path} 第 {index} 块失败」。
