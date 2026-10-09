@@ -1261,6 +1261,77 @@ test('电路换了持有人、旧临时钱包只剩一点：报错，保留旧�
   } finally { s.done(); }
 });
 
+// ---- 放弃旧持有人钱包里退不出来的零头 ----
+
+const discard = (s) => s.p.discardDust({ chainId: BSC.chainId, container: CONTAINER });
+
+test('discardDust：余额不够付退款手续费，删掉记录，返回放弃的余额', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OLD, 21000n * PRICE);
+    assert.deepEqual(await discard(s), { discarded: 21000n * PRICE });
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+    assert.equal(s.chain.mined.length, 0);
+    // 删掉以后可以为新持有人新建
+    const r = await s.p.run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'done');
+  } finally { s.done(); }
+});
+
+test('discardDust：余额还能退回就拒绝，记录保留', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OLD, 21000n * PRICE + 1n);
+    await assert.rejects(discard(s), is('NOT_DUST', /临时钱包里的余额还能退回，请先退款/));
+    assert.ok(s.store.get(BSC.chainId, CONTAINER));
+  } finally { s.done(); }
+});
+
+test('discardDust：持有人是合约时按估算的退款 gas 判断', async () => {
+  const s = setup();
+  try {
+    s.chain.code.add(lower(OLD));
+    s.chain.transferGas.set(lower(OLD), 40000n);
+    // 按 21000 算能退，按合约的 40000 × 1.25 算退不出来
+    oldWallet(s, OLD, 30000n * PRICE);
+    assert.deepEqual(await discard(s), { discarded: 30000n * PRICE });
+  } finally { s.done(); }
+});
+
+test('discardDust：有在途交易、持有人钱包有未确认的交易、没有记录、正在发布时都拒绝', async () => {
+  const s = setup();
+  try {
+    await assert.rejects(discard(s), is('NO_OPERATOR', /没有这个容器的临时钱包/));
+    const rec = oldWallet(s, OWNER, 1n);
+    s.store.setPending(BSC.chainId, CONTAINER, { raw: '0x01', hash: '0x02', kind: 'refund', nonce: 0n, value: 0n });
+    await assert.rejects(discard(s), is('LATER', /临时钱包还有一笔交易在等确认/));
+    s.store.clearPending(BSC.chainId, CONTAINER);
+    s.store.setOwnerPending(BSC.chainId, CONTAINER, { kind: 'fund', hash: '0x' + 'e'.repeat(64), at: T0, nonce: 0n });
+    await assert.rejects(discard(s), is('LATER', /持有人还有一笔交易在等确认/));
+    s.store.clearOwnerPending(BSC.chainId, CONTAINER);
+    s.chain.owner.pending = s.chain.owner.latest + 1n;
+    await assert.rejects(discard(s), is('WALLET_PENDING', /持有人钱包里还有一笔未确认的交易/));
+    s.chain.owner.pending = s.chain.owner.latest;
+    assert.equal(s.store.get(BSC.chainId, CONTAINER).address, rec.address);
+    await assert.rejects(s.p.discardDust({ chainId: 1, container: CONTAINER }), is('CHAIN_MISMATCH', /网络不一致/));
+    // 和 refund / run 共用容器锁
+    const busy = s.p.refund({ chainId: BSC.chainId, container: CONTAINER });
+    await assert.rejects(discard(s), is('BUSY', /这个容器正在发布/));
+    await busy;
+  } finally { s.done(); }
+});
+
+test('discardDust：余额不早于 pinBlock 读，刚到账的充值看得到', async () => {
+  const s = setup();
+  try {
+    const rec = oldWallet(s, OLD, 0n);
+    s.store.setMinBlock(BSC.chainId, CONTAINER, s.chain.head);
+    s.chain.mineTx('0x' + 'f'.repeat(64), OWNER, { from: OWNER, to: rec.address, value: 10n ** 15n, data: '0x' }, PRICE);
+    s.chain.mineEmpty(1);
+    await assert.rejects(discard(s), is('NOT_DUST', /请先退款/));
+  } finally { s.done(); }
+});
+
 test('refund 和 run 共用容器锁', async () => {
   const s = setup({ files: threeFiles() });
   try {

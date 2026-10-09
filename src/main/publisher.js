@@ -9,6 +9,7 @@
 //   inspect  检查网络、预检查、电路状态、发布计划，估算费用；只读链，不发交易
 //   run      开通 → 临时钱包 → 授权 → 充值 → 上传 → 核验 → 退款
 //   refund   放弃发布、只退钱：把临时钱包剩下的余额退回记录里的持有人
+//   discardDust  放弃退不出来的零头（余额不够付退款手续费），删掉记录
 // run 每一步都重新读链，不信任上次的进度；中断后再 run 一次就能接着传。
 // 金额、gas、gasPrice 一律是 bigint；错误信息是给用户看的中文，界面要区分的错误带 code（见 publish-errors.js）。
 
@@ -766,5 +767,32 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     } finally { unlock(); }
   }
 
-  return { inspect, run, refund };
+  /**
+   * 放弃临时钱包里退不出来的零头：余额 ≤ 退款手续费（普通地址 21000 × 当前单价，合约按估算）时删掉记录，
+   * 返回 { discarded: 余额 }。电路换了持有人、旧钱包只剩零头时用，删掉以后才能为新持有人新建（阶段 3 先让用户确认）。
+   * 和 run / refund 共用容器锁；有在途交易、持有人钱包有未确认的交易（可能是一笔还没到账的充值）都不删。
+   * 余额不早于 pinBlock 读：刚确认的充值也看得到，不会把它当零头删掉
+   */
+  async function discardDust({ chainId, container }) {
+    if (chainId !== net.chainId) throw fail(E.CHAIN_MISMATCH, '网络不一致');
+    const unlock = lockContainer(chainId, container);
+    try {
+      const rec = store.get(chainId, container);
+      if (!rec) throw fail(E.NO_OPERATOR, '没有这个容器的临时钱包');
+      if (rec.pending) throw fail(E.LATER, '临时钱包还有一笔交易在等确认');
+      if (rec.ownerPending) throw fail(E.LATER, '持有人还有一笔交易在等确认');
+      const { latest, pending } = await chain.nonceOf(rec.owner);
+      if (pending > latest) throw fail(E.WALLET_PENDING, '持有人钱包里还有一笔未确认的交易，等它确认后再处理');
+      const pinned = BigInt(await chain.pinBlock());
+      const ctx = { container: rec.container, owner: rec.owner, minBlock: rec.minBlock != null && rec.minBlock > pinned ? rec.minBlock : pinned };
+      const operator = createOperator({ store, chain, net, container: rec.container, owner: rec.owner, sleep, now });
+      const balance = await operator.balance(hexBlock(ctx.minBlock));
+      const { amount } = await refundQuote(ctx, operator, balance);
+      if (amount > 0n) throw fail(E.NOT_DUST, '临时钱包里的余额还能退回，请先退款');
+      store.remove(chainId, container);
+      return { discarded: balance };
+    } finally { unlock(); }
+  }
+
+  return { inspect, run, refund, discardDust };
 }

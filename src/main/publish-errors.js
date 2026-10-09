@@ -21,6 +21,7 @@ export const NOT_READY = 'NOT_READY';             // 还没有检查通过
 export const UPLOAD_FAILED = 'UPLOAD_FAILED';     // 上传回执失败、模拟失败、上传后核对失败
 export const REFUND_FAILED = 'REFUND_FAILED';
 export const NO_OPERATOR = 'NO_OPERATOR';         // 没有这个容器的临时钱包
+export const NOT_DUST = 'NOT_DUST';               // 临时钱包里的余额还能退回，不能直接放弃
 export const OPERATOR_OWNER_MISMATCH = 'OPERATOR_OWNER_MISMATCH'; // 容器已有另一个持有人的临时钱包，带 old
 
 /** 带 code 的 Error；extra 里的字段（cause、old 等）一起挂到错误上。返回错误，由调用方 throw */
