@@ -16,7 +16,7 @@
 // 标题：下载 index.html 取 <title>，按首页 sha256 缓存，内容没变不重新下载
 // 图片：查首页时顺带查容器根目录的 logo.png / logo.jpg（正方形图标）和 cover.png / cover.jpg（16:10 封面），
 //   只记文件信息，不下载；超过 50 KB 的不用。界面显示卡片时才按需读取（imageFor）
-// 分类：站长在 web.json 里写了 category 就用它；没写时取首页标题时顺带推测一个（category.js），
+// 分类：站长在 deweb.json 里写了 category 就用它；没写时取首页标题时顺带推测一个（category.js），
 //   按首页 sha256 缓存
 //
 // 标题来自网站自己的 HTML，界面只按纯文本显示。
@@ -37,7 +37,7 @@ export const IMAGE_FILES = { logo: ['logo.png', 'logo.jpg'], cover: ['cover.png'
 export const IMAGE_MAX_BYTES = 50 * 1024;
 const IMAGE_PATHS = [...IMAGE_FILES.logo, ...IMAGE_FILES.cover];
 // 站长对 DeWEB 应用的声明（目前只有 category），放在网站根目录，和 index.html 同一层
-export const MANIFEST_PATH = 'web.json';
+export const MANIFEST_PATH = 'deweb.json';
 const MANIFEST_MAX_BYTES = 16 * 1024;
 
 /** 从 HTML 里取 <title> 的纯文本 */
@@ -289,7 +289,7 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
     onChange();
   }
 
-  /** 读取有变化的 web.json，取站长声明的分类 */
+  /** 读取有变化的 deweb.json，取站长声明的分类 */
   async function fetchManifests(net) {
     const todo = ofNet(net).map(([, s]) => s).filter((s) => s.manifest && s.manifestRead !== s.manifest.sha256);
     if (!todo.length) return;

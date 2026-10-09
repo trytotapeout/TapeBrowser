@@ -49,7 +49,7 @@ test('干净的网站只有提示，卡片信息齐全', async () => {
     'index.html': '<title>Gomoku</title><script src="app.js"></script><link rel="icon" href="/logo.png">',
     'app.js': 'x',
     'logo.png': png(256, 256),
-    'web.json': '{"category": "game"}',
+    'deweb.json': '{"category": "game"}',
   });
   const r = await precheck({ files, read });
   assert.ok(!levels(r).includes('error') && !levels(r).includes('warn'), JSON.stringify(r.items));
@@ -96,8 +96,8 @@ test('运行时加载的外部脚本也算进去', async () => {
   assert.match(texts(r, 'warn'), /api\.example\.com/);
 });
 
-test('web.json 不合法、logo 比例不对', async () => {
-  const { files, read } = folder({ 'index.html': '<title>x</title>', 'web.json': '{"category": "nope"}', 'logo.png': png(300, 100) });
+test('deweb.json 不合法、logo 比例不对', async () => {
+  const { files, read } = folder({ 'index.html': '<title>x</title>', 'deweb.json': '{"category": "nope"}', 'logo.png': png(300, 100) });
   const r = await precheck({ files, read });
   assert.match(texts(r, 'warn'), /web\.json/);
   assert.match(texts(r, 'info'), /300×100/);

@@ -137,9 +137,9 @@ export async function precheck({ files, skipped = [], truncated = false, read, e
     let declared = null;
     try { declared = declaredCategory(JSON.parse(new TextDecoder().decode(await read(MANIFEST_PATH)))); } catch { /* 下面提示 */ }
     if (declared) Object.assign(card, { category: declared, categoryFrom: 'declared', categoryWhy: [] });
-    else add('warn', tr('web.json 不是合法的 JSON，或 category 不是 {list} 之一，会按推测的分类显示', { list: CATEGORIES.join(' / ') }));
+    else add('warn', tr('deweb.json 不是合法的 JSON，或 category 不是 {list} 之一，会按推测的分类显示', { list: CATEGORIES.join(' / ') }));
   } else {
-    add('info', tr('没有 web.json，分类是推测的。可以在根目录放 web.json 声明分类，例如 {"category": "game"}'));
+    add('info', tr('没有 deweb.json，分类是推测的。可以在根目录放 deweb.json 声明分类，例如 {"category": "game"}'));
   }
   const want = { logo: { ratio: 1, text: tr('正方形，推荐 256×256') }, cover: { ratio: 1.6, text: tr('16:10，推荐 640×400') } };
   for (const [kind, names] of Object.entries(IMAGE_FILES)) {

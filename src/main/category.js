@@ -1,4 +1,4 @@
-// DeWEB 应用的分类：没有站长声明（web.json）时，从首页推测一个默认分类。纯函数，不依赖 Electron。
+// DeWEB 应用的分类：没有站长声明（deweb.json）时，从首页推测一个默认分类。纯函数，不依赖 Electron。
 //
 // 规则是确定的、在本机算，不把网站内容发给任何服务：
 //   1. 关键词：标题、<meta name="description">、<meta name="keywords"> 里的词，每命中一个给对应分类加分
@@ -91,7 +91,7 @@ export function classify(title, bytes) {
   return { category: best, why: why[best] };
 }
 
-/** 站长在 web.json 里声明的分类；不认识的值当作没声明 */
+/** 站长在 deweb.json 里声明的分类；不认识的值当作没声明 */
 export function declaredCategory(json) {
   const c = json && typeof json.category === 'string' ? json.category.trim().toLowerCase() : '';
   return CATEGORIES.includes(c) ? c : null;

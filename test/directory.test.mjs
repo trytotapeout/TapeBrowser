@@ -288,7 +288,7 @@ test('卡片图片：logo、cover 各取第一个存在的格式；超过 50 KB 
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('分类：默认按首页推测；web.json 声明的分类覆盖推测，改了会重新读', async () => {
+test('分类：默认按首页推测；deweb.json 声明的分类覆盖推测，改了会重新读', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'tb-dir-'));
   const file = join(dir, 'directory.json');
   let t = 1_000_000;
