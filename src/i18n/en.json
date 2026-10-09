@@ -398,7 +398,7 @@
  "引用的文件不存在，上链后会 404：{list}": "Referenced files are missing and will 404 on chain: {list}",
  "用了不在链上的外部脚本或接口：{list}。上链后「链上」按钮会显示「含外部脚本」，外部服务失效时网站也会出问题；建议把脚本下载下来一起上传": "Uses off-chain scripts or APIs: {list}. On chain the site button will show \"External scripts\", and the site breaks if those services go down. Consider bundling the scripts and uploading them too",
  "加载了外部图片、字体或样式：{list}。不影响校验，但外部服务失效时会显示不全": "Loads external images, fonts or styles: {list}. Verification isn't affected, but the page may look incomplete if those services go down",
- "index.html 有 {size} 字节，超过一块的 {max} 字节。第一次能发布，但以后不能再替换首页；建议把脚本和样式拆出去": "index.html is {size} bytes, over the {max}-byte single chunk. It can be published once, but the home page can't be replaced later; move scripts and styles into separate files",
+ "index.html 有 {size} 字节，超过一块的 {max} 字节。更新网站时首页要分 {n} 笔交易替换，替换完成前网站会暂时打不开；建议把脚本和样式拆出去，让首页保持在一块以内": "index.html is {size} bytes, over the {max}-byte single chunk. Updating the site replaces the home page in {n} transactions, and the site is unavailable until that finishes; move scripts and styles into separate files to keep the home page within one chunk",
  "index.html 有 {size}，超过 256 KB，目录里会显示「（没有标题）」。可以把脚本和样式拆成单独的文件": "index.html is {size}, over 256 KB, so the directory will show \"(untitled)\". Move scripts and styles into separate files",
  "index.html 没有 <title>，目录里会显示「（没有标题）」": "index.html has no <title>, so the directory will show \"(untitled)\"",
  "deweb.json 不是合法的 JSON，或 category 不是 {list} 之一，会按推测的分类显示": "deweb.json isn't valid JSON, or category isn't one of {list}. The guessed category will be shown",

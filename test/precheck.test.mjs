@@ -104,13 +104,16 @@ test('deweb.json 不合法、logo 比例不对', async () => {
   assert.equal(r.card.categoryFrom, 'guess');
 });
 
-test('首页超过一块：能首发，但以后不能替换，警告里写字节数', async () => {
+test('首页超过一块：更新时要分几笔替换，替换完成前网站打不开，警告里写字节数和笔数', async () => {
   const page = (size) => folder({ 'index.html': '<title>x</title>' + 'a'.repeat(size - 16) });
   const big = texts(await precheck(page(30000)), 'warn');
   assert.match(big, /30000 字节/);
   assert.match(big, /24000 字节/);
+  assert.match(big, /分 2 笔交易替换/);
+  assert.match(big, /网站会暂时打不开/);
   assert.doesNotMatch(texts(await precheck(page(24000)), 'warn'), /超过一块/);
-  assert.match(texts(await precheck(page(24001)), 'warn'), /24001 字节，超过一块的 24000 字节/);
+  assert.match(texts(await precheck(page(24001)), 'warn'), /24001 字节，超过一块的 24000 字节。更新网站时首页要分 2 笔交易替换/);
+  assert.match(texts(await precheck(page(60000)), 'warn'), /60000 字节，超过一块的 24000 字节。更新网站时首页要分 3 笔交易替换/);
   const small = folder({ 'index.html': '<title>x</title>' });
   assert.doesNotMatch(texts(await precheck(small), 'warn'), /超过一块/);
 });

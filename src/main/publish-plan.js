@@ -1,8 +1,10 @@
 // 发布计划：对比本地文件和链上文件信息，决定每个文件怎么传。纯函数，不依赖 Electron。
 //
 // 规则和官方发布页一致：链上文件只增不改。内容相同的复用，传了一半的接着传；
-// 内容不同的只有 index.html 可以在最后整个替换（只能单块），其他文件算冲突，要改文件名。
+// 内容不同的只有 index.html 可以整个替换，其他文件算冲突，要改文件名。
 // index.html 永远最后传：传到一半时，旧首页和它引用的旧文件都还在，网站不会坏。
+// index.html 超过一块时替换要分几笔（putFile 换掉第 0 块并声明新 sha，后面 appendChunk），
+// 传完之前网站会暂时打不开，所以放在最后、连续传完。中断后链上 sha 已是新的，下次按 append 接着传。
 
 import { guessType } from './tape-protocol.js';
 import { CHUNK_BYTES } from './config.js';
@@ -25,7 +27,7 @@ export const chunkOf = (bytes, i) => bytes.subarray(i * CHUNK_BYTES, (i + 1) * C
  * 返回 {rows, conflicts, transactions, uploadBytes, reused}：
  *   rows      [{path, bytes, sha256, contentType, chunks, action, from, remaining, uploadBytes}]
  *             action 是 create / append / replace / reuse；from 是从第几块开始传
- *   conflicts [{path, reason}]，reason 是 changed / index-too-big / corrupt；有冲突就不能发布
+ *   conflicts [{path, reason}]，reason 是 changed / corrupt；有冲突就不能发布
  */
 export function planPublish(files, infos) {
   const rows = [];
@@ -41,9 +43,9 @@ export function planPublish(files, infos) {
     }
     const same = String(info.sha256).toLowerCase() === String(f.sha256).toLowerCase() && sameType(info.contentType, contentType);
     if (!same) {
+      // index.html 内容变了可以整个替换；超过一块时替换要分几笔，传完之前网站会暂时打不开，所以放在最后、连续传完
       if (f.path !== INDEX) conflicts.push({ path: f.path, reason: 'changed' });
-      else if (f.bytes.length > CHUNK_BYTES) conflicts.push({ path: f.path, reason: 'index-too-big' });
-      else rows.push({ ...base, action: 'replace', from: 0, remaining: 1, uploadBytes: f.bytes.length });
+      else rows.push({ ...base, action: 'replace', from: 0, remaining: chunks, uploadBytes: f.bytes.length });
       return;
     }
     const count = info.chunkCount;

@@ -35,16 +35,35 @@ test('内容相同的复用，传了一半的接着传', () => {
   assert.equal(p.uploadBytes, 60000 - CHUNK_BYTES);
 });
 
-test('首页内容变了：小于一块就最后替换，太大就算冲突', () => {
+test('首页内容变了：不管多大都在最后整个替换，超过一块就分几笔', () => {
   const oldIndex = file('index.html', 100, 1);
   const small = file('index.html', 100, 2);
   const p = planPublish([small], [onChain(oldIndex, 1, 'text/html; charset=utf-8')]);
   assert.equal(row(p, 'index.html').action, 'replace');
   assert.equal(row(p, 'index.html').remaining, 1);
-  const big = file('index.html', CHUNK_BYTES + 1, 2);
-  const q = planPublish([big], [onChain(oldIndex, 1, 'text/html; charset=utf-8')]);
-  assert.equal(q.conflicts[0].path, 'index.html');
-  assert.equal(q.conflicts[0].reason, 'index-too-big');
+  for (const [size, n] of [[CHUNK_BYTES + 1, 2], [60000, 3]]) {
+    const big = file('index.html', size, 2);
+    const q = planPublish([big], [onChain(oldIndex, 1, 'text/html; charset=utf-8')]);
+    assert.deepEqual(q.conflicts, [], String(size));
+    const r = row(q, 'index.html');
+    assert.equal(r.action, 'replace');
+    assert.equal(r.from, 0);
+    assert.equal(r.remaining, n);
+    assert.equal(r.uploadBytes, size);
+    assert.equal(q.transactions, n);
+    // 第 0 块用 putFile 整个替换，后面的用 appendChunk
+    assert.deepEqual(stepsOf(q).map((s) => s.index), [...Array(n).keys()]);
+  }
+});
+
+test('多块首页替换到一半中断：putFile 已经换上新 sha，接着从第 1 块传', () => {
+  const f = file('index.html', 60000, 2);
+  const p = planPublish([f], [{ size: CHUNK_BYTES, contentType: 'text/html; charset=utf-8', sha256: f.sha256, updatedAt: 1, chunkCount: 1 }]);
+  const r = row(p, 'index.html');
+  assert.equal(r.action, 'append');
+  assert.equal(r.from, 1);
+  assert.equal(r.remaining, 2);
+  assert.deepEqual(stepsOf(p).map((s) => s.index), [1, 2]);
 });
 
 test('其他文件内容变了是冲突，contentType 不同也算变了，链上分块异常也是冲突', () => {
@@ -116,11 +135,16 @@ test('没传完但块数比本地还多，算分块异常', () => {
 
 test('冲突里 index.html 也排最后；子目录的 index.html 是普通文件', () => {
   const big = file('index.html', CHUNK_BYTES + 1, 2);
-  const sub = file('sub/index.html', 10, 2);
+  const sub = file('sub/index.html', CHUNK_BYTES + 1, 2);
   const z = file('z.js', 10, 2);
   const old = (path) => ({ size: 10, contentType: '', sha256: sha(new Uint8Array(10).fill(9)), updatedAt: 1, chunkCount: 1, path });
   const p = planPublish([big, sub, z], [old(), old(), old()]);
-  assert.deepEqual(p.conflicts.map((x) => [x.path, x.reason]), [['sub/index.html', 'changed'], ['z.js', 'changed'], ['index.html', 'index-too-big']]);
+  assert.deepEqual(p.conflicts.map((x) => [x.path, x.reason]), [['sub/index.html', 'changed'], ['z.js', 'changed']]);
+  assert.equal(row(p, 'index.html').action, 'replace');
+  // 首页的冲突也排最后（损坏的链上分块）
+  const idx = file('index.html', 30000);
+  const q = planPublish([idx, z], [{ ...onChain(idx, 1, ''), size: 5 }, old()]);
+  assert.deepEqual(q.conflicts.map((x) => [x.path, x.reason]), [['z.js', 'changed'], ['index.html', 'corrupt']]);
 });
 
 test('stepsOf：多块的新文件从第 0 块开始', () => {
