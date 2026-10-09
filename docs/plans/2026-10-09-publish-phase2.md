@@ -140,7 +140,9 @@
 
 ## Task 10：发布引擎第二部分：执行和恢复
 
-在 `publisher.js` 里加 `run(inspected, { onProgress, signal })`。每一步都重新读链上状态，不信任上次的进度。`onProgress({ stage, done, total, path, index, hash })` 报告进度；`signal.aborted` 为 true 时在两笔交易之间停下，返回 `{ stage: 'paused' }`。
+在 `publisher.js` 里加 `run(inspected, { onProgress, signal })`。每一步都重新读链上状态，不信任上次的进度。
+
+重新 inspect 时一律传 `inspect({ target, files: inspected.files, minBlock })`，`minBlock` 是最近一笔已确认交易（开通、授权、充值、上传）回执里的 `blockNumber`。不传的话，钉住的区块可能早于刚确认的交易：会把已开通的容器当成没开通，再交一次开通费；或者用过期的块数去 appendChunk，交易回滚（Task 9 审查意见）。`onProgress({ stage, done, total, path, index, hash })` 报告进度；`signal.aborted` 为 true 时在两笔交易之间停下，返回 `{ stage: 'paused' }`。
 
 1. **开通**（只在 `!opened` 时）：
    - 持有人 `ownerSend(openTx(...))`，拿到 hash 后用 `chain.receipt` 轮询到确认。status 0 抛出「开通容器失败」。
@@ -151,7 +153,8 @@
 3. **授权**：`chain.operatorState(container, op)`：`!canEdit`，或者 `until < now/1000 + 300` → 持有人 `ownerSend(grantTx(...))`，等确认，再读一次确认已经生效。
 4. **充值**：
    - 需要的金额 = 剩余各步 `stepGas`（inspect 返回，已含 ×1.25）之和 × gasPrice，再减去临时钱包现有余额。
-   - 节点广播前检查的是「余额 ≥ gasLimit × gasPrice」，所以每笔上传前还要保证余额 ≥ 这一笔的 gasLimit × gasPrice；不够就按剩余各步重新算充值金额，算出来 ≤ 0 时至少充够这一笔（防止死循环，Task 9 审查意见）。
+   - 节点广播前检查的是「余额 ≥ gasLimit × gasPrice」，所以每笔上传前还要保证余额 ≥ 这一笔的 gasLimit × gasPrice。
+   - 不够时，充值金额 = max(剩余各步 stepGas 之和 × gasPrice − 余额, 这一笔 gasLimit × gasPrice − 余额)。这样就算节点估出来的 gas 比 stepGas 大，也一定能往前走，不会算出 ≤ 0 然后原地打转（Task 9 审查意见）。
    - 计划里有首页要替换时，要确保余额够传完首页的全部块，所以首页的块总是算进剩余金额里。
    - 金额大于 0 时，持有人 `ownerSend(fundTx(...))`，等确认。
 5. **上传**：用第一次 inspect 的文件快照重新 `inspect({ target, files })` 得到最新的 `steps`（上传中途本地文件改了也不影响这次发布），然后逐笔处理：
