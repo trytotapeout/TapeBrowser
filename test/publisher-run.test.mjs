@@ -55,6 +55,8 @@ const args = (data, types) => decodeResult(types, '0x' + data.slice(10));
 const gasOf = (tx) => 21000n + BigInt((tx.data.length - 2) / 2) * 20n;
 
 const cloneState = (s) => ({
+  ownerNonce: s.owner.latest,
+  owner: { ...s.owner },
   circuit: { ...s.circuit },
   files: new Map([...s.files].map(([k, v]) => [k, { ...v, chunks: [...v.chunks] }])),
   grant: { ...s.grant },
@@ -136,8 +138,10 @@ function fakeChain({ clock, store, opened = true }) {
     },
     mineItem(item) {
       if (item.kind === 'owner') {
+        // 先出块（快照是出块前的状态，nonce 还没前进），再推进持有人的 nonce
+        const r = c.mineTx(item.hash, item.tx.from, item.tx, PRICE, { revert: Boolean(c.hooks.revertOwner?.(item.tx)) });
         c.owner.latest += 1n;
-        return c.mineTx(item.hash, item.tx.from, item.tx, PRICE, { revert: Boolean(c.hooks.revertOwner?.(item.tx)) });
+        return r;
       }
       const { hash, tx, from } = item;
       c.nonces.set(from, (c.nonces.get(from) ?? 0n) + 1n);
@@ -201,6 +205,13 @@ function fakeChain({ clock, store, opened = true }) {
       }
       return c.receipts.get(hash) ?? null;
     },
+    async nonceAt(a, block) {
+      c.calls.push(['nonceAt', block]);
+      assert.equal(lower(a), lower(c.circuit.owner));
+      return c.at(block).ownerNonce;
+    },
+    /** 出几个空块（别人的交易） */
+    mineEmpty(n = 1) { for (let i = 0; i < n; i++) { c.snaps.set(c.head, cloneState(c)); c.head += 1n; } },
     async nonceOf(a) {
       if (lower(a) === lower(c.circuit.owner)) return { latest: c.owner.latest, pending: c.owner.pending, nodes: 2 };
       const n = c.nonces.get(lower(a)) ?? 0n;
@@ -210,7 +221,10 @@ function fakeChain({ clock, store, opened = true }) {
       c.calls.push(['nativeBalance', block]);
       return c.bal(a, c.at(block));
     },
-    async pinBlock() { return '0x' + (c.head - c.lag).toString(16); },
+    async pinBlock() {
+      const v = c.hooks.pinBlock?.();
+      return v !== undefined ? v : '0x' + (c.head - c.lag).toString(16);
+    },
     async gasPrice() { return PRICE; },
     async openFee() { return FEE; },
     async circuitInfos(list, block) {
@@ -858,5 +872,78 @@ test('等确认途中交易被替换：这次 run 就清掉 ownerPending，按�
     assert.equal(r.stage, 'uploaded');
     assert.equal(opens(s.chain), 1);
     assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending, null);
+  } finally { s.done(); }
+});
+
+// ---- 被替换的持有人交易：minBlock 要越过替换它的那笔，落后的节点才不会读到替换之前的状态 ----
+
+/**
+ * 节点有快有慢：替换发生之后，钉区块时大多落在还停在替换之前那一块的节点上，
+ * 只有 armFresh() 之后的下一次落在已经同步的节点上（run 里检测替换时那一次）
+ */
+function mixedNodes(s) {
+  const stale = '0x' + (s.chain.head - 1n).toString(16);
+  let fresh = 0;
+  s.chain.hooks.pinBlock = () => {
+    if (fresh > 0) { fresh--; return undefined; }
+    // 上传确认以后 minBlock 早已越过它，落后的节点不再要紧
+    return s.chain.mined.length ? undefined : stale;
+  };
+  return { armFresh: () => { fresh = 1; } };
+}
+
+test('充值被加速、节点有快有慢：替换后 minBlock 前进，余额不早于替换的区块读，不会再充一次', async () => {
+  const files = threeFiles();
+  const s = setup({ files });
+  try {
+    await stuckOn(s, 'fund', (tx) => tx.data === '0x');
+    s.chain.replaceOwner((tx) => tx);
+    const replacedAt = s.chain.head;
+    const nodes = mixedNodes(s);
+    const inspected = await s.p.inspect({ target });
+    assert.ok(BigInt(inspected.block) < replacedAt);
+    nodes.armFresh();
+    const progress = [];
+    const before = s.chain.calls.length;
+    const r = await s.make().run(inspected, { onProgress: (e) => progress.push(e) });
+    assert.equal(r.stage, 'uploaded');
+    assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
+    assert.ok(progress.some((e) => e.stage === 'fund' && e.replaced === true));
+    // 只看这次 run 的读取
+    const reads = s.chain.calls.slice(before).filter(([n]) => n === 'nativeBalance');
+    assert.ok(reads.length > 0 && reads.every(([, b]) => BigInt(b) >= replacedAt), '余额读取不早于替换的区块');
+    assert.ok(s.store.get(BSC.chainId, CONTAINER).minBlock >= replacedAt);
+  } finally { s.done(); }
+});
+
+test('开通被加速、节点有快有慢：不会再发开通交易', async () => {
+  const files = threeFiles();
+  const s = setup({ opened: false, files });
+  try {
+    await stuckOn(s, 'open', true);
+    s.chain.replaceOwner((tx) => tx);
+    const nodes = mixedNodes(s);
+    const inspected = await s.p.inspect({ target });
+    assert.equal(inspected.opened, false);
+    nodes.armFresh();
+    const progress = [];
+    const r = await s.make().run(inspected, { onProgress: (e) => progress.push(e) });
+    assert.equal(r.stage, 'uploaded');
+    assert.equal(opens(s.chain), 1);
+    assert.ok(progress.some((e) => e.stage === 'open' && e.replaced === true));
+    for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
+  } finally { s.done(); }
+});
+
+test('钉住的区块还没看到 nonce 被用掉：不清记录，当成还在等', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    await stuckOn(s, 'fund', (tx) => tx.data === '0x');
+    s.chain.replaceOwner((tx) => tx);
+    // latest nonce 已经前进，钉住的区块落后到替换之前
+    s.chain.lag = 1n;
+    await assert.rejects(s.make().run(await s.p.inspect({ target })), /持有人的交易还没确认/);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending.kind, 'fund');
+    assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
   } finally { s.done(); }
 });

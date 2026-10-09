@@ -268,8 +268,10 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
    * 等一笔持有人交易确认：有回执（不管成败）就清掉在途记录并返回回执；超时保留记录并抛出。
    * 持有人可能在钱包里加速或取消了这笔（同一个 nonce 换成另一笔交易上链），或者它被节点丢掉后钱包用这个 nonce 发了别的：
    * 原来的哈希永远不会有回执，一直等下去每次 run 都会卡 5 分钟。所以没有回执时再看持有人的 latest nonce，
-   * 已经越过这笔的 nonce，就隔一个 pollMs 再查一次回执（回执节点可能落后，和 operator.js 一样），还是没有就清掉记录，
-   * 返回 null，让调用方按链上状态重新判断这一步（替换的那笔可能做了同样的事，也可能什么都没做）。
+   * 已经越过这笔的 nonce，就隔一个 pollMs 再查一次回执（回执节点可能落后，和 operator.js 一样）。还是没有，
+   * 就取一个钉住的区块，确认它上面 nonce 也已经被用掉，把 minBlock 推到这个区块（替换的那笔一定在它之内），
+   * 再清掉记录、返回 null，让调用方按链上状态重新判断这一步（替换的那笔可能做了同样的事，也可能什么都没做）。
+   * 不推 minBlock 的话，落后的节点读到替换之前的余额，会再充一次值。钉住的区块还没看到 nonce 被用掉，就当它还在等。
    * 早期记录没有 nonce，只能等回执
    */
   async function awaitOwner(ctx, { kind, hash, nonce }, { timeoutMs = 300000, pollMs = 3000 } = {}) {
@@ -279,10 +281,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       if (!r && nonce != null && (await chain.nonceOf(ctx.owner)).latest > nonce) {
         await sleep(pollMs);
         r = await chain.receipt(hash);
-        if (!r) {
-          store.clearOwnerPending(net.chainId, ctx.container);
-          return null;
-        }
+        if (!r && await replacedBy(ctx, { kind, nonce })) return null;
       }
       if (r) {
         store.clearOwnerPending(net.chainId, ctx.container);
@@ -293,6 +292,16 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       if (now() >= deadline) throw new Error('持有人的交易还没确认，可以稍后继续');
       await sleep(pollMs);
     }
+  }
+
+  /** 钉住的区块上持有人的 nonce 已经越过这笔：推进 minBlock、清掉记录，返回 true；还没看到就返回 false */
+  async function replacedBy(ctx, { kind, nonce }) {
+    const block = BigInt(await chain.pinBlock());
+    if ((await chain.nonceAt(ctx.owner, hexBlock(block))) <= nonce) return false;
+    confirmed(ctx, { blockNumber: block });
+    store.clearOwnerPending(net.chainId, ctx.container);
+    ctx.progress({ stage: kind, replaced: true });
+    return true;
   }
 
   /** 上次留下的持有人交易：不重发，等它确认或确认它被替换了。返回是否处理了一笔 */

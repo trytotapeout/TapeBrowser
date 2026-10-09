@@ -261,3 +261,15 @@ test('safeBlock 其他节点错误照常抛出', async () => {
   const notFound = fakeRpc({ handlers: { eth_getBlockByNumber: () => { throw new RpcError('safe block not found', -32000); } } });
   await assert.rejects(createChain(notFound, NET).safeBlock(), /safe block not found/);
 });
+
+test('nonceAt 在指定区块读一次 eth_getTransactionCount，返回 bigint', async () => {
+  const rpc = fakeRpc({ handlers: { eth_getTransactionCount: ([, block]) => (block === '0x64' ? '0x4' : '0x9') } });
+  rpc.distinct = async () => { throw new Error('nonceAt 不该问多个节点'); };
+  const chain = createChain(rpc, NET);
+  assert.equal(await chain.nonceAt(OPERATOR, '0x64'), 4n);
+  assert.equal(await chain.nonceAt(OPERATOR, 'latest'), 9n);
+  assert.deepEqual(rpc.log.map((l) => [l.method, l.params]), [
+    ['eth_getTransactionCount', [OPERATOR, '0x64']],
+    ['eth_getTransactionCount', [OPERATOR, 'latest']],
+  ]);
+});

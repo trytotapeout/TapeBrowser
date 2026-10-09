@@ -307,6 +307,11 @@ export function createChain(rpc, net = BSC) {
     return { latest: latest.value, pending: pending.value, nodes: latest.nodes };
   }
 
+  /** 地址在某个区块（0x 十六进制或标签）上的 nonce，只问一个节点：和同一区块上的其他读取对得上 */
+  async function nonceAt(address, block) {
+    return BigInt(await rpc('eth_getTransactionCount', [address, block]));
+  }
+
   /**
    * 估算 gas：tx 里的 BigInt 字段，以及数字形式的 value / gas / gasPrice / nonce 转成 0x 十六进制，undefined 字段去掉。
    * tx.from 必须是真正的发送方：registry 按 from 检查 canEdit，填错会估出 revert
@@ -366,5 +371,5 @@ export function createChain(rpc, net = BSC) {
     return b?.number ? BigInt(b.number) : null;
   }
 
-  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, v3Price, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, allPaths, hasCode, readRange, readVerified, openFee, isDeployed, operatorState, gasPrice, nonceOf, estimateGas, receipt, sendRaw, safeBlock };
+  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, v3Price, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, allPaths, hasCode, readRange, readVerified, openFee, isDeployed, operatorState, gasPrice, nonceOf, nonceAt, estimateGas, receipt, sendRaw, safeBlock };
 }
