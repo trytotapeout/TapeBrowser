@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPublisher } from '../src/main/publisher.js';
 import { createOperatorStore } from '../src/main/operator-store.js';
-import { SEL, BSC, CHUNK_BYTES, OPERATOR_TTL } from '../src/main/config.js';
+import { SEL, BSC, XLAYER, CHUNK_BYTES, OPERATOR_TTL } from '../src/main/config.js';
 import { hexToBytes, bytesToHex, decodeResult } from '../src/main/abi.js';
 import { keccak256 } from '../src/main/keccak.js';
 import { RpcError } from '../src/main/rpc.js';
@@ -70,18 +70,24 @@ const cloneState = (s) => ({
  * 默认 ownerSend / sendRaw 立刻出块；holdOwner / holdOps 时先进交易池，mineQueued() 才出块。
  * hooks 让测试制造广播失败、回滚、估算回滚、广播后抛错之类的情况
  */
-function fakeChain({ clock, store, opened = true }) {
+function fakeChain({ clock, store, opened = true, chainId = BSC.chainId }) {
   const c = {
     head: 100n, lag: 0n, snaps: new Map(),
     circuit: { owner: OWNER, opened, deployed: opened },
     files: new Map(), grant: { operator: null, until: 0 }, balances: new Map(),
     nonces: new Map(), owner: { latest: 0n, pending: 0n }, queue: [], holdOwner: false, holdOps: false,
     receipts: new Map(), sent: [], mined: [], ownerTxs: [], calls: [], hooks: {},
+    // safeLag：safe 区块比链头落后几块；safe 为 false 时节点不支持 safe 标签（safeBlock 返回 null）
+    safeLag: 0n, safe: true,
+    // 合约地址（eth_getCode 不是 0x）和给它转账的估算 gas；corrupt 里的路径读回来时内容被改了一个字节
+    code: new Set(), transferGas: new Map(), corrupt: new Set(),
     nowSec: () => Math.floor(clock.t / 1000),
-    opAddr: () => store.get(BSC.chainId, CONTAINER)?.address,
+    opAddr: () => store.get(chainId, CONTAINER)?.address,
     canEdit: (who, s = c) => lower(who) === lower(s.circuit.owner)
       || (s.grant.operator && lower(who) === lower(s.grant.operator) && s.grant.until > c.nowSec()),
     bal: (a, s = c) => s.balances.get(lower(a)) ?? 0n,
+    /** 实际用掉的 gas：转给合约地址按 transferGas，其余按 gasOf */
+    used: (tx) => (tx.data === '0x' && c.code.has(lower(tx.to)) ? c.transferGas.get(lower(tx.to)) ?? 21000n : gasOf(tx)),
 
     /** 某个区块的状态：链头就是当前状态，更早的用快照（比最早的快照还早就用最早的） */
     at(block) {
@@ -96,6 +102,7 @@ function fakeChain({ clock, store, opened = true }) {
     apply(from, tx) {
       const sel = tx.data.slice(0, 10);
       if (tx.data === '0x') {
+        c.balances.set(lower(from), c.bal(from) - tx.value);
         c.balances.set(lower(tx.to), c.bal(tx.to) + tx.value);
         return true;
       }
@@ -132,7 +139,7 @@ function fakeChain({ clock, store, opened = true }) {
       if (charge) c.balances.set(lower(from), c.bal(from) - charge);
       const ok = !revert && c.apply(from, tx);
       c.head += 1n;
-      const r = { transactionHash: hash, status: ok ? 1 : 0, blockNumber: c.head, gasUsed: gasOf(tx), effectiveGasPrice: price };
+      const r = { transactionHash: hash, status: ok ? 1 : 0, blockNumber: c.head, gasUsed: c.used(tx), effectiveGasPrice: price };
       c.receipts.set(hash, r);
       return r;
     },
@@ -145,8 +152,8 @@ function fakeChain({ clock, store, opened = true }) {
       }
       const { hash, tx, from } = item;
       c.nonces.set(from, (c.nonces.get(from) ?? 0n) + 1n);
-      const r = c.mineTx(hash, from, tx, tx.gasPrice, { revert: Boolean(c.hooks.revert?.(tx)), charge: gasOf(tx) * tx.gasPrice });
-      c.mined.push({ hash, tx, receipt: r });
+      const r = c.mineTx(hash, from, tx, tx.gasPrice, { revert: Boolean(c.hooks.revert?.(tx)), charge: c.used(tx) * tx.gasPrice });
+      c.mined.push({ hash, tx, from, receipt: r });
       c.hooks.afterMine?.(tx, r);
       return r;
     },
@@ -190,7 +197,7 @@ function fakeChain({ clock, store, opened = true }) {
       const nonce = (c.nonces.get(from) ?? 0n) + c.opQueued(from);
       if (tx.nonce < nonce) return { known: true, reason: 'nonceUsed' };
       if (tx.nonce > nonce) throw new RpcError('nonce too high', -32000);
-      if (c.bal(from) < tx.gas * tx.gasPrice) throw new RpcError('insufficient funds for gas * price + value', -32000);
+      if (c.bal(from) < tx.gas * tx.gasPrice + tx.value) throw new RpcError('insufficient funds for gas * price + value', -32000);
       const item = { kind: 'op', hash, tx, from };
       if (c.holdOps) c.queue.push(item);
       else c.mineItem(item);
@@ -252,6 +259,8 @@ function fakeChain({ clock, store, opened = true }) {
         const v = c.hooks.estimate(tx);
         if (v !== undefined) return v;
       }
+      // 转账（退款）：不执行，合约地址按 transferGas 返回
+      if (tx.data === '0x') return c.transferGas.get(lower(tx.to)) ?? 21000n;
       // 在当前状态上模拟一遍，不留下改动
       const snapshot = new Map([...c.files].map(([k, v]) => [k, { ...v, chunks: [...v.chunks] }]));
       const ok = c.apply(tx.from, tx);
@@ -259,11 +268,28 @@ function fakeChain({ clock, store, opened = true }) {
       if (!ok) throw new RpcError('execution reverted', 3, '0x08c379a0');
       return gasOf(tx);
     },
+    async hasCode(addresses, block) {
+      c.calls.push(['hasCode', block]);
+      return new Map(addresses.map((a) => [lower(a), c.code.has(lower(a))]));
+    },
+    async safeBlock() {
+      c.calls.push(['safeBlock']);
+      return c.safe ? c.head - c.safeLag : null;
+    },
+    /** 从内存里的容器读回整个文件，和 chain.js 一样核对 SHA-256 */
+    async readVerified(container, path, info, block) {
+      c.calls.push(['readVerified', path, block]);
+      const f = c.at(block).files.get(path);
+      const bytes = Buffer.concat((f?.chunks ?? []).map((x) => Buffer.from(x)));
+      if (c.corrupt.has(path) && bytes.length) bytes[0] ^= 0xff;
+      if (bytes.length !== info.size || sha(bytes) !== info.sha256) throw new Error('SHA-256 校验失败：文件可能还在上传中，或已损坏');
+      return new Uint8Array(bytes);
+    },
   };
   return c;
 }
 
-function setup({ opened = true, files: local = [] } = {}) {
+function setup({ opened = true, files: local = [], net = BSC } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'publisher-run-'));
   const clock = { t: T0, sleeps: 0 };
   let chain;
@@ -271,17 +297,23 @@ function setup({ opened = true, files: local = [] } = {}) {
   const sleep = async (ms) => { clock.sleeps++; clock.t += ms; chain.hooks.onSleep?.(); };
   const now = () => clock.t;
   const store = createOperatorStore({ dir, encrypt, decrypt, now });
-  chain = fakeChain({ clock, store, opened });
+  // 退款后记录会被删掉：删之前留一份，测试还能看最后的状态
+  const removed = [];
+  const rm = store.remove;
+  store.remove = (id, container) => { removed.push(store.get(id, container)); rm(id, container); };
+  chain = fakeChain({ clock, store, opened, chainId: net.chainId });
   const make = () => createPublisher({
-    chain, net: BSC, ownerSend: (tx) => chain.ownerSend(tx), store,
+    chain, net, ownerSend: (tx) => chain.ownerSend(tx), store,
     readFiles: async () => local, precheck: async () => ({ items: [] }), now, sleep,
   });
   const p = make();
-  return { dir, clock, store, chain, p, make, done: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, clock, store, removed, chain, p, make, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 /** 容器里的文件内容拼起来，和本地字节比较 */
 const content = (chain, path) => Buffer.concat((chain.files.get(path)?.chunks ?? []).map((x) => Buffer.from(x)));
+/** 当前的记录；已经退款删掉了就用删之前的最后一份 */
+const recOf = (s) => s.store.get(BSC.chainId, CONTAINER) ?? s.removed.at(-1);
 const sameBytes = (chain, f) => content(chain, f.path).equals(Buffer.from(f.bytes));
 const uploads = (chain) => chain.mined.filter((m) => m.tx.data.startsWith(SEL.putFile) || m.tx.data.startsWith(SEL.appendChunk));
 const ownerKinds = (chain) => chain.ownerTxs.map((tx) => (tx.data === '0x' ? 'fund' : tx.data.startsWith(SEL.open) ? 'open' : tx.data.startsWith(SEL.setOperator) ? 'grant' : '?'));
@@ -301,18 +333,17 @@ test('已开通、空容器：授权、充值，按顺序传完 3 个文件（�
     const r = await s.p.run(inspected, { onProgress: (e) => progress.push(e) });
     const up = uploads(s.chain);
     assert.deepEqual(up.map((m) => m.receipt.status), [1, 1, 1, 1]);
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(r.container, CONTAINER);
     assert.equal(r.label, 'demo');
     assert.equal(r.uploaded, 4);
     assert.equal(r.reused, 0);
     assert.equal(r.spent, spentOf(up));
-    assert.equal(r.lastBlock, up[3].receipt.blockNumber);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
     assert.equal(s.chain.files.get('big.png').chunks.length, 2);
     assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
     // 授权给了临时钱包，6 小时
-    const op = s.store.get(BSC.chainId, CONTAINER).address;
+    const op = recOf(s).address;
     assert.equal(lower(s.chain.grant.operator), op);
     assert.equal(s.chain.grant.until, Math.floor(T0 / 1000) + OPERATOR_TTL);
     // 首页最后传
@@ -339,7 +370,7 @@ test('没开通：先付开通费开通，核对后再授权、充值、上传',
     const inspected = await s.p.inspect({ target });
     assert.equal(inspected.opened, false);
     const r = await s.p.run(inspected);
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(r.uploaded, 4);
     assert.deepEqual(ownerKinds(s.chain), ['open', 'grant', 'fund']);
     assert.equal(s.chain.ownerTxs[0].value, FEE);
@@ -369,7 +400,7 @@ test('inspect 之后容器已经被开通：run 开始时重新检查，不再�
     s.chain.circuit.opened = true;
     s.chain.circuit.deployed = true;
     const r = await s.p.run(inspected);
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(opens(s.chain), 0);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
@@ -396,7 +427,7 @@ test('中途 abort：在两笔交易之间停下；再 run 一次接着传完，
 
     s.chain.hooks.afterMine = null;
     const r2 = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(r2.stage, 'uploaded');
+    assert.equal(r2.stage, 'done');
     assert.equal(r2.uploaded, 2);
     const keys = uploads(s.chain).map((m) => m.tx.data.slice(0, 10) + ':' + m.hash);
     assert.equal(uploads(s.chain).length, 4);
@@ -428,12 +459,12 @@ test('上传时广播失败：报错保留 pending；重启后 settle 重发同�
     assert.equal(uploads(s.chain).length, 0);
 
     const r = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(r.uploaded, 4);
     assert.equal(s.chain.sent.filter((raw) => raw === pending.raw).length, 2);
     assert.equal(uploads(s.chain)[0].hash, pending.hash);
     assert.equal(uploads(s.chain).length, 4);
-    assert.equal(s.store.get(BSC.chainId, CONTAINER).pending, null);
+    assert.equal(recOf(s).pending, null);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
 });
@@ -448,7 +479,7 @@ test('首页替换：链上已有旧首页（两块），新首页整个重传�
     const inspected = await s.p.inspect({ target });
     assert.equal(inspected.plan.rows.find((r) => r.path === 'index.html').action, 'replace');
     const r = await s.p.run(inspected);
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(r.uploaded, 1);
     assert.equal(r.reused, 1);
     assert.ok(sameBytes(s.chain, index));
@@ -467,7 +498,7 @@ test('余额不够：上传途中余额被花掉，下一笔之前再充一次�
       s.chain.balances.set(s.chain.opAddr(), 0n);
     };
     const r = await s.p.run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund', 'fund']);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
@@ -479,7 +510,7 @@ test('节点估出的 gas 比 stepGas 大：充值按这一笔的 gasLimit 补�
   try {
     s.chain.hooks.estimate = (tx) => (lower(tx.from) === s.chain.opAddr() ? 10000000n : undefined);
     const r = await s.p.run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     // 每笔 gasLimit = 10000000 × 1.25
     for (const m of uploads(s.chain)) assert.equal(m.tx.gas, 12500000n);
     const funds = s.chain.ownerTxs.filter((tx) => tx.data === '0x');
@@ -505,7 +536,7 @@ test('授权快过期（不到 5 分钟）：重新授权', async () => {
     const op = s.store.create({ chainId: BSC.chainId, container: CONTAINER, owner: OWNER }).address;
     s.chain.grant = { operator: op, until: Math.floor(T0 / 1000) + 100 };
     const r = await s.p.run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
     assert.equal(s.chain.grant.until, Math.floor(T0 / 1000) + OPERATOR_TTL);
   } finally { s.done(); }
@@ -541,9 +572,9 @@ test('同一个容器并发 run：第二个直接拒绝；第一个结束后可�
     const inspected = await s.p.inspect({ target });
     const first = s.p.run(inspected);
     await assert.rejects(s.make().run(inspected), /这个容器正在发布/);
-    assert.equal((await first).stage, 'uploaded');
+    assert.equal((await first).stage, 'done');
     const again = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(again.stage, 'uploaded');
+    assert.equal(again.stage, 'done');
     assert.equal(again.uploaded, 0);
     assert.equal(again.reused, 3);
   } finally { s.done(); }
@@ -556,7 +587,7 @@ test('出错之后互斥锁也会释放', async () => {
     await assert.rejects(s.p.run(await s.p.inspect({ target })), /第 1 块失败/);
     s.chain.hooks.revert = null;
     const r = await s.p.run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
   } finally { s.done(); }
 });
 
@@ -570,7 +601,7 @@ test('估算回滚（节点落后）：隔一个 pollMs 重试，第三次成功
       throw new RpcError('execution reverted', 3, '0x');
     };
     const r = await s.p.run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(reverts, 2);
     assert.ok(s.clock.sleeps >= 2);
   } finally { s.done(); }
@@ -601,7 +632,7 @@ test('估算遇到节点故障（不是回滚）：用这一步的 stepGas 作 g
     const inspected = await s.p.inspect({ target });
     const fresh = await s.p.inspect({ target, files: inspected.files, simulate: false });
     const r = await s.p.run(inspected);
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(uploads(s.chain)[0].tx.gas, fresh.stepGas[0]);
   } finally { s.done(); }
 });
@@ -636,7 +667,7 @@ test('钱包广播了开通交易却抛错：再 run 不会再发一次开通（
     s.chain.mineQueued();
     s.chain.holdOwner = false;
     const r = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(opens(s.chain), 1);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
@@ -655,9 +686,9 @@ test('开通交易等确认超时：记录留在 ownerPending；下次 run 先�
     // 下次 run 时它才出块
     s.chain.hooks.onSleep = () => s.chain.mineQueued();
     const r = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(opens(s.chain), 1);
-    assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending, null);
+    assert.equal(recOf(s).ownerPending, null);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
 });
@@ -691,7 +722,7 @@ test('开通确认后中断；下次 latest 落后几个块：不会再交一次
     const stale = await s.p.inspect({ target });
     assert.equal(stale.opened, false);
     const r2 = await s.make().run(stale);
-    assert.equal(r2.stage, 'uploaded');
+    assert.equal(r2.stage, 'done');
     assert.equal(opens(s.chain), 1);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
@@ -703,7 +734,7 @@ test('充值确认后 latest 落后：余额钉在最近确认的区块上读，
   try {
     s.chain.lag = 3n;
     const r = await s.p.run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
     const reads = s.chain.calls.filter(([n]) => n === 'nativeBalance');
     assert.ok(reads.length >= 4);
@@ -725,7 +756,7 @@ test('广播报 nonce too low、回执节点又落后：等到回执，这一笔
     // 临时钱包内部查到了回执，紧接着的那次查询落在落后的节点上
     s.chain.hooks.receipt = (hash) => (hash === target0 && ++calls === 2 ? null : undefined);
     const r = await s.p.run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(r.uploaded, 4);
     assert.equal(r.spent, spentOf(uploads(s.chain)));
     assert.ok(calls >= 3);
@@ -744,7 +775,7 @@ test('上传途中授权快到期：重新检查时重新授权', async () => {
       s.clock.t += (OPERATOR_TTL - 100) * 1000;
     };
     const r = await s.p.run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.deepEqual(ownerKinds(s.chain).filter((k) => k === 'grant').length, 2);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
@@ -764,7 +795,7 @@ test('上次留下的上传 pending：回执没有 effectiveGasPrice 时按签�
       return hash === pending.hash && r ? { ...r, effectiveGasPrice: null } : undefined;
     };
     const r = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(r.uploaded, 4);
     assert.equal(r.spent, spentOf(uploads(s.chain)));
   } finally { s.done(); }
@@ -811,9 +842,9 @@ test('开通交易被加速（同样的开通换了哈希上链）：下次 run 
     s.chain.replaceOwner((tx) => tx);
     assert.equal(s.chain.circuit.opened, true);
     const r = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(opens(s.chain), 1);
-    assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending, null);
+    assert.equal(recOf(s).ownerPending, null);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
 });
@@ -826,7 +857,7 @@ test('开通交易被取消：下次 run 清掉 ownerPending，重新检查，�
     s.chain.replaceOwner();
     assert.equal(s.chain.circuit.opened, false);
     const r = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     // 第一次那笔被取消了，这次只新发一笔
     assert.equal(opens(s.chain), 2);
     assert.equal(s.chain.circuit.opened, true);
@@ -841,7 +872,7 @@ test('充值交易被取消：下次 run 按钉住的余额重新算，只再充
     await stuckOn(s, 'fund', (tx) => tx.data === '0x');
     s.chain.replaceOwner();
     const r = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund', 'fund']);
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
@@ -854,7 +885,7 @@ test('充值交易被加速：下次 run 看到余额已经够了，不再充值
     await stuckOn(s, 'fund', (tx) => tx.data === '0x');
     s.chain.replaceOwner((tx) => tx);
     const r = await s.make().run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
   } finally { s.done(); }
 });
@@ -869,9 +900,9 @@ test('等确认途中交易被替换：这次 run 就清掉 ownerPending，按�
       if (++polls === 3) { s.chain.holdOwner = false; s.chain.replaceOwner((tx) => tx); }
     };
     const r = await s.p.run(await s.p.inspect({ target }));
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(opens(s.chain), 1);
-    assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending, null);
+    assert.equal(recOf(s).ownerPending, null);
   } finally { s.done(); }
 });
 
@@ -906,13 +937,13 @@ test('充值被加速、节点有快有慢：替换后 minBlock 前进，余额�
     const progress = [];
     const before = s.chain.calls.length;
     const r = await s.make().run(inspected, { onProgress: (e) => progress.push(e) });
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
     assert.ok(progress.some((e) => e.stage === 'fund' && e.replaced === true));
     // 只看这次 run 的读取
     const reads = s.chain.calls.slice(before).filter(([n]) => n === 'nativeBalance');
     assert.ok(reads.length > 0 && reads.every(([, b]) => BigInt(b) >= replacedAt), '余额读取不早于替换的区块');
-    assert.ok(s.store.get(BSC.chainId, CONTAINER).minBlock >= replacedAt);
+    assert.ok(recOf(s).minBlock >= replacedAt);
   } finally { s.done(); }
 });
 
@@ -928,7 +959,7 @@ test('开通被加速、节点有快有慢：不会再发开通交易', async ()
     nodes.armFresh();
     const progress = [];
     const r = await s.make().run(inspected, { onProgress: (e) => progress.push(e) });
-    assert.equal(r.stage, 'uploaded');
+    assert.equal(r.stage, 'done');
     assert.equal(opens(s.chain), 1);
     assert.ok(progress.some((e) => e.stage === 'open' && e.replaced === true));
     for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
@@ -945,5 +976,181 @@ test('钉住的区块还没看到 nonce 被用掉：不清记录，当成还在�
     await assert.rejects(s.make().run(await s.p.inspect({ target })), /持有人的交易还没确认/);
     assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending.kind, 'fund');
     assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
+  } finally { s.done(); }
+});
+
+// ---- 核验和退款 ----
+
+const OLD = '0x' + '4'.repeat(40);
+const refunds = (chain) => chain.mined.filter((m) => m.tx.data === '0x');
+const funded = (chain) => chain.ownerTxs.filter((tx) => tx.data === '0x').reduce((n, tx) => n + tx.value, 0n);
+
+/** 给 who 建一条临时钱包记录，钱包里放 balance */
+function oldWallet(s, who, balance) {
+  const rec = s.store.create({ chainId: BSC.chainId, container: CONTAINER, owner: who });
+  s.chain.balances.set(rec.address, balance);
+  return rec;
+}
+
+test('完整发布：核验通过，余额减去 21000 × gasPrice 退回持有人，记录删掉', async () => {
+  const files = threeFiles();
+  const s = setup({ files });
+  try {
+    const r = await s.p.run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'done');
+    assert.equal(r.verified, true);
+    assert.equal(r.safeSkipped, false);
+    assert.equal(r.dust, false);
+    const [back] = refunds(s.chain);
+    assert.equal(back.receipt.status, 1);
+    assert.equal(lower(back.tx.to), lower(OWNER));
+    assert.equal(back.tx.gas, 21000n);
+    assert.equal(r.refunded, funded(s.chain) - spentOf(uploads(s.chain)) - 21000n * PRICE);
+    assert.equal(back.tx.value, r.refunded);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+    // 每个文件都读回来核对过；没有撤销授权
+    const read = s.chain.calls.filter(([n]) => n === 'readVerified').map(([, p]) => p).sort();
+    assert.deepEqual(read, ['a.js', 'big.png', 'index.html']);
+    assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
+  } finally { s.done(); }
+});
+
+test('核验对不上：先退款，再抛出核验失败', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    s.chain.corrupt.add('big.png');
+    await assert.rejects(s.p.run(await s.p.inspect({ target })), /核验失败：big\.png/);
+    assert.equal(refunds(s.chain).length, 1);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
+test('X Layer：等 safe 区块覆盖最后一笔交易再核验', async () => {
+  const s = setup({ files: threeFiles(), net: XLAYER });
+  try {
+    s.chain.safeLag = 3n;
+    s.chain.hooks.onSleep = () => { if (s.chain.safeLag > 0n) s.chain.safeLag -= 1n; };
+    const r = await s.p.run(await s.p.inspect({ target }));
+    assert.equal(r.verified, true);
+    assert.equal(r.safeSkipped, false);
+    assert.ok(s.chain.calls.filter(([n]) => n === 'safeBlock').length >= 4);
+    // 核验在 safe 追上之后才开始
+    const firstRead = s.chain.calls.findIndex(([n]) => n === 'readVerified');
+    const lastSafe = s.chain.calls.findLastIndex(([n]) => n === 'safeBlock');
+    assert.ok(lastSafe < firstRead);
+  } finally { s.done(); }
+});
+
+test('X Layer 节点不支持 safe：跳过等待，照常核验，结果里注明 safeSkipped', async () => {
+  const s = setup({ files: threeFiles(), net: XLAYER });
+  try {
+    s.chain.safe = false;
+    const r = await s.p.run(await s.p.inspect({ target }));
+    assert.equal(r.verified, true);
+    assert.equal(r.safeSkipped, true);
+  } finally { s.done(); }
+});
+
+test('X Layer safe 区块一直追不上：超时不核验，照样退款', async () => {
+  const s = setup({ files: threeFiles(), net: XLAYER });
+  try {
+    s.chain.safeLag = 1000n;
+    const r = await s.p.run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'done');
+    assert.equal(r.verified, false);
+    assert.equal(r.reason, 'safe');
+    assert.equal(s.chain.calls.filter(([n]) => n === 'readVerified').length, 0);
+    assert.equal(refunds(s.chain).length, 1);
+    assert.equal(s.store.get(XLAYER.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
+test('持有人是合约：退款 gas 用 estimateGas × 1.25', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    s.chain.code.add(lower(OWNER));
+    s.chain.transferGas.set(lower(OWNER), 30000n);
+    const r = await s.p.run(await s.p.inspect({ target }));
+    const [back] = refunds(s.chain);
+    assert.equal(back.tx.gas, 37500n);
+    assert.equal(r.refunded, funded(s.chain) - spentOf(uploads(s.chain)) - 37500n * PRICE);
+    // 实际只用了 30000，多留的手续费还在钱包里，记录保留
+    assert.equal(s.chain.bal(back.from), 7500n * PRICE);
+    assert.ok(s.store.get(BSC.chainId, CONTAINER));
+  } finally { s.done(); }
+});
+
+test('余额不够付退款手续费：不发交易，保留记录，返回 dust', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OWNER, 21000n * PRICE - 1n);
+    const r = await s.p.refund({ chainId: BSC.chainId, container: CONTAINER });
+    assert.deepEqual(r, { refunded: 0n, dust: true });
+    assert.equal(refunds(s.chain).length, 0);
+    assert.ok(s.store.get(BSC.chainId, CONTAINER));
+  } finally { s.done(); }
+});
+
+test('单独 refund：退回记录里的持有人（电路已经转给别人了也一样），删除记录', async () => {
+  const s = setup();
+  try {
+    await assert.rejects(s.p.refund({ chainId: BSC.chainId, container: CONTAINER }), /没有这个容器的临时钱包/);
+    oldWallet(s, OLD, 10n ** 15n);
+    const r = await s.p.refund({ chainId: BSC.chainId, container: CONTAINER });
+    assert.deepEqual(r, { refunded: 10n ** 15n - 21000n * PRICE, dust: false });
+    const [back] = refunds(s.chain);
+    assert.equal(lower(back.tx.to), lower(OLD));
+    assert.equal(s.chain.bal(OLD), r.refunded);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
+test('退款回执 status 0：抛出退款失败，保留记录', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    s.chain.hooks.revert = (tx) => tx.data === '0x';
+    await assert.rejects(s.p.run(await s.p.inspect({ target })), /退款失败/);
+    const rec = s.store.get(BSC.chainId, CONTAINER);
+    assert.ok(rec);
+    assert.equal(rec.pending, null);
+  } finally { s.done(); }
+});
+
+test('电路换了持有人：旧临时钱包的余额先退给旧持有人，再为新持有人新建，发布完成', async () => {
+  const files = threeFiles();
+  const s = setup({ files });
+  try {
+    const old = oldWallet(s, OLD, 10n ** 15n);
+    const r = await s.p.run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'done');
+    const [first, second] = refunds(s.chain);
+    assert.equal(first.from, old.address);
+    assert.equal(lower(first.tx.to), lower(OLD));
+    assert.equal(s.chain.bal(OLD), 10n ** 15n - 21000n * PRICE);
+    // 新钱包是另一个地址，退款回到新持有人
+    assert.notEqual(second.from, old.address);
+    assert.equal(lower(second.tx.to), lower(OWNER));
+    for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
+test('电路换了持有人、旧临时钱包只剩一点：报错，保留旧记录，什么都不发', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    const old = oldWallet(s, OLD, 1000n);
+    await assert.rejects(s.p.run(await s.p.inspect({ target })), /旧持有人的临时钱包余额不够付退款手续费，已保留记录/);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER).address, old.address);
+    assert.equal(s.chain.mined.length, 0);
+    assert.equal(s.chain.ownerTxs.length, 0);
+  } finally { s.done(); }
+});
+
+test('refund 和 run 共用容器锁', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    const running = s.p.run(await s.p.inspect({ target }));
+    await assert.rejects(s.p.refund({ chainId: BSC.chainId, container: CONTAINER }), /这个容器正在发布/);
+    assert.equal((await running).stage, 'done');
   } finally { s.done(); }
 });

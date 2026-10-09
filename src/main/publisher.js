@@ -7,15 +7,15 @@
 //   precheck   已绑定参数的预检查 → { items: [{ level, text }] }
 // 流程分三步：
 //   inspect  检查网络、预检查、电路状态、发布计划，估算费用；只读链，不发交易
-//   run      开通 → 临时钱包 → 授权 → 充值 → 上传（核验、退款在后续任务接上）
-//   refund   把临时钱包剩下的余额退回持有人（后续任务）
+//   run      开通 → 临时钱包 → 授权 → 充值 → 上传 → 核验 → 退款
+//   refund   放弃发布、只退钱：把临时钱包剩下的余额退回记录里的持有人
 // run 每一步都重新读链，不信任上次的进度；中断后再 run 一次就能接着传。
 // 金额、gas、gasPrice 一律是 bigint；错误信息是给用户看的中文。
 
 import { createHash } from 'node:crypto';
 import { PUBLISH_NETWORKS, MAX_GAS_PRICE, MAX_UPLOAD_GAS, MAX_FILE_BYTES } from './config.js';
 import { planPublish, stepsOf, chunkOf } from './publish-plan.js';
-import { uploadTx, openTx, grantTx, fundTx } from './publish-tx.js';
+import { uploadTx, openTx, grantTx, fundTx, refundTx } from './publish-tx.js';
 import { createOperator } from './operator.js';
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -80,6 +80,10 @@ const GRANT_MARGIN_SEC = 300;
 const ESTIMATE_POLL_MS = 3000;
 const ESTIMATE_RETRIES = 2;
 const CHECK_EVERY = 10;
+// 普通地址收款的 gas；X Layer 等 safe 区块最多 10 分钟，每 3 秒查一次
+const TRANSFER_GAS = 21000n;
+const SAFE_TIMEOUT_MS = 600000;
+const SAFE_POLL_MS = 3000;
 
 // 正在执行 run / refund 的（chainId, 容器）。主进程只有一个实例，内存里互斥就够了
 const running = new Map();
@@ -199,7 +203,8 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
 
   /**
    * 执行一次发布：inspected 是 inspect 返回的 ready 结果；opts = { onProgress, signal }。
-   * 返回 { stage: 'uploaded', container, label, uploaded, reused, spent, lastBlock } 或 { stage: 'paused' }。
+   * 返回 { stage: 'done', container, label, uploaded, reused, spent, refunded, dust, verified, reason, safeSkipped }
+   * 或 { stage: 'paused' }（只在核验之前停下：核验和退款开始后一定做完）。
    * 同一个（chainId, 容器）同时只能有一个 run / refund
    */
   async function run(inspected, { onProgress, signal } = {}) {
@@ -229,7 +234,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       checkAbort: () => { if (signal?.aborted) throw PAUSED; },
     };
     // 临时钱包记录要在任何持有人交易之前就建好：持有人交易的在途记录（ownerPending）存在里面
-    const operator = openOperator(ctx);
+    const operator = await openOperator(ctx);
     // 上次 run 确认过的区块：落后的节点不会让已开通的容器看起来没开通
     const saved = store.get(net.chainId, ctx.container)?.minBlock;
     if (saved != null && saved > ctx.minBlock) ctx.minBlock = saved;
@@ -242,10 +247,14 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     // reused 按开始上传时的计划算：传完以后再看，这次传的文件也都成了复用
     const { reused } = cur.plan;
     await uploadAll(ctx, cur, operator);
-    // 10b：在这里接核验和退款
+    const check = await verifyAll(ctx);
+    // 核验没通过也先把钱退回持有人，再报错
+    const { refunded, dust } = await refundOperator(ctx, operator);
+    if (check.bad) throw new Error(`核验失败：${check.bad}`);
     return {
-      stage: 'uploaded', container: ctx.container, label: ctx.target.label,
-      uploaded: ctx.uploaded, reused, spent: ctx.spent, lastBlock: ctx.lastBlock,
+      stage: 'done', container: ctx.container, label: ctx.target.label,
+      uploaded: ctx.uploaded, reused, spent: ctx.spent, refunded, dust,
+      verified: check.verified, reason: check.reason, safeSkipped: check.safeSkipped,
     };
   }
 
@@ -362,10 +371,18 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
 
   /**
    * 第 2 步：取出或新建这个容器的临时钱包。
-   * OPERATOR_OWNER_MISMATCH（电路换了持有人）原样抛出，由后续任务处理
+   * 电路换了持有人（OPERATOR_OWNER_MISMATCH）：先把旧临时钱包的余额退回旧持有人（只要临时钱包签名），
+   * 全部退完、记录删掉以后再为新持有人新建；退不出来就保留旧记录报错
    */
-  function openOperator(ctx) {
-    store.create({ chainId: net.chainId, container: ctx.container, owner: ctx.owner });
+  async function openOperator(ctx) {
+    const create = () => store.create({ chainId: net.chainId, container: ctx.container, owner: ctx.owner });
+    try { create(); } catch (e) {
+      if (e?.code !== 'OPERATOR_OWNER_MISMATCH') throw e;
+      const { dust } = await refundRecord(e.old);
+      if (dust) throw new Error('旧持有人的临时钱包余额不够付退款手续费，已保留记录');
+      if (store.get(net.chainId, ctx.container)) throw new Error('旧持有人的临时钱包还没退干净，请稍后再试');
+      create();
+    }
     return createOperator({ store, chain, net, container: ctx.container, owner: ctx.owner, sleep, now });
   }
 
@@ -478,5 +495,128 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     return cur;
   }
 
-  return { inspect, run };
+  // ---- 核验 → 退款 ----
+
+  /**
+   * X Layer 等 safe 区块覆盖到 block：返回 'ok'、'unsupported'（节点不支持 safe 标签）或 'timeout'。
+   * block 可能是钉住的区块而不是回执区块（持有人交易被替换时 confirmed 记的是钉住的区块），
+   * 它不早于所有已确认的交易，等 safe ≥ 它照样覆盖了最后一笔回执
+   */
+  async function waitSafe(block) {
+    const deadline = now() + SAFE_TIMEOUT_MS;
+    for (;;) {
+      const safe = await chain.safeBlock();
+      if (safe === null) return 'unsupported';
+      if (safe >= block) return 'ok';
+      if (now() >= deadline) return 'timeout';
+      await sleep(SAFE_POLL_MS);
+    }
+  }
+
+  // readVerified 内容对不上时的错误（长度或 SHA-256）；其余是节点问题，原样抛出
+  const MISMATCH = /SHA-256|长度/;
+
+  /** 一个文件在 block 上读回来和本地一致；不一致返回 false，节点问题抛出 */
+  async function sameOnChain(ctx, f, info, block) {
+    if (!info || info.sha256 !== f.sha256 || info.size !== f.bytes.length) return false;
+    try {
+      await chain.readVerified(ctx.container, f.path, info, block);
+      return true;
+    } catch (e) {
+      if (MISMATCH.test(String(e?.message))) return false;
+      throw e;
+    }
+  }
+
+  /**
+   * 第 6 步：快照里的每个文件在 minBlock 上读回来核对 sha256。
+   * X Layer 先等 safe 区块覆盖最后一笔交易：超时不核验（verified false、reason 'safe'），节点不支持就跳过等待（safeSkipped）。
+   * 返回 { verified, reason, safeSkipped, bad }；bad 是第一个对不上的路径
+   */
+  async function verifyAll(ctx) {
+    let safeSkipped = false;
+    if (net.key === 'xlayer') {
+      const w = await waitSafe(ctx.lastBlock ?? ctx.minBlock);
+      if (w === 'timeout') return { verified: false, reason: 'safe', safeSkipped, bad: null };
+      safeSkipped = w === 'unsupported';
+    }
+    const block = hexBlock(ctx.minBlock);
+    const infos = await chain.fileInfos(ctx.files.map((f) => ({ container: ctx.container, path: f.path })), block);
+    for (const [i, f] of ctx.files.entries()) {
+      ctx.progress({ stage: 'verify', done: i, total: ctx.files.length, path: f.path });
+      if (!(await sameOnChain(ctx, f, infos[i], block))) return { verified: false, reason: 'mismatch', safeSkipped, bad: f.path };
+    }
+    return { verified: true, reason: null, safeSkipped, bad: null };
+  }
+
+  /** 退款的 gas：持有人是普通地址用 21000；是合约（有代码）用 estimateGas × 1.25，不超过 MAX_UPLOAD_GAS */
+  async function refundGas(ctx, operator, balance, gasPrice) {
+    const code = (await chain.hasCode([ctx.owner], hexBlock(ctx.minBlock))).get(lower(ctx.owner));
+    if (code === undefined) throw new Error('读不到持有人地址的信息，请稍后再试');
+    if (!code) return TRANSFER_GAS;
+    // 估算用的金额：先按 21000 留出手续费，余额不够时用 1 试探
+    const probe = balance > TRANSFER_GAS * gasPrice ? balance - TRANSFER_GAS * gasPrice : 1n;
+    const est = BigInt(await chain.estimateGas({ from: operator.address, to: ctx.owner, value: probe, data: '0x' }));
+    return minOf(est * PAD_NUM / PAD_DEN, MAX_UPLOAD_GAS);
+  }
+
+  /**
+   * 第 7 步：临时钱包的余额减去 gas × gasPrice 转回 ctx.owner。不撤销授权（授权会自己到期）。
+   * 先处理上次留下的 pending；余额在 minBlock 上读。可退金额 ≤ 0 时保留记录，返回 dust: true；
+   * 回执 status 0 抛出「退款失败」并保留记录；确认后在回执区块上余额为 0 才删除记录。返回 { refunded, dust }
+   */
+  async function refundOperator(ctx, operator) {
+    const left = await operator.settle();
+    if (left) confirmed(ctx, left);
+    const balance = await operator.balance(hexBlock(ctx.minBlock));
+    if (balance === 0n) {
+      store.remove(net.chainId, ctx.container);
+      return { refunded: 0n, dust: false };
+    }
+    const gasPrice = await currentGasPrice();
+    const gas = await refundGas(ctx, operator, balance, gasPrice);
+    const amount = balance - gas * gasPrice;
+    if (amount <= 0n) return { refunded: 0n, dust: true };
+
+    const hash = await operator.send({ ...refundTx(ctx.owner, amount), gas, gasPrice }, { kind: 'refund' });
+    ctx.progress({ stage: 'refund', hash });
+    const r = (await operator.settle())
+      ?? (await waitReceipt(hash, { timeoutMs: 120000, message: '退款交易还没确认，可以稍后再退' }));
+    confirmed(ctx, r);
+    if (r.status !== 1) throw new Error('退款失败');
+    const after = await operator.balance(hexBlock(BigInt(r.blockNumber)));
+    if (after === 0n) store.remove(net.chainId, ctx.container);
+    return { refunded: amount, dust: false };
+  }
+
+  /**
+   * 按一条记录退款，退给记录里的持有人（电路可能已经转给别人了）。
+   * 先等这个持有人在途的交易（可能是一笔充值，删掉记录以后再到账就取不出来了）；它回执 status 0 不影响退款
+   */
+  async function refundRecord(rec) {
+    const pinned = BigInt(await chain.pinBlock());
+    const ctx = {
+      container: rec.container, owner: rec.owner, lastBlock: null, progress: () => {},
+      minBlock: rec.minBlock != null && rec.minBlock > pinned ? rec.minBlock : pinned,
+    };
+    try { await settleOwnerPending(ctx); } catch (e) {
+      // status 0 时记录已经清掉，可以接着退；超时之类还在等，原样抛出
+      if (store.get(net.chainId, ctx.container)?.ownerPending) throw e;
+    }
+    const operator = createOperator({ store, chain, net, container: rec.container, owner: rec.owner, sleep, now });
+    return refundOperator(ctx, operator);
+  }
+
+  /** 放弃发布、只退钱：返回 { refunded, dust }。和 run 共用同一个容器锁 */
+  async function refund({ chainId, container }) {
+    if (chainId !== net.chainId) throw new Error('网络不一致');
+    const unlock = lockContainer(chainId, container);
+    try {
+      const rec = store.get(chainId, container);
+      if (!rec) throw new Error('没有这个容器的临时钱包');
+      return await refundRecord(rec);
+    } finally { unlock(); }
+  }
+
+  return { inspect, run, refund };
 }
