@@ -1,6 +1,6 @@
 # TapeBrowser
 
-浏览 TapeKit 电路容器里 DeWEB 网站的桌面浏览器（Electron），支持 macOS、Windows 和 Linux。网站文件直接从链上读取并校验，不经过任何网关服务器。
+基于 TapeKit DeWEB 的应用浏览器（Electron），跨平台，支持 macOS、Windows 和 Linux，但不仅仅是浏览器。网站文件直接从链上读取并校验，不经过任何网关服务器。
 
 **欢迎一起共建。** 这是一个开源项目，修 bug、加功能、改文案、补翻译、在 Windows / Linux 真机上测试，都欢迎直接提 Issue 和 PR。比起各自维护分支，我们更希望改进能合并回这个仓库，让所有用户都能用上。怎么参与见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
