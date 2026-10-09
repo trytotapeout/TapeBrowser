@@ -7,7 +7,12 @@
 import { guessType } from './tape-protocol.js';
 
 export const CHUNK_BYTES = 24000;
+// 只有根目录的 index.html 能替换；sub/index.html 是普通文件
 const INDEX = 'index.html';
+
+const mime = (t) => String(t).split(';')[0].trim().toLowerCase();
+/** 链上 contentType 为空时读取端会按扩展名猜，等于一致；否则只比较 ';' 前面的 MIME，不分大小写 */
+export const sameType = (chainType, localType) => !chainType || mime(chainType) === mime(localType);
 
 /** 文件要几块；空文件也要一笔 putFile */
 export const chunksOf = (size) => Math.max(1, Math.ceil(size / CHUNK_BYTES));
@@ -33,7 +38,7 @@ export function planPublish(files, infos) {
       rows.push({ ...base, action: 'create', from: 0, remaining: chunks, uploadBytes: f.bytes.length });
       return;
     }
-    const same = String(info.sha256).toLowerCase() === String(f.sha256).toLowerCase() && info.contentType === contentType;
+    const same = String(info.sha256).toLowerCase() === String(f.sha256).toLowerCase() && sameType(info.contentType, contentType);
     if (!same) {
       if (f.path !== INDEX) conflicts.push({ path: f.path, reason: 'changed' });
       else if (f.bytes.length > CHUNK_BYTES) conflicts.push({ path: f.path, reason: 'index-too-big' });
@@ -41,12 +46,11 @@ export function planPublish(files, infos) {
       return;
     }
     const count = info.chunkCount;
-    if (count > chunks || info.size !== Math.min(count * CHUNK_BYTES, f.bytes.length)) {
-      conflicts.push({ path: f.path, reason: 'corrupt' });
-      return;
-    }
-    if (count === chunks) rows.push({ ...base, action: 'reuse', from: count, remaining: 0, uploadBytes: 0 });
-    else rows.push({ ...base, action: 'append', from: count, remaining: chunks - count, uploadBytes: f.bytes.length - info.size });
+    // 大小对上就是传完了，块数不管（别的工具可能不按 24000 分块）
+    if (info.size === f.bytes.length && count >= 1) rows.push({ ...base, action: 'reuse', from: count, remaining: 0, uploadBytes: 0 });
+    // 没传完：只有按 24000 分的前 count 块能接着传
+    else if (count < chunks && info.size === count * CHUNK_BYTES) rows.push({ ...base, action: 'append', from: count, remaining: chunks - count, uploadBytes: f.bytes.length - info.size });
+    else conflicts.push({ path: f.path, reason: 'corrupt' });
   });
   const order = (a, b) => (a.path === INDEX) - (b.path === INDEX) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   rows.sort(order);

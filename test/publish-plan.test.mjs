@@ -68,3 +68,62 @@ test('空文件也要一笔 putFile', () => {
   const p = planPublish([file('empty.txt', 0)], [null]);
   assert.equal(row(p, 'empty.txt').remaining, 1);
 });
+
+test('链上 contentType 为空或只是大小写/参数不同，都算一致', () => {
+  const f = file('index.html', 10);
+  for (const t of ['', 'TEXT/HTML', ' text/html ; charset=UTF-8']) {
+    const p = planPublish([f], [onChain(f, 1, t)]);
+    assert.equal(row(p, 'index.html').action, 'reuse', t);
+  }
+  const g = file('a.js', 10);
+  assert.equal(planPublish([g], [onChain(g, 1, 'text/css')]).conflicts[0].reason, 'changed');
+});
+
+test('sha256 大小写不同也算一致', () => {
+  const f = file('a.js', 10);
+  const p = planPublish([f], [{ ...onChain(f, 1, 'text/javascript'), sha256: f.sha256.toUpperCase().replace('0X', '0x') }]);
+  assert.equal(row(p, 'a.js').action, 'reuse');
+});
+
+test('别的工具传的完整文件，块数不是按 24000 分也复用', () => {
+  const f = file('big.png', 60000);
+  const p = planPublish([f], [{ size: 60000, contentType: 'image/png', sha256: f.sha256, updatedAt: 1, chunkCount: 5 }]);
+  assert.equal(row(p, 'big.png').action, 'reuse');
+  assert.deepEqual(p.conflicts, []);
+});
+
+test('新文件 putFile 已上链（1 块 24000 字节），从第 1 块接着传', () => {
+  const f = file('big.png', 60000);
+  const p = planPublish([f], [{ size: CHUNK_BYTES, contentType: 'image/png', sha256: f.sha256, updatedAt: 1, chunkCount: 1 }]);
+  assert.equal(row(p, 'big.png').action, 'append');
+  assert.equal(row(p, 'big.png').from, 1);
+  assert.equal(row(p, 'big.png').remaining, 2);
+  assert.equal(p.uploadBytes, 60000 - CHUNK_BYTES);
+});
+
+test('上次的 replace 已上链，这次首页复用', () => {
+  const f = file('index.html', 100, 2);
+  const p = planPublish([f], [onChain(f, 1, 'text/html; charset=utf-8')]);
+  assert.equal(row(p, 'index.html').action, 'reuse');
+  assert.equal(p.transactions, 0);
+});
+
+test('没传完但块数比本地还多，算分块异常', () => {
+  const f = file('big.png', 60000);
+  const p = planPublish([f], [{ size: 2 * CHUNK_BYTES, contentType: 'image/png', sha256: f.sha256, updatedAt: 1, chunkCount: 4 }]);
+  assert.deepEqual(p.conflicts, [{ path: 'big.png', reason: 'corrupt' }]);
+});
+
+test('冲突里 index.html 也排最后；子目录的 index.html 是普通文件', () => {
+  const big = file('index.html', CHUNK_BYTES + 1, 2);
+  const sub = file('sub/index.html', 10, 2);
+  const z = file('z.js', 10, 2);
+  const old = (path) => ({ size: 10, contentType: '', sha256: sha(new Uint8Array(10).fill(9)), updatedAt: 1, chunkCount: 1, path });
+  const p = planPublish([big, sub, z], [old(), old(), old()]);
+  assert.deepEqual(p.conflicts.map((x) => [x.path, x.reason]), [['sub/index.html', 'changed'], ['z.js', 'changed'], ['index.html', 'index-too-big']]);
+});
+
+test('stepsOf：多块的新文件从第 0 块开始', () => {
+  const p = planPublish([file('big.png', 60000)], [null]);
+  assert.deepEqual(stepsOf(p).map((s) => s.index), [0, 1, 2]);
+});
