@@ -1249,6 +1249,30 @@ test('上次崩溃留下的退款 pending 在开始时确认：refunded 是它�
   } finally { s.done(); }
 });
 
+test('上次崩溃留下的退款 pending 一直不打包：下次 run 重签、确认，算进 refunded，再照常发布', async () => {
+  const files = threeFiles();
+  const s = setup({ files });
+  try {
+    oldWallet(s, OWNER, 10n ** 15n);
+    s.chain.hooks.drop = (tx) => tx.data === '0x';
+    s.chain.hooks.onSleep = () => { throw new Error('crash'); };
+    await assert.rejects(s.p.refund({ chainId: BSC.chainId, container: CONTAINER }), /crash/);
+    const p = s.store.get(BSC.chainId, CONTAINER).pending;
+    assert.equal(p.kind, 'refund');
+    // 重启后旧单价的那笔仍然永远不打包，重签的才会
+    s.chain.hooks = { drop: (tx) => tx.data === '0x' && tx.nonce === p.nonce && tx.gasPrice === p.gasPrice };
+    const r = await s.make().run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'done');
+    const [left, back] = refunds(s.chain);
+    assert.equal(left.tx.nonce, p.nonce);
+    assert.equal(left.tx.gasPrice, PRICE * 1125n / 1000n);
+    assert.equal(lower(back.tx.to), lower(OWNER));
+    assert.equal(r.refunded, left.tx.value + back.tx.value);
+    for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
 test('核验时节点出错：照样退款，再抛出原来的错误', async () => {
   const s = setup({ files: threeFiles() });
   try {

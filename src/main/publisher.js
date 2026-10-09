@@ -236,6 +236,8 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       lastBlock: null,
       uploaded: 0,
       spent: 0n,
+      // 开始时处理的上次留下的退款退回了多少，最后和这次的退款加在一起报
+      refunded: 0n,
       progress: (e) => onProgress?.(e),
       checkAbort: () => { if (signal?.aborted) throw PAUSED; },
     };
@@ -256,7 +258,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     const { check, refunded, dust } = await verifyThenRefund(ctx, operator);
     return {
       stage: 'done', container: ctx.container, label: ctx.target.label,
-      uploaded: ctx.uploaded, reused, spent: ctx.spent, refunded, dust,
+      uploaded: ctx.uploaded, reused, spent: ctx.spent, refunded: ctx.refunded + refunded, dust,
       verified: check.verified, reason: check.reason, safeSkipped: check.safeSkipped,
     };
   }
@@ -391,10 +393,19 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
 
   /**
    * 处理临时钱包上次留下的 pending。上次停在一笔上传上时，它确认了也算这次的上传；status 0 照常报错。
-   * 回执没有 effectiveGasPrice 时按 pending 里记下的签名单价算花费
+   * 回执没有 effectiveGasPrice 时按 pending 里记下的签名单价算花费。
+   * 是一笔崩溃前发出的退款：和 refundOperator 一样走 settleRefund（一直不打包就重签），
+   * 退回的金额记进 ctx.refunded；退款的手续费不算进 spent，status 0 时钱还在临时钱包里，照常接着发布（后面按余额充值）
    */
   async function settleOperator(ctx, operator) {
     const pending = store.get(net.chainId, ctx.container)?.pending;
+    if (pending?.kind === 'refund') {
+      const { receipt, value } = await settleRefund(ctx, operator);
+      if (!receipt) return;
+      confirmed(ctx, receipt);
+      if (receipt.status === 1) ctx.refunded += value;
+      return;
+    }
     const r = await operator.settle();
     if (!r) return;
     confirmed(ctx, r);
