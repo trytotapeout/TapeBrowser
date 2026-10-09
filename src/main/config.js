@@ -105,13 +105,14 @@ export const SIG = Object.freeze({
   readRange: 'readRange(address,string,uint256,uint256)',
   pathCount: 'pathCount(address)',
   pathsRange: 'pathsRange(address,uint256,uint256)',
-  // 写接口（SPEC 附录 B.5）与开通容器（id.tapeout.link）
+  // SiteRegistry 写接口与操作员查询（SPEC 附录 B.5）
   putFile: 'putFile(address,string,string,bytes32,bytes)',
   appendChunk: 'appendChunk(address,string,uint256,bytes)',
   setOperator: 'setOperator(address,address,uint256)',
   canEdit: 'canEdit(address,address)',
   operatorOf: 'operatorOf(address)',
   operatorUntil: 'operatorUntil(address)',
+  // 开通器 opener：开通容器（id.tapeout.link）
   open: 'open(address,uint256)',
   openFee: 'FEE()',
   isDeployed: 'isDeployed(address,uint256)',
@@ -151,7 +152,7 @@ export const PATHS_PAGE = 200;
 export const MULTICALL_BATCH = 400;
 // 扫描钱包时单个处理器最多扫多少个编号
 export const MAX_IDS_PER_CPU = 50000;
-// 发布到容器（和官方发布页一致）：操作员授权 6 小时；Gas 单价超过 0.1 gwei 就停，防止节点报出离谱的价格
+// 发布到容器（和官方发布页一致）：操作员授权 6 小时（OPERATOR_TTL 单位是秒）；Gas 单价超过 0.1 gwei 就停，防止节点报出离谱的价格
 export const OPERATOR_TTL = 21600;
 export const MAX_GAS_PRICE = 100000000n;
 // 单笔上传交易的 gas 上限：一块 24 KB 写成合约字节码约 500 万 gas，留足余量
