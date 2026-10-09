@@ -146,6 +146,18 @@ function fakeChain({ clock, store, opened = true }) {
       c.hooks.afterMine?.(tx, r);
       return r;
     },
+    /**
+     * 持有人在钱包里加速 / 取消了交易池里的那笔：同一个 nonce 换成另一笔交易上链，原来的哈希永远没有回执。
+     * make(原交易) 返回替换的交易：加速是原样再发；不给 make 是取消（给自己转 0）
+     */
+    replaceOwner(make = () => ({ from: OWNER, to: OWNER, value: 0n, data: '0x' })) {
+      const i = c.queue.findIndex((q) => q.kind === 'owner');
+      assert.ok(i >= 0, '交易池里没有持有人的交易');
+      const [old] = c.queue.splice(i, 1);
+      const hash = bytesToHex(keccak256(new TextEncoder().encode('replaced:' + old.hash)));
+      c.mineItem({ kind: 'owner', hash, tx: make(old.tx) });
+      return old;
+    },
     /** 交易池里的交易按顺序出块 */
     mineQueued() { while (c.queue.length) c.mineItem(c.queue.shift()); },
     opQueued: (from) => BigInt(c.queue.filter((q) => q.kind === 'op' && q.from === from).length),
@@ -156,7 +168,8 @@ function fakeChain({ clock, store, opened = true }) {
       const hash = bytesToHex(keccak256(new TextEncoder().encode('owner:' + c.ownerTxs.length)));
       c.owner.pending += 1n;
       const item = { kind: 'owner', hash, tx };
-      if (c.holdOwner) c.queue.push(item);
+      // holdOwner 可以是 (tx) => bool，只扣住某一种持有人交易
+      if (typeof c.holdOwner === 'function' ? c.holdOwner(tx) : c.holdOwner) c.queue.push(item);
       else c.mineItem(item);
       // 钱包已经广播了，却没把哈希交回来
       if (c.hooks.ownerThrows?.(tx)) throw new Error('钱包窗口关掉了');
@@ -759,6 +772,91 @@ test('持有人交易回执 status 0：清掉 ownerPending 再报错', async () 
   try {
     s.chain.hooks.revertOwner = (tx) => tx.data.startsWith(SEL.open);
     await assert.rejects(s.p.run(await s.p.inspect({ target })), /开通容器失败/);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending, null);
+  } finally { s.done(); }
+});
+
+// ---- 持有人在钱包里加速 / 取消了交易（ownerPending 的哈希永远不会上链） ----
+
+/** 第一次 run 停在一笔被扣住的持有人交易上（等确认超时），ownerPending 记下了它 */
+async function stuckOn(s, kind, hold) {
+  s.chain.holdOwner = hold;
+  await assert.rejects(s.p.run(await s.p.inspect({ target })), /持有人的交易还没确认/);
+  const p = s.store.get(BSC.chainId, CONTAINER).ownerPending;
+  assert.equal(p.kind, kind);
+  assert.equal(p.nonce, s.chain.owner.latest);
+  s.chain.holdOwner = false;
+  return p;
+}
+
+test('开通交易被加速（同样的开通换了哈希上链）：下次 run 清掉 ownerPending，重新检查，不再开通', async () => {
+  const files = threeFiles();
+  const s = setup({ opened: false, files });
+  try {
+    await stuckOn(s, 'open', true);
+    s.chain.replaceOwner((tx) => tx);
+    assert.equal(s.chain.circuit.opened, true);
+    const r = await s.make().run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'uploaded');
+    assert.equal(opens(s.chain), 1);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending, null);
+    for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
+  } finally { s.done(); }
+});
+
+test('开通交易被取消：下次 run 清掉 ownerPending，重新检查，再发一次开通', async () => {
+  const files = threeFiles();
+  const s = setup({ opened: false, files });
+  try {
+    await stuckOn(s, 'open', true);
+    s.chain.replaceOwner();
+    assert.equal(s.chain.circuit.opened, false);
+    const r = await s.make().run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'uploaded');
+    // 第一次那笔被取消了，这次只新发一笔
+    assert.equal(opens(s.chain), 2);
+    assert.equal(s.chain.circuit.opened, true);
+    for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
+  } finally { s.done(); }
+});
+
+test('充值交易被取消：下次 run 按钉住的余额重新算，只再充一次', async () => {
+  const files = threeFiles();
+  const s = setup({ files });
+  try {
+    await stuckOn(s, 'fund', (tx) => tx.data === '0x');
+    s.chain.replaceOwner();
+    const r = await s.make().run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'uploaded');
+    assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund', 'fund']);
+    for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
+  } finally { s.done(); }
+});
+
+test('充值交易被加速：下次 run 看到余额已经够了，不再充值', async () => {
+  const files = threeFiles();
+  const s = setup({ files });
+  try {
+    await stuckOn(s, 'fund', (tx) => tx.data === '0x');
+    s.chain.replaceOwner((tx) => tx);
+    const r = await s.make().run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'uploaded');
+    assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
+  } finally { s.done(); }
+});
+
+test('等确认途中交易被替换：这次 run 就清掉 ownerPending，按链上状态继续', async () => {
+  const files = threeFiles();
+  const s = setup({ opened: false, files });
+  try {
+    s.chain.holdOwner = (tx) => tx.data.startsWith(SEL.open);
+    let polls = 0;
+    s.chain.hooks.onSleep = () => {
+      if (++polls === 3) { s.chain.holdOwner = false; s.chain.replaceOwner((tx) => tx); }
+    };
+    const r = await s.p.run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'uploaded');
+    assert.equal(opens(s.chain), 1);
     assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending, null);
   } finally { s.done(); }
 });

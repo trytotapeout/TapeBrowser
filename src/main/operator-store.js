@@ -11,8 +11,10 @@
 //              { raw, hash, kind: 'upload' | 'refund', path?, index?, nonce, gasPrice? }，nonce、gasPrice 存十进制字符串
 //              （gasPrice 是签名用的单价，回执没有 effectiveGasPrice 时按它算花费；旧记录没有）
 //              已有 pending 时 setPending 拒绝，要先 clearPending
-//   ownerPending  null，或持有人已经发出、还没确认的一笔交易 { kind: 'open' | 'grant' | 'fund', hash, at }
+//   ownerPending  null，或持有人已经发出、还没确认的一笔交易 { kind: 'open' | 'grant' | 'fund', hash, at, nonce }
 //              下次发布先等它确认，不会再发一次（重复交开通费、重复充值）；旧记录没有这个字段，按 null 处理
+//              nonce 是发出前读到的持有人 latest nonce（十进制字符串）：它被别的交易用掉，说明这笔在钱包里被加速或取消了。
+//              早期记录没有 nonce，读出来是 null，只能等回执
 //   lastNonce  最后一笔已确认交易的 nonce（十进制字符串，没有时为 null），只能往大改：
 //              防止公共节点落后、读到旧 nonce 后重发
 //   minBlock   这个容器最近一笔已确认交易（开通、授权、充值、上传）的区块号（十进制字符串，没有时为 null），只能往大改：
@@ -75,11 +77,13 @@ function ownerPendingToDisk(p) {
   if (!p || typeof p !== 'object' || !OWNER_KINDS.includes(p.kind)) throw new Error('临时钱包：持有人的待确认交易不正确');
   if (typeof p.hash !== 'string' || !HASH.test(p.hash)) throw new Error('临时钱包：持有人的交易哈希不正确');
   if (!Number.isSafeInteger(p.at) || p.at < 0) throw new Error('临时钱包：持有人的交易时间不正确');
-  return { kind: p.kind, hash: p.hash.toLowerCase(), at: p.at };
+  if (typeof p.nonce !== 'bigint' || p.nonce < 0n) throw new Error('临时钱包：持有人的交易 nonce 不正确');
+  return { kind: p.kind, hash: p.hash.toLowerCase(), at: p.at, nonce: p.nonce.toString() };
 }
 
 const ownerPendingOk = (p) => p == null || (typeof p === 'object' && OWNER_KINDS.includes(p.kind)
-  && typeof p.hash === 'string' && HASH.test(p.hash) && Number.isSafeInteger(p.at));
+  && typeof p.hash === 'string' && HASH.test(p.hash) && Number.isSafeInteger(p.at)
+  && (p.nonce == null || (typeof p.nonce === 'string' && /^[0-9]+$/.test(p.nonce))));
 
 /** 落盘记录 → 返回给调用方的形式（去掉 key，nonce 转 bigint） */
 function publicView(rec) {
@@ -91,7 +95,9 @@ function publicView(rec) {
     r.pending = { ...rec.pending, nonce: BigInt(rec.pending.nonce) };
     if (rec.pending.gasPrice != null) r.pending.gasPrice = BigInt(rec.pending.gasPrice);
   }
-  r.ownerPending = rec.ownerPending ? { ...rec.ownerPending } : null;
+  r.ownerPending = rec.ownerPending
+    ? { ...rec.ownerPending, nonce: rec.ownerPending.nonce == null ? null : BigInt(rec.ownerPending.nonce) }
+    : null;
   return r;
 }
 

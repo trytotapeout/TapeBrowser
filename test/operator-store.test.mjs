@@ -331,10 +331,10 @@ test('ownerPending：新建为 null；写入后重建还能读到；已有时拒
   try {
     assert.equal(store.create({ chainId: CHAIN, container: C, owner: OWNER }).ownerPending, null);
     const hash = '0x' + 'AB'.repeat(32);
-    store.setOwnerPending(CHAIN, C, { kind: 'open', hash, at: 99 });
-    assert.deepEqual(make().get(CHAIN, C).ownerPending, { kind: 'open', hash: hash.toLowerCase(), at: 99 });
+    store.setOwnerPending(CHAIN, C, { kind: 'open', hash, at: 99, nonce: 4n });
+    assert.deepEqual(make().get(CHAIN, C).ownerPending, { kind: 'open', hash: hash.toLowerCase(), at: 99, nonce: 4n });
     // 一次只能有一笔：覆盖会丢掉还没确认的交易
-    assert.throws(() => store.setOwnerPending(CHAIN, C, { kind: 'fund', hash: '0x' + 'cd'.repeat(32), at: 1 }), /持有人还有一笔交易在等确认/);
+    assert.throws(() => store.setOwnerPending(CHAIN, C, { kind: 'fund', hash: '0x' + 'cd'.repeat(32), at: 1, nonce: 5n }), /持有人还有一笔交易在等确认/);
     assert.equal(make().get(CHAIN, C).ownerPending.kind, 'open');
     store.clearOwnerPending(CHAIN, C);
     assert.equal(make().get(CHAIN, C).ownerPending, null);
@@ -347,8 +347,10 @@ test('setOwnerPending 校验 kind、hash 和 at', () => {
   const { store, done } = setup();
   try {
     store.create({ chainId: CHAIN, container: C, owner: OWNER });
-    const ok = { kind: 'grant', hash: '0x' + 'cd'.repeat(32), at: 1 };
-    for (const bad of [{ ...ok, kind: 'upload' }, { ...ok, hash: '0x12' }, { ...ok, hash: 'cd'.repeat(33) }, { ...ok, at: -1 }, { ...ok, at: 1.5 }, null]) {
+    const ok = { kind: 'grant', hash: '0x' + 'cd'.repeat(32), at: 1, nonce: 0n };
+    const { nonce: _n, ...noNonce } = ok;
+    for (const bad of [{ ...ok, kind: 'upload' }, { ...ok, hash: '0x12' }, { ...ok, hash: 'cd'.repeat(33) }, { ...ok, at: -1 }, { ...ok, at: 1.5 },
+      { ...ok, nonce: -1n }, { ...ok, nonce: '3' }, noNonce, null]) {
       assert.throws(() => store.setOwnerPending(CHAIN, C, bad));
     }
     assert.equal(store.get(CHAIN, C).ownerPending, null);
@@ -390,5 +392,22 @@ test('minBlock：新建为 null；setMinBlock 只能往大改，重建后还在'
     store.setMinBlock(CHAIN, C, 130n);
     assert.equal(make().get(CHAIN, C).minBlock, 130n);
     assert.throws(() => store.setMinBlock(CHAIN, C, -1n));
+  } finally { done(); }
+});
+
+test('ownerPending.nonce 落盘为十进制字符串；旧记录没有 nonce 照常读，nonce 为 null', () => {
+  const { dir, store, make, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    store.setOwnerPending(CHAIN, C, { kind: 'fund', hash: '0x' + 'cd'.repeat(32), at: 1, nonce: 12n });
+    assert.match(allFiles(dir), /"nonce": "12"/);
+    const file = join(dir, readdirSync(dir)[0]);
+    const rec = JSON.parse(readFileSync(file, 'utf8'));
+    delete rec.ownerPending.nonce;
+    writeFileSync(file, JSON.stringify(rec));
+    assert.deepEqual(make().get(CHAIN, C).ownerPending, { kind: 'fund', hash: '0x' + 'cd'.repeat(32), at: 1, nonce: null });
+    rec.ownerPending.nonce = 'x1';
+    writeFileSync(file, JSON.stringify(rec));
+    assert.throws(() => make().get(CHAIN, C), /记录文件已损坏/);
   } finally { done(); }
 });

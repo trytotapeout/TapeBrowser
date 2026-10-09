@@ -186,8 +186,8 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
 
   // ---- run：开通 → 临时钱包 → 授权 → 充值 → 上传 ----
 
-  /** 轮询交易回执，超时抛出 message（下次 run 会重新读链，交易上了链就不会重发） */
-  async function waitReceipt(hash, { timeoutMs = 300000, pollMs = 3000, message = '持有人的交易还没确认，可以稍后继续' } = {}) {
+  /** 轮询交易回执，超时抛出 message */
+  async function waitReceipt(hash, { timeoutMs, pollMs = 3000, message }) {
     const deadline = now() + timeoutMs;
     for (;;) {
       const r = await chain.receipt(hash);
@@ -264,16 +264,38 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
 
   const OWNER_FAIL = { open: '开通容器失败', grant: '授权失败', fund: '充值失败' };
 
-  /** 等一笔持有人交易确认：有回执（不管成败）就清掉在途记录；超时保留记录并抛出 */
-  async function awaitOwner(ctx, { kind, hash }) {
-    const r = await waitReceipt(hash);
-    store.clearOwnerPending(net.chainId, ctx.container);
-    if (r.status !== 1) throw new Error(OWNER_FAIL[kind]);
-    confirmed(ctx, r);
-    return r;
+  /**
+   * 等一笔持有人交易确认：有回执（不管成败）就清掉在途记录并返回回执；超时保留记录并抛出。
+   * 持有人可能在钱包里加速或取消了这笔（同一个 nonce 换成另一笔交易上链），或者它被节点丢掉后钱包用这个 nonce 发了别的：
+   * 原来的哈希永远不会有回执，一直等下去每次 run 都会卡 5 分钟。所以没有回执时再看持有人的 latest nonce，
+   * 已经越过这笔的 nonce，就隔一个 pollMs 再查一次回执（回执节点可能落后，和 operator.js 一样），还是没有就清掉记录，
+   * 返回 null，让调用方按链上状态重新判断这一步（替换的那笔可能做了同样的事，也可能什么都没做）。
+   * 早期记录没有 nonce，只能等回执
+   */
+  async function awaitOwner(ctx, { kind, hash, nonce }, { timeoutMs = 300000, pollMs = 3000 } = {}) {
+    const deadline = now() + timeoutMs;
+    for (;;) {
+      let r = await chain.receipt(hash);
+      if (!r && nonce != null && (await chain.nonceOf(ctx.owner)).latest > nonce) {
+        await sleep(pollMs);
+        r = await chain.receipt(hash);
+        if (!r) {
+          store.clearOwnerPending(net.chainId, ctx.container);
+          return null;
+        }
+      }
+      if (r) {
+        store.clearOwnerPending(net.chainId, ctx.container);
+        if (r.status !== 1) throw new Error(OWNER_FAIL[kind]);
+        confirmed(ctx, r);
+        return r;
+      }
+      if (now() >= deadline) throw new Error('持有人的交易还没确认，可以稍后继续');
+      await sleep(pollMs);
+    }
   }
 
-  /** 上次留下的持有人交易：不重发，等它确认。返回是否处理了一笔 */
+  /** 上次留下的持有人交易：不重发，等它确认或确认它被替换了。返回是否处理了一笔 */
   async function settleOwnerPending(ctx) {
     const p = store.get(net.chainId, ctx.container)?.ownerPending;
     if (!p) return false;
@@ -283,7 +305,8 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   }
 
   /**
-   * 持有人发一笔交易并等确认。返回回执；如果先处理了一笔在途的持有人交易就不发，返回 null，调用方重新判断这一步还要不要做。
+   * 持有人发一笔交易并等确认。返回回执；如果先处理了一笔在途的持有人交易就不发，
+   * 或者这笔在钱包里被加速 / 取消了，返回 null，调用方按链上状态重新判断这一步还要不要做。
    * 发之前钱包不能有未确认的交易：ownerSend 广播之后却没把哈希交回来（窗口被关、桥接断开）时，
    * 没有可记的在途记录，只能靠这个 nonce 检查拦住重复的开通、充值；它的确认要等节点交易池同步，不是完全没有空档
    */
@@ -294,9 +317,10 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     if (pending > latest) throw new Error('钱包里还有一笔未确认的交易，请等它确认后再继续');
     const hash = await ownerSend(tx);
     // 拿到哈希先落盘，再去等确认：中途崩溃、超时，下次 run 都会等这一笔，不会再发一次
-    store.setOwnerPending(net.chainId, ctx.container, { kind, hash, at: now() });
+    // nonce 记发出前的 latest：之后被别的交易用掉，说明这笔被替换了
+    store.setOwnerPending(net.chainId, ctx.container, { kind, hash, at: now(), nonce: latest });
     ctx.progress({ stage: kind, hash });
-    return awaitOwner(ctx, { kind, hash });
+    return awaitOwner(ctx, { kind, hash, nonce: latest });
   }
 
   /** 按 minBlock 重新检查（不模拟），不是 ready 就停下 */
