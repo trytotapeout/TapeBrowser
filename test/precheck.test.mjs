@@ -103,3 +103,10 @@ test('deweb.json 不合法、logo 比例不对', async () => {
   assert.match(texts(r, 'info'), /300×100/);
   assert.equal(r.card.categoryFrom, 'guess');
 });
+
+test('首页超过一块：能首发，但以后不能替换', async () => {
+  const big = folder({ 'index.html': '<title>x</title>' + 'a'.repeat(24000) });
+  assert.match(texts(await precheck(big), 'warn'), /24000/);
+  const small = folder({ 'index.html': '<title>x</title>' });
+  assert.doesNotMatch(texts(await precheck(small), 'warn'), /24000/);
+});

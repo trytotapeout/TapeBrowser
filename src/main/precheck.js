@@ -86,6 +86,8 @@ export async function precheck({ files, skipped = [], truncated = false, read, e
   if (truncated) add('error', tr('文件超过 {n} 个，只检查了前 {n} 个。是不是选错了文件夹？应该选构建产物（例如 dist/）', { n: files.length }));
   const index = byPath.get('index.html');
   if (!index) add('error', tr('根目录没有 index.html：网站打不开，目录也不会收录'));
+  // 链上文件只增不改，只有单块的首页能在以后替换（publish-plan.js）
+  if (index && index.size > CHUNK_SIZE) add('warn', tr('index.html 有 {size}，超过 24000 字节（一块）。第一次能发布，但以后不能再替换首页；建议把脚本和样式拆出去', { size: kb(index.size) }));
   const empty = files.filter((f) => f.size === 0).map((f) => f.path);
   if (empty.length) add('error', tr('空文件不能上链：{list}', { list: list(empty, tr) }));
   const huge = files.filter((f) => f.size > MAX_FILE_BYTES).map((f) => `${f.path}（${kb(f.size)}）`);
