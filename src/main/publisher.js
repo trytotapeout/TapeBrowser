@@ -354,12 +354,15 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       throw fail(E.BAD_WALLET_HASH, '钱包返回的交易哈希格式不对');
     }
     const hash = lower(sent);
-    // 记这笔交易真正的 nonce：确认框开着时用户可能在钱包里另发了一笔，用掉了发之前读到的 latest，
-    // 按 latest 记会把这笔误判成被替换，再充一次值
-    const nonce = (await sentNonce(hash)) ?? latest;
-    // 拿到 nonce 先落盘，再去等确认：中途崩溃、超时，下次 run 都会等这一笔，不会再发一次
-    store.setOwnerPending(net.chainId, ctx.container, { kind, hash, at: now(), nonce });
+    // 拿到哈希立刻落盘，再查 nonce、等确认：中途崩溃、超时，下次 run 都会等这一笔，不会再发一次。
+    // 先按发出前读到的 latest 记，查到真正的 nonce 再改
+    store.setOwnerPending(net.chainId, ctx.container, { kind, hash, at: now(), nonce: latest });
     ctx.progress({ stage: kind, hash });
+    // 确认框开着时用户可能在钱包里另发了一笔，用掉了发之前读到的 latest，
+    // 按 latest 记会把这笔误判成被替换，再充一次值
+    const real = await sentNonce(hash);
+    const nonce = real ?? latest;
+    if (nonce !== latest) store.updateOwnerPendingNonce(net.chainId, ctx.container, hash, nonce);
     return awaitOwner(ctx, { kind, hash, nonce });
   }
 
@@ -367,7 +370,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
    * 刚发出的持有人交易的 nonce：节点可能还不认得它，隔一个 pollMs 再查，最多查 TX_NONCE_POLLS 次。
    * 一直查不到返回 null，由调用方退回发之前读到的 latest。取舍：
    * 退回 latest 只在「确认框开着时另发了一笔」又碰上节点一直不认得这笔交易时出错（误判成被替换，按链上状态重新判断这一步）；
-   * 不退回就只能一直等或不记在途记录，后者更糟。查询期间崩溃也没有在途记录，这时靠发之前的 nonce 检查拦住重复的交易
+   * 不退回就只能一直等或不记在途记录，后者更糟。查询期间崩溃时在途记录已经按 latest 落盘，下次 run 照样等这一笔
    */
   async function sentNonce(hash) {
     for (let i = 0; ; i++) {

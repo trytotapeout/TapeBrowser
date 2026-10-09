@@ -270,6 +270,18 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
       });
     },
 
+    /**
+     * 持有人那笔在途交易查到了真正的 nonce：只在 ownerPending 就是这个哈希时改它的 nonce（先按发出前的 latest 落盘，见 publisher.ownerTx）
+     */
+    updateOwnerPendingNonce(chainId, container, hash, nonce) {
+      if (typeof nonce !== 'bigint' || nonce < 0n) throw new Error('临时钱包：持有人的交易 nonce 不正确');
+      const h = String(hash).toLowerCase();
+      update(chainId, container, (rec) => {
+        if (rec.ownerPending?.hash !== h) throw new Error('临时钱包：持有人没有这笔在等确认的交易');
+        rec.ownerPending = { ...rec.ownerPending, nonce: nonce.toString() };
+      });
+    },
+
     clearOwnerPending(chainId, container) {
       update(chainId, container, (rec) => { rec.ownerPending = null; });
     },

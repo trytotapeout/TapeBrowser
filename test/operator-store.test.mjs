@@ -343,6 +343,21 @@ test('ownerPending：新建为 null；写入后重建还能读到；已有时拒
   } finally { done(); }
 });
 
+test('updateOwnerPendingNonce：只改同一个哈希的那笔，落盘；没有或哈希不同时拒绝，nonce 要校验', () => {
+  const { store, make, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    const hash = '0x' + 'AB'.repeat(32);
+    assert.throws(() => store.updateOwnerPendingNonce(CHAIN, C, hash, 5n), /持有人没有这笔在等确认的交易/);
+    store.setOwnerPending(CHAIN, C, { kind: 'fund', hash, at: 7, nonce: 4n });
+    store.updateOwnerPendingNonce(CHAIN, C, hash.toLowerCase(), 5n);
+    assert.deepEqual(make().get(CHAIN, C).ownerPending, { kind: 'fund', hash: hash.toLowerCase(), at: 7, nonce: 5n });
+    assert.throws(() => store.updateOwnerPendingNonce(CHAIN, C, '0x' + 'cd'.repeat(32), 6n), /持有人没有这笔在等确认的交易/);
+    for (const bad of [-1n, '6', 6, null]) assert.throws(() => store.updateOwnerPendingNonce(CHAIN, C, hash, bad), /nonce 不正确/);
+    assert.equal(make().get(CHAIN, C).ownerPending.nonce, 5n);
+  } finally { done(); }
+});
+
 test('setOwnerPending 校验 kind、hash 和 at', () => {
   const { store, done } = setup();
   try {

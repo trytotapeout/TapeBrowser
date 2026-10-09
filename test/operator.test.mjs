@@ -344,7 +344,8 @@ test('没有临时钱包或持有人不一致时 createOperator 抛出', () => {
   try {
     const mk = (o) => () => createOperator({ store, chain, net: BSC, container: C, owner: OWNER, ...o });
     assert.doesNotThrow(mk({ owner: OWNER.toUpperCase().replace('0X', '0x') }));
-    assert.throws(mk({ owner: '0x' + '22'.repeat(20) }), /持有人/);
+    // 不是 store 的 OPERATOR_OWNER_MISMATCH：这里没有 old 可带
+    assert.throws(mk({ owner: '0x' + '22'.repeat(20) }), (e) => e.code === 'OWNER_MISMATCH_OPERATOR' && /临时钱包的持有人不一致/.test(e.message) && e.old === undefined);
     assert.throws(mk({ container: '0x' + '33'.repeat(20) }), /临时钱包不存在/);
   } finally { done(); }
 });

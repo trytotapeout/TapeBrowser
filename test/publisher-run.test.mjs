@@ -978,12 +978,41 @@ test('节点一时还不认得刚发的持有人交易：多查几次，记下�
     const seen = [];
     const set = s.store.setOwnerPending;
     s.store.setOwnerPending = (id, c, p) => { seen.push(p); set(id, c, p); };
-    s.chain.hooks.onSleep = () => { if (seen.some((p) => p.kind === 'fund')) { s.chain.holdOwner = false; s.chain.mineQueued(); } };
+    const fixed = [];
+    const upd = s.store.updateOwnerPendingNonce;
+    s.store.updateOwnerPendingNonce = (id, c, h, n) => { upd(id, c, h, n); fixed.push(s.store.get(id, c).ownerPending); };
+    s.chain.hooks.onSleep = () => { if (fixed.length) { s.chain.holdOwner = false; s.chain.mineQueued(); } };
     const r = await s.p.run(await s.p.inspect({ target }));
     assert.equal(r.stage, 'done');
-    // grant 用 nonce 0，不相干的那笔用 1，充值用 2
-    assert.equal(seen.find((p) => p.kind === 'fund').nonce, 2n);
+    // grant 用 nonce 0，不相干的那笔用 1，充值用 2：先按发之前的 latest（1）落盘，查到后改成 2
+    const fund = seen.find((p) => p.kind === 'fund');
+    assert.equal(fund.nonce, 1n);
+    assert.equal(fixed.length, 1);
+    assert.equal(fixed[0].hash, fund.hash);
+    assert.equal(fixed[0].nonce, 2n);
     assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
+  } finally { s.done(); }
+});
+
+test('ownerSend 返回哈希后、查 nonce 时崩溃：哈希已经落盘，下次 run 等它确认，不重发', async () => {
+  const files = threeFiles();
+  const s = setup({ files });
+  try {
+    s.chain.holdOwner = (tx) => tx.data === '0x';
+    // 只在查充值那笔的 nonce 时崩溃（它还在交易池里）
+    s.chain.hooks.txNonce = (h) => { if (s.chain.queue.some((q) => q.hash === h)) throw new Error('crash'); };
+    await assert.rejects(s.p.run(await s.p.inspect({ target })), /crash/);
+    const op = s.store.get(BSC.chainId, CONTAINER).ownerPending;
+    assert.equal(op.kind, 'fund');
+    assert.equal(op.hash, s.chain.queue[0].hash);
+    assert.equal(op.nonce, 1n);
+
+    s.chain.hooks = { onSleep: () => s.chain.mineQueued() };
+    s.chain.holdOwner = false;
+    const r = await s.make().run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'done');
+    assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
+    for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
   } finally { s.done(); }
 });
 

@@ -10,7 +10,7 @@
 
 import { signLegacy, uint } from './eth-tx.js';
 import { assertOperatorTx } from './publish-tx.js';
-import { fail, NO_OPERATOR, OPERATOR_OWNER_MISMATCH, STATE_CHANGED, PENDING_TIMEOUT, BUSY, LATER, WALLET_PENDING } from './publish-errors.js';
+import { fail, NO_OPERATOR, OWNER_MISMATCH_OPERATOR, STATE_CHANGED, PENDING_TIMEOUT, BUSY, LATER, WALLET_PENDING } from './publish-errors.js';
 
 const lower = (a) => String(a).toLowerCase();
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -19,7 +19,7 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
   const chainId = net.chainId;
   const rec = store.get(chainId, container);
   if (!rec) throw fail(NO_OPERATOR, '临时钱包不存在');
-  if (rec.owner !== lower(owner)) throw fail(OPERATOR_OWNER_MISMATCH, '临时钱包的持有人不一致');
+  if (rec.owner !== lower(owner)) throw fail(OWNER_MISMATCH_OPERATOR, '临时钱包的持有人不一致');
   const address = rec.address;
   const op = Object.freeze({ address, owner: rec.owner, container: rec.container });
 

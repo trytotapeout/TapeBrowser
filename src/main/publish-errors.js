@@ -22,7 +22,9 @@ export const UPLOAD_FAILED = 'UPLOAD_FAILED';     // 上传回执失败、模拟
 export const REFUND_FAILED = 'REFUND_FAILED';
 export const NO_OPERATOR = 'NO_OPERATOR';         // 没有这个容器的临时钱包
 export const NOT_DUST = 'NOT_DUST';               // 临时钱包里的余额还能退回，不能直接放弃
+// 只有 operator-store.create 抛出的 OPERATOR_OWNER_MISMATCH 带 old（旧记录，不含私钥），调用方据此先退款给旧持有人
 export const OPERATOR_OWNER_MISMATCH = 'OPERATOR_OWNER_MISMATCH'; // 容器已有另一个持有人的临时钱包，带 old
+export const OWNER_MISMATCH_OPERATOR = 'OWNER_MISMATCH_OPERATOR'; // createOperator 传入的持有人和记录不一致，不带 old
 
 /** 带 code 的 Error；extra 里的字段（cause、old 等）一起挂到错误上。返回错误，由调用方 throw */
 export function fail(code, message, extra) {
