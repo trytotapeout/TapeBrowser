@@ -31,7 +31,7 @@
         <h1>TapeBrowser</h1>
         <p>TapeKit DeWEB 网站的桌面浏览器。网站文件直接从链上读取并校验，不经过任何网关服务器。</p>
         <div class="cta">
-          <a class="btn primary" href="#download">下载 0.12.0</a>
+          <a class="btn primary" href="#download">下载 0.13.0</a>
           <a class="btn" href="https://github.com/trytotapeout/TapeBrowser">查看源代码</a>
         </div>
         <p class="version">macOS · Windows · Linux｜GPL-3.0-or-later 开源</p>
@@ -51,8 +51,10 @@
           <div class="card"><h3>哈希校验</h3><p>每个文件下载后都核对长度和链上记录的 SHA-256，节点或网络篡改了内容会直接拒绝显示。</p></div>
           <div class="card"><h3>多节点交叉校验</h3><p>再找两个不同的节点核对容器和文件哈希，单个节点作恶伪造不了，不一致时按钮变红。</p></div>
           <div class="card"><h3>持有人变更提醒</h3><p>网站换了持有人（被转手或卖掉）时，再次打开会提醒，书签和最近访问里也会标出来。</p></div>
+          <div class="card"><h3>安全体检</h3><p>一键读取网站的全部文件，在本机分析它会请你签什么、钱会流向哪里，以及有没有骗助记词、盗币工具包等作恶特征。</p></div>
+          <div class="card"><h3>本地预览和发布预检查</h3><p>打开本机文件夹，按 tape:// 的规则预览网站，上链前列出传不上去、打不开、目录里显示不好的问题和要发的交易笔数。</p></div>
           <div class="card"><h3>签名风险解读</h3><p>无限额授权、授权全部 NFT、离线签名授权、盲签等高危请求翻成一句话，默认按钮是「拒绝」。</p></div>
-          <div class="card"><h3>外部脚本和代码变更</h3><p>网站运行了不在链上的脚本时标出来；上次签名之后网站改过代码，签名时列出改了哪些文件。</p></div>
+          <div class="card"><h3>外部脚本和代码变更</h3><p>网站运行了不在链上的脚本时标出来；上次签名之后网站改过代码，签名时列出改了哪些文件。普通网页标「未校验」。</p></div>
           <div class="card"><h3>钱包不导入私钥</h3><p>桥接系统浏览器里的钱包扩展（MetaMask 等），不依赖 WalletConnect 这类中心化中继，每次签名都先显示真实来源；链不对时一键切换。</p></div>
           <div class="card"><h3>DeWEB 应用</h3><p>新标签页以卡片列出三条链上所有有首页的网站，显示站长的 logo 或封面，按游戏、金融、工具等分类筛选，也能按标题、编号、持有人搜索。</p></div>
           <div class="card"><h3>BEM 价格和资产</h3><p>工具栏显示 BEM 价格和钱包在两条链上的 BEM 总数；网站信息面板显示容器里的原生币和 BEM。都直接从链上读。</p></div>
@@ -67,18 +69,18 @@
     <section id="download" aria-labelledby="download-title">
       <div class="wrap">
         <h2 id="download-title">下载</h2>
-        <p class="lead">最新版本 0.12.0，发布于 2026-10-08。所有版本见 <a href="https://github.com/trytotapeout/TapeBrowser/releases">GitHub Releases</a>。</p>
+        <p class="lead">最新版本 0.13.0，发布于 2026-10-09。所有版本见 <a href="https://github.com/trytotapeout/TapeBrowser/releases">GitHub Releases</a>。</p>
         <table class="downloads">
           <thead><tr><th scope="col">平台</th><th scope="col">文件</th><th scope="col">下载</th></tr></thead>
           <tbody>
-            <tr><td>macOS（Apple 芯片）</td><td><code>TapeBrowser-0.12.0-mac-arm64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.12.0/TapeBrowser-0.12.0-mac-arm64.dmg">下载（120 MB）</a></td></tr>
-            <tr><td>macOS（Intel）</td><td><code>TapeBrowser-0.12.0-mac-x64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.12.0/TapeBrowser-0.12.0-mac-x64.dmg">下载（127 MB）</a></td></tr>
-            <tr><td>Windows（x64）</td><td><code>TapeBrowser-0.12.0-win-x64-setup.exe</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.12.0/TapeBrowser-0.12.0-win-x64-setup.exe">下载（106 MB）</a></td></tr>
-            <tr><td>Linux（x86_64）</td><td><code>TapeBrowser-0.12.0-linux-x86_64.AppImage</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.12.0/TapeBrowser-0.12.0-linux-x86_64.AppImage">下载（119 MB）</a></td></tr>
+            <tr><td>macOS（Apple 芯片）</td><td><code>TapeBrowser-0.13.0-mac-arm64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.13.0/TapeBrowser-0.13.0-mac-arm64.dmg">下载（121 MB）</a></td></tr>
+            <tr><td>macOS（Intel）</td><td><code>TapeBrowser-0.13.0-mac-x64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.13.0/TapeBrowser-0.13.0-mac-x64.dmg">下载（127 MB）</a></td></tr>
+            <tr><td>Windows（x64）</td><td><code>TapeBrowser-0.13.0-win-x64-setup.exe</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.13.0/TapeBrowser-0.13.0-win-x64-setup.exe">下载（106 MB）</a></td></tr>
+            <tr><td>Linux（x86_64）</td><td><code>TapeBrowser-0.13.0-linux-x86_64.AppImage</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.13.0/TapeBrowser-0.13.0-linux-x86_64.AppImage">下载（119 MB）</a></td></tr>
           </tbody>
         </table>
         <div class="hint">
-          <p>每个文件的 SHA-256 见 <a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.12.0/SHA256SUMS.txt">SHA256SUMS.txt</a>。安装包还没有签名，第一次打开时：</p>
+          <p>每个文件的 SHA-256 见 <a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.13.0/SHA256SUMS.txt">SHA256SUMS.txt</a>。安装包还没有签名，第一次打开时：</p>
           <ul>
             <li>macOS：按下面的步骤操作</li>
             <li>Windows：SmartScreen 提示时点「更多信息 → 仍要运行」</li>
@@ -104,6 +106,15 @@
     <section id="changelog" class="log" aria-labelledby="changelog-title">
       <div class="wrap">
         <h2 id="changelog-title">更新日志</h2>
+
+        <h3>0.13.0 <span class="date">2026-10-09</span></h3>
+        <ul>
+          <li>安全体检：网站信息面板里点「开始体检」，读取网站的全部文件在本机分析：会请你签哪些操作（授权、无限额授权、Permit、Seaport 挂单、盲签）、代码里写死的地址是合约还是普通钱包，以及骗助记词、盗币工具包、回传数据、劫持钱包、远程加载代码等作恶特征。规则用目录里全部 85 个网站校准过</li>
+          <li>本地预览和发布预检查：菜单「文件 → 打开本地文件夹预览」（⌘O），上链前按 tape:// 的规则预览网站，文件改了自动刷新；预检查列出传不上去、上链后打不开、目录里显示不好的问题，以及要发多少笔交易</li>
+          <li>不在链上的网站标「未校验」：普通网页的地址栏左边显示灰色的「未校验」，连接钱包、签名时也会提醒内容不在链上</li>
+          <li>站长声明分类的文件改名为 deweb.json</li>
+          <li>新标签页、产品网站和分享落地页换成更朴素的样式：暖白底、白色卡片、细边框，去掉渐变和阴影</li>
+        </ul>
 
         <h3>0.12.0 <span class="date">2026-10-08</span></h3>
         <ul>
