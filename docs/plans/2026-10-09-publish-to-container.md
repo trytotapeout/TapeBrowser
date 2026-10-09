@@ -723,7 +723,17 @@ git commit -m "Warn in precheck when index.html can't be replaced later"
 - **Task 11**：用户在 X Layer 上用一个便宜的电路实测一遍完整流程：开通、授权、充值、上传几个文件（包括一个多块文件）、中途杀掉应用再续传、替换首页、退款。顺便确认 `open` 是否只允许持有人调用。
 - **Task 12**：README 和官网补充发布说明，然后发版。
 
+## 阶段 1 审查后给阶段 2 的约束
+
+- 引擎开始前必须跑 precheck，有 error 就不发布。`planPublish` 不管空文件、超过 `MAX_FILE_BYTES` 的文件、重复路径和 sha256 格式，这些都靠 precheck 和引擎自己拦。
+- 文件路径用 `local-site.list` 给的结果（用 `/` 分隔、按字母排序、去掉隐藏文件），不要再自己拼路径。
+- `chain.fileInfo` 返回的 `size`、`chunkCount` 是 number；交易里的 `value`、gas 是 bigint。交给 bridge 的持有人交易要转成 0x 十六进制。
+- 只允许 `PUBLISH_NETWORKS` 里的链。
+- 退款：余额减去 gas × gasPrice。持有人是普通地址时 gas 用 21000；是合约地址（`eth_getCode` 不为 `0x`）时用 `eth_estimateGas` 乘 1.25，和官方发布页一样。
+
 ## 已知风险
+
+- 链上的 index.html 是多块、本地是单块且内容不同时，计划给出的是 `replace`。这要求合约允许用 putFile 覆盖已有的多块文件（SPEC 写的是「replaces the whole file if it exists」），要在阶段 4 实测确认。
 
 - 系统钥匙串被重置时，`safeStorage` 解不开，临时钱包里的余额就找不回来了。所以充值只按估算值乘 1.2，不预充大额。
 - 公共节点限速：广播要依次尝试多个节点，等回执之间加间隔。
