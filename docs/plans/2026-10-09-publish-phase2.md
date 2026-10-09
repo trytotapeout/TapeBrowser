@@ -142,7 +142,9 @@
 
 在 `publisher.js` 里加 `run(inspected, { onProgress, signal })`。每一步都重新读链上状态，不信任上次的进度。
 
-重新 inspect 时一律传 `inspect({ target, files: inspected.files, minBlock })`，`minBlock` 是最近一笔已确认交易（开通、授权、充值、上传）回执里的 `blockNumber`。不传的话，钉住的区块可能早于刚确认的交易：会把已开通的容器当成没开通，再交一次开通费；或者用过期的块数去 appendChunk，交易回滚（Task 9 审查意见）。`onProgress({ stage, done, total, path, index, hash })` 报告进度；`signal.aborted` 为 true 时在两笔交易之间停下，返回 `{ stage: 'paused' }`。
+重新 inspect 时一律传 `inspect({ target, files: inspected.files, minBlock, simulate: false })`。`simulate: false` 是本任务要给 inspect 加的选项：不调 `estimateGas`，`stepGas` 只用 `stepGasBound` × 1.25，不会因为 latest 落在落后的节点上把正常的 appendChunk 模拟成回滚（Task 9 审查意见）。每笔上传实际的 gas 上限在第 5 步用操作员地址单独估算；估算回滚时，先隔一个 pollMs 重试 2 次，仍然回滚才停下报错。
+
+`minBlock` 的规则：`minBlock` 是最近一笔已确认交易（开通、授权、充值、上传）回执里的 `blockNumber`。不传的话，钉住的区块可能早于刚确认的交易：会把已开通的容器当成没开通，再交一次开通费；或者用过期的块数去 appendChunk，交易回滚（Task 9 审查意见）。`onProgress({ stage, done, total, path, index, hash })` 报告进度；`signal.aborted` 为 true 时在两笔交易之间停下，返回 `{ stage: 'paused' }`。
 
 1. **开通**（只在 `!opened` 时）：
    - 持有人 `ownerSend(openTx(...))`，拿到 hash 后用 `chain.receipt` 轮询到确认。status 0 抛出「开通容器失败」。
