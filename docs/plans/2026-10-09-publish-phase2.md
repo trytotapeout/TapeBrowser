@@ -195,4 +195,15 @@
 
 ## 阶段 2 结束
 
+### 阶段 3 必须遵守的契约（阶段 2 总审）
+
+1. `ownerSend(tx)`：签名前核对钱包当前账户等于 `tx.from`、链等于 `net.chainId`（持有人交易里没有 chainId 字段，切错链会把开通费或充值发到别的链）；只在广播之后才返回，返回 0x + 64 位十六进制哈希；广播之后不能抛错，窗口关闭、桥接断开也要设法把哈希交回来；bigint 字段转成 0x 十六进制。
+2. `inspect` 的结果只留在主进程。渲染进程只拿脱敏摘要和一个 id，`run` 按 id 取主进程里的原件；绝不接收渲染进程传回来的 inspected，文件内容也不过 IPC。
+3. 能暴露给 IPC 的只有：`inspect({ target })`（target 在主进程按当前站点构造）、`run(id)`、`refund({ chainId, container })`、`discardDust(...)`（界面先让用户确认）、`store.list()` / `broken()`。`keyOf`、`create`、`remove`、`setPending` 和 operator 的任何方法都不能暴露。
+4. 启动时用 `list()` 找残留：有余额、pending 或 ownerPending 的记录要提示「继续发布」或「退款」；余额为 0 且没有在途交易的空记录直接清理；`broken()` 和解密失败单独提示，后者意味着钱找不回来。
+5. `encrypt` / `decrypt` 接 `safeStorage`：先确认 `isEncryptionAvailable()`，不可用就拒绝发布；Linux 上 `getSelectedStorageBackend()` 是 `basic_text` 时也拒绝。不能退回明文。
+6. 整个应用只建一个 publisher（主进程已有单实例锁）；不要在 publisher 之外改 store。
+7. `run` 返回 `paused`，或以核验失败以外的错误结束时，钱还在临时钱包里：界面始终给出「继续发布」和「退款」两个入口。按 `src/main/publish-errors.js` 的错误码决定提示和按钮，不要匹配中文文字。
+8. abort 只在两笔交易之间生效，等确认期间最长要几分钟才停下：界面上的「暂停」要说明这一点。
+
 最后整体审一遍，然后停下来，等用户确认后再细化阶段 3（IPC 和界面）。
