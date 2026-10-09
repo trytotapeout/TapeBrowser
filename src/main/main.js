@@ -11,6 +11,7 @@ import { createSites } from './sites.js';
 import { createTapeHandler } from './tape-protocol.js';
 import { createLocalSites, isLocalUrl } from './local-site.js';
 import { precheck } from './precheck.js';
+import { audit as safetyAudit } from './safety.js';
 import { createBridgeServer } from './bridge-server.js';
 import { createProviderHost, providerError, homeNetwork } from './provider-host.js';
 import { createTabs, originOf, ALLOWED } from './tabs.js';
@@ -360,6 +361,8 @@ function registerIpc() {
   });
   ui('clearCache', () => contentStore.clear());
   ui('openLocal', () => openLocalFolder());
+  // 安全体检：读当前网站的全部文件，静态分析它会对钱包做什么、有没有作恶特征
+  ui('safetyCheck', () => safetyCheck(tabs.active()?.url));
   ui('revealLocal', () => { const root = localSites.rootOf(tabs.active()?.url); if (root) shell.openPath(root); });
   // 本地预览的卡片图片：预检查核对过格式和大小的才显示
   ui('localImage', async (kind) => {
@@ -431,6 +434,56 @@ async function localInfo(url) {
     return { local: true, root, label: tr('本地预览'), external, check };
   } catch (e) {
     return { local: true, root, error: String(e?.message || e) };
+  }
+}
+
+// 安全体检最多读多少个文件、多少字节：太大的网站只体检一部分，报告里写明
+const AUDIT_MAX_FILES = 400;
+const AUDIT_MAX_BYTES = 24 * 1024 * 1024;
+const RECENT = 24 * 60 * 60;
+
+/** 安全体检当前标签的网站（链上网站读整个容器，本地预览读文件夹）。返回报告，或 {error} */
+async function safetyCheck(url) {
+  const external = audit.externalOf(originOf(url || ''));
+  const t0 = Date.now();
+  try {
+    if (isLocalUrl(url)) {
+      const root = localSites.rootOf(url);
+      if (!root) return { url, error: tr('这个本地文件夹没有在本次运行中打开，请重新选择') };
+      const listing = await localSites.list(root);
+      const r = await safetyAudit({ files: listing.files, read: (p) => localSites.bytesOf(root, p), external, tr: (...a) => tr(...a) });
+      return { url, local: true, ...r, context: [], ms: Date.now() - t0 };
+    }
+    const m = /^tape:\/\/([^/?#]+)/i.exec(url || '');
+    const s = m && parseHost(m[1]);
+    if (!s) return { url, error: tr('只能体检电路网站和本地预览') };
+    const net = networkByArea(s.area);
+    const all = await sites.siteFiles(s.tokenId, s.cpu, s.area);
+    if (!all.site.exists || !all.site.opened) return { url, error: tr('这个电路没有开通容器，没有可体检的文件') };
+    // 按大小从小到大读，超过上限的列进「没检查」
+    const files = [];
+    const extraSkipped = [];
+    let bytes = 0;
+    for (const f of [...all.files].sort((a, b) => a.size - b.size)) {
+      if (files.length >= AUDIT_MAX_FILES || bytes + f.size > AUDIT_MAX_BYTES) { extraSkipped.push(f.path); continue; }
+      files.push(f);
+      bytes += f.size;
+    }
+    if (all.total > all.files.length) extraSkipped.push(tr('（容器里还有 {n} 个文件没有列出）', { n: all.total - all.files.length }));
+    const r = await safetyAudit({
+      files, read: all.read, external, extraSkipped, tr: (...a) => tr(...a),
+      hasCode: (list) => chains[net.key].hasCode(list),
+    });
+    // 链上背景：持有人最近换过、网站刚更新过
+    const context = [];
+    const seen = library.seenOf(url);
+    if (seen?.prevOwner) context.push({ level: 'warn', text: tr('这个网站换过持有人（上一任 {prev}），现在的内容由新持有人控制', { prev: seen.prevOwner }) });
+    const newest = all.files.reduce((x, f) => Math.max(x, f.updatedAt || 0), 0);
+    if (newest && Date.now() / 1000 - newest < RECENT) context.push({ level: 'warn', text: tr('网站在 24 小时内更新过文件。如果链接是别人刚发给你的，要多留意') });
+    context.push({ level: 'info', text: tr('持有人 {owner}，{network}，共 {n} 个文件', { owner: all.site.owner, network: net.name, n: all.total }) });
+    return { url, ...r, context, ms: Date.now() - t0 };
+  } catch (e) {
+    return { url, error: String(e?.message || e) };
   }
 }
 

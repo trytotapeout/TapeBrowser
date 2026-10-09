@@ -103,6 +103,8 @@ export const SIG = Object.freeze({
   fileInfo: 'fileInfo(address,string)',
   aggregate3: 'aggregate3((address,bool,bytes)[])',
   readRange: 'readRange(address,string,uint256,uint256)',
+  pathCount: 'pathCount(address)',
+  pathsRange: 'pathsRange(address,uint256,uint256)',
 });
 
 export const SEL = Object.freeze({
@@ -116,12 +118,16 @@ export const SEL = Object.freeze({
   fileInfo: '0x6c609107',
   aggregate3: '0x82ad56cb',
   readRange: '0x15a4cae2',
+  pathCount: '0xb554782b',
+  pathsRange: '0xb056072c',
 });
 
 // SiteRegistry 单文件上限：350 块 × 24,000 字节
 export const MAX_FILE_BYTES = 350 * 24000;
 // readRange 每段读取字节数（SPEC 建议 96 KB）
 export const READ_RANGE = 96000;
+// pathsRange 每页读多少个路径
+export const PATHS_PAGE = 200;
 // 单次 Multicall 打包的调用数
 export const MULTICALL_BATCH = 400;
 // 扫描钱包时单个处理器最多扫多少个编号

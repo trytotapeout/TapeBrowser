@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { encodeCall, decodeResult, decodeAggregate3, hexToBytes } from './abi.js';
-import { BSC, SEL, MULTICALL_BATCH, MAX_FILE_BYTES, READ_RANGE } from './config.js';
+import { BSC, SEL, MULTICALL_BATCH, MAX_FILE_BYTES, READ_RANGE, PATHS_PAGE } from './config.js';
 
 const lower = (a) => String(a).toLowerCase();
 
@@ -201,6 +201,27 @@ export function createChain(rpc, net = BSC) {
     return v;
   }
 
+  /** 容器里的全部文件路径（SiteRegistry 的 pathCount + pathsRange，分页读取）；最多 max 个 */
+  async function allPaths(container, block = 'latest', max = 5000) {
+    const [n] = await view(net.registry, encodeCall(SEL.pathCount, ['address'], [container]), ['uint'], block);
+    const total = Math.min(Number(n), max);
+    const out = [];
+    for (let from = 0; from < total; from += PATHS_PAGE) {
+      const [page] = await view(net.registry, encodeCall(SEL.pathsRange, ['address', 'uint', 'uint'], [container, from, PATHS_PAGE]), ['string[]'], block);
+      out.push(...page);
+    }
+    return { paths: out.slice(0, total), total: Number(n) };
+  }
+
+  /** 每个地址上有没有合约代码：address → bool（读失败的不出现在结果里） */
+  async function hasCode(addresses, block = 'latest') {
+    const out = new Map();
+    await Promise.all(addresses.map(async (a) => {
+      try { out.set(lower(a), ((await rpc('eth_getCode', [a, block])) || '0x').length > 2); } catch { /* 读不到就不下结论 */ }
+    }));
+    return out;
+  }
+
   async function fileInfo(container, path, block) {
     return (await fileInfos([{ container, path }], block))[0];
   }
@@ -233,5 +254,5 @@ export function createChain(rpc, net = BSC) {
     return out;
   }
 
-  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, v3Price, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, readRange, readVerified };
+  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, v3Price, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, allPaths, hasCode, readRange, readVerified };
 }

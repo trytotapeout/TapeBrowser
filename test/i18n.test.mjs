@@ -9,7 +9,7 @@ const CJK = /[一-鿿]/;
 /** 代码里所有 tr('…') 和 index.html 里的中文 */
 function usedKeys() {
   const keys = new Set();
-  for (const f of ['src/main/main.js', 'src/main/tabs.js', 'src/main/risk.js', 'src/main/tip.js', 'src/main/precheck.js', 'src/ui/ui.js']) {
+  for (const f of ['src/main/main.js', 'src/main/tabs.js', 'src/main/risk.js', 'src/main/tip.js', 'src/main/precheck.js', 'src/main/safety.js', 'src/ui/ui.js']) {
     const s = readFileSync(f, 'utf8');
     for (const m of s.matchAll(/\btr\((['"])((?:\\.|(?!\1).)*)\1/g)) keys.add(new Function(`return ${m[1]}${m[2]}${m[1]}`)());
   }

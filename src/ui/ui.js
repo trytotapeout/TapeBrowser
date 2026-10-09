@@ -44,6 +44,8 @@
   let verify = null;
   // 当前网站容器里的资产 {url, assets} | {url, error}；打开网站信息面板时读一次
   let assets = null;
+  // 安全体检：{url, running} 或体检报告（safety.js），用户点按钮才做
+  let safety = null;
   // 「持有的全部网站」：下一次显示新标签页时按这个持有人筛选
   let pendingOwner = null;
   // 上次查询网站信息时的 标签 id + 网址 + 是否在加载，变化时才重新查询
@@ -263,6 +265,7 @@
     }
     row(tr('交叉校验'), verifyText());
     row(tr('外部资源'), externalText(info.external || []));
+    if (info.container && info.opened) safetyRow(dl);
     if (info.container && info.opened) tipRow(row, info);
   }
 
@@ -315,6 +318,79 @@
       checks.append(ul);
     }
     row(tr('卡片预览')).append(localCard(c.card));
+    safetyRow(dl);
+  }
+
+  const LEVEL_TEXT = { danger: tr('高危'), warn: tr('留意'), info: tr('信息') };
+  const KIND_TEXT = { contract: tr('合约'), wallet: tr('普通钱包'), unknown: tr('未知') };
+
+  /** 一组带级别的条目：[{level, text, where}] */
+  function levelList(items) {
+    const ul = Object.assign(document.createElement('ul'), { className: 'check-list' });
+    for (const it of items) {
+      const li = Object.assign(document.createElement('li'), { className: it.level === 'danger' ? 'error' : it.level });
+      li.append(Object.assign(document.createElement('span'), { className: 'lv', textContent: LEVEL_TEXT[it.level] }), document.createTextNode(it.text));
+      if (it.where && it.where.length) li.append(Object.assign(document.createElement('span'), { className: 'where', textContent: ' ' + it.where.join(tr('、')) }));
+      ul.append(li);
+    }
+    return ul;
+  }
+
+  /** 安全体检一行：没做过时是按钮，做完显示报告 */
+  function safetyRow(dl) {
+    const dd = Object.assign(document.createElement('dd'), { className: 'checks' });
+    dl.append(Object.assign(document.createElement('dt'), { textContent: tr('安全体检') }), dd);
+    const url = active() && active().url;
+    const r = safety && safety.url === url ? safety : null;
+    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: r && !r.running ? tr('重新体检') : tr('开始体检') });
+    go.disabled = Boolean(r && r.running);
+    go.addEventListener('click', () => runSafety(url));
+    const hint = (t) => dd.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: t }));
+    if (!r) {
+      hint(tr('读取这个网站的全部文件，分析它会请你签什么、钱会流向哪里，以及有没有盗币、钓鱼的特征。只在本机分析，不上传任何内容'));
+      dd.append(go);
+      return;
+    }
+    if (r.running) { hint(tr('正在读取全部文件并分析，网站大的话要几十秒…')); return; }
+    if (r.error) { hint(tr('体检失败：') + r.error); dd.append(go); return; }
+
+    const danger = r.findings.filter((f) => f.level === 'danger').length;
+    const head = Object.assign(document.createElement('p'), { className: 'verdict ' + (danger ? 'bad' : r.findings.length ? 'stale' : 'ok') });
+    head.textContent = danger ? tr('发现 {n} 个高危特征，不要连接钱包、不要签名', { n: danger })
+      : r.findings.some((f) => f.level === 'warn') ? tr('没有发现高危特征，但有需要留意的地方')
+        : tr('没有发现已知的作恶特征');
+    dd.append(head);
+    const section = (title, node) => {
+      dd.append(Object.assign(document.createElement('h4'), { textContent: title }));
+      dd.append(node);
+    };
+    if (r.findings.length || (r.context || []).length) section(tr('发现'), levelList([...r.findings, ...(r.context || [])]));
+    section(tr('这个网站可能请你做的钱包操作'), r.abilities.length ? levelList(r.abilities) : Object.assign(document.createElement('p'), { className: 'hint', textContent: tr('代码里没有找到钱包调用') }));
+    if (r.addresses.length) {
+      const ul = Object.assign(document.createElement('ul'), { className: 'addr-list' });
+      for (const a of r.addresses.slice(0, 12)) {
+        const li = document.createElement('li');
+        li.append(Object.assign(document.createElement('span'), { className: 'kind ' + a.kind, textContent: KIND_TEXT[a.kind] }), Object.assign(document.createElement('code'), { textContent: a.address, title: a.where.join('\n') }));
+        ul.append(li);
+      }
+      section(tr('代码里写死的地址（{n} 个）', { n: r.addresses.length }), ul);
+    }
+    const cov = r.coverage;
+    const notes = [tr('分析了 {files} 个文件中的文本文件，共 {size}，用时 {s} 秒', { files: cov.files, size: size(cov.scanned), s: (r.ms / 1000).toFixed(1) })];
+    if (cov.skipped.length) notes.push(tr('没有检查：{list}', { list: cov.skipped.slice(0, 5).join(tr('、')) + (cov.skipped.length > 5 ? tr(' 等 {n} 个', { n: cov.skipped.length }) : '') }));
+    notes.push(tr('这是静态特征检查：能认出常见的盗币工具包、钓鱼和骗助记词页面，但「没有发现」不等于安全。作者有意规避时（例如按时间或钱包触发）查不出来'));
+    for (const n of notes) hint(n);
+    dd.append(go);
+  }
+
+  function runSafety(url) {
+    safety = { url, running: true };
+    renderSite();
+    tb.invoke('safetyCheck').then((r) => {
+      if (!r || r.url !== url) return;
+      safety = r;
+      if (siteOpen) renderSite();
+    }).catch((e) => { safety = { url, error: errText(e) }; if (siteOpen) renderSite(); });
   }
 
   /** 普通网页的面板：说明内容不在链上、TapeBrowser 证明不了它，签名时仍有风险解读 */

@@ -121,6 +121,21 @@ export function createSites(chains, store = null) {
     return { info, bytes, source };
   }
 
+  /**
+   * 网站容器里的全部文件（安全体检用）：{site, files: [{path, size, sha256, updatedAt}], total, read(path)}。
+   * 只列文件，不读内容；read 走 readFile，校验 sha256、复用内容缓存
+   */
+  async function siteFiles(tokenId, cpu, area = null) {
+    const s = await site(tokenId, cpu, area);
+    if (!s.exists || !s.opened || !s.container) return { site: s, files: [], total: 0, read: async () => null };
+    const chain = chainOf(area);
+    const { paths, total } = await chain.allPaths(s.container);
+    const infos = paths.length ? await chain.fileInfos(paths.map((path) => ({ container: s.container, path }))) : [];
+    const files = [];
+    paths.forEach((path, i) => { const f = infos[i]; if (f) files.push({ path, size: f.size, sha256: f.sha256, updatedAt: f.updatedAt }); });
+    return { site: s, files, total, read: async (path) => (await readFile(s.container, path, area))?.bytes ?? null };
+  }
+
   /** 网站信息面板：电路、持有人、容器，以及当前页面文件最近一次的读取情况 */
   async function describe(tokenId, cpu, path, area = null) {
     const net = netOf(area);
@@ -278,5 +293,5 @@ export function createSites(chains, store = null) {
     };
   }
 
-  return { cpus, site, readFile, describe, verify, indexInfo, containerAssets, enumerateDigits, scanWallet, networks: enabled };
+  return { cpus, site, readFile, siteFiles, describe, verify, indexInfo, containerAssets, enumerateDigits, scanWallet, networks: enabled };
 }

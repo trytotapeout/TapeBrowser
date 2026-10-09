@@ -198,3 +198,16 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 #site-btn.web { border-color: var(--line); color: var(--muted); }
 #si-status.web { color: var(--muted); }
 #si-list dd .v.wrap { white-space: normal; font-family: inherit; font-size: 13px; line-height: 1.5; }
+/* 安全体检报告 */
+#si-list dd .hint { margin: 2px 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+#si-list dd h4 { margin: 8px 0 3px; font-size: 12px; font-weight: 600; }
+#si-list dd .verdict { margin: 2px 0 4px; font-weight: 600; }
+#si-list dd .verdict.ok { color: var(--ok); }
+#si-list dd .verdict.stale { color: #b7791f; }
+#si-list dd .verdict.bad { color: var(--bad); }
+.check-list .where { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.addr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.addr-list code { font-size: 12px; }
+.addr-list .kind { display: inline-block; min-width: 4.5em; margin-right: 8px; font-size: 11px; color: var(--muted); }
+.addr-list .kind.wallet { color: #b7791f; }
+#siteinfo { max-height: 70vh; overflow: auto; }
