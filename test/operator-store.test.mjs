@@ -49,10 +49,24 @@ test('新建临时钱包，再次 create 返回同一个地址', () => {
 });
 
 test('换个持有人会抛出', () => {
-  const { store, done } = setup();
+  const { dir, store, done } = setup();
   try {
-    store.create({ chainId: CHAIN, container: C, owner: OWNER });
-    assert.throws(() => store.create({ chainId: CHAIN, container: C, owner: OTHER }), { message: '这个容器已有另一个持有人的临时钱包' });
+    const a = store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    const hex = bytesToHex(store.keyOf(CHAIN, C)).slice(2);
+    let err;
+    try { store.create({ chainId: CHAIN, container: C, owner: OTHER }); } catch (e) { err = e; }
+    assert.ok(err instanceof Error);
+    assert.equal(err.message, '这个容器已有另一个持有人的临时钱包，请先把它的余额退回原持有人');
+    assert.equal(err.code, 'OPERATOR_OWNER_MISMATCH');
+    assert.equal(err.old.address, a.address);
+    assert.equal(err.old.owner, OWNER);
+    assert.equal('key' in err.old, false);
+    const dump = (x) => JSON.stringify(x, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+    assert.equal(dump(err).includes(hex), false);
+    assert.equal(dump(err.old).includes(hex), false);
+    const stored = JSON.parse(readFileSync(join(dir, `${CHAIN}-${C.toLowerCase()}.json`), 'utf8')).key;
+    assert.equal(dump(err).includes(stored), false);
+    assert.equal(dump(err.old).includes(stored), false);
   } finally { done(); }
 });
 
@@ -204,6 +218,75 @@ test('文件权限是 0600，写完不留 .tmp', { skip: process.platform === 'w
     store.create({ chainId: CHAIN, container: C, owner: OWNER });
     store.setLastNonce(CHAIN, C, 1);
     const file = join(dir, `${CHAIN}-${C.toLowerCase()}.json`);
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(dir), [`${CHAIN}-${C.toLowerCase()}.json`]);
+  } finally { done(); }
+});
+
+test('坏文件出现在 broken() 里，list 跳过，get 抛出固定提示', () => {
+  const { dir, store, done } = setup();
+  try {
+    const a = store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    const bad1 = `1-0x${'33'.repeat(20)}.json`;
+    const bad2 = `10-0x${'44'.repeat(20)}.json`;
+    writeFileSync(join(dir, bad1), '{not json');
+    writeFileSync(join(dir, bad2), JSON.stringify({ v: 1, chainId: 10 }));
+    writeFileSync(join(dir, 'readme.txt'), 'hi');
+    assert.deepEqual(store.broken().sort(), [bad1, bad2].sort());
+    assert.deepEqual(store.list(), [a]);
+    for (const [chainId, c] of [[1, '0x' + '33'.repeat(20)], [10, '0x' + '44'.repeat(20)]]) {
+      assert.throws(() => store.get(chainId, c), (e) => e.message === '临时钱包：记录文件已损坏');
+    }
+  } finally { done(); }
+});
+
+test('broken 在目录不存在时返回空数组', () => {
+  const { dir, make, done } = setup();
+  try {
+    assert.deepEqual(make({ dir: join(dir, 'missing') }).broken(), []);
+  } finally { done(); }
+});
+
+test('setPending 拒绝不比 lastNonce 大的 nonce', () => {
+  const { store, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    const p = { raw: '0x01', hash: '0x02', kind: 'upload', nonce: 5n };
+    store.setPending(CHAIN, C, p); // 还没有 lastNonce，可以
+    store.setLastNonce(CHAIN, C, 5n);
+    const MSG = '交易的 nonce 不比已确认的大，节点可能落后';
+    assert.throws(() => store.setPending(CHAIN, C, p), (e) => e.message === MSG);
+    assert.throws(() => store.setPending(CHAIN, C, { ...p, nonce: 4 }), (e) => e.message === MSG);
+    assert.equal(store.get(CHAIN, C).pending.nonce, 5n);
+    store.setPending(CHAIN, C, { ...p, nonce: 6n });
+    assert.equal(store.get(CHAIN, C).pending.nonce, 6n);
+  } finally { done(); }
+});
+
+test('setPending / setLastNonce 拒绝不合法的参数', () => {
+  const { store, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    const p = { raw: '0x01', hash: '0x02', kind: 'upload', nonce: 1n };
+    for (const bad of [{ kind: 'mint' }, { kind: undefined }, { index: -1 }, { index: 1.5 }, { nonce: 1.5 }, { nonce: -1 }, { nonce: '1' }, { raw: 1 }]) {
+      assert.throws(() => store.setPending(CHAIN, C, { ...p, ...bad }));
+    }
+    assert.throws(() => store.setPending(CHAIN, C, null));
+    for (const bad of [-1, -1n, 1.5, '3', NaN, null]) {
+      assert.throws(() => store.setLastNonce(CHAIN, C, bad));
+    }
+    const r = store.get(CHAIN, C);
+    assert.equal(r.pending, null);
+    assert.equal(r.lastNonce, null);
+  } finally { done(); }
+});
+
+test('写盘前删掉残留的 .tmp，新文件仍是 0600', { skip: process.platform === 'win32' }, () => {
+  const { dir, store, done } = setup();
+  try {
+    const file = join(dir, `${CHAIN}-${C.toLowerCase()}.json`);
+    writeFileSync(file + '.tmp', 'stale', { mode: 0o644 });
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
     assert.equal(statSync(file).mode & 0o777, 0o600);
     assert.deepEqual(readdirSync(dir), [`${CHAIN}-${C.toLowerCase()}.json`]);
   } finally { done(); }

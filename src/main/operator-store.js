@@ -13,9 +13,11 @@
 //              防止公共节点落后、读到旧 nonce 后重发
 //   createdAt  创建时间（毫秒）
 // get / list / create 返回的记录不含 key，并且 lastNonce 是 bigint | null、pending.nonce 是 bigint。
-// 写盘先写 .tmp 再 rename（和 settings.js 一样）。每次读都直接读文件，不缓存。
+// 这个文件关系到临时钱包里的钱，写盘要落实：先删掉残留的 .tmp，新建 .tmp（0600）写入并 fsync，
+// 再 rename，最后尽量 fsync 目录。每次读都直接读文件，不缓存。
+// 读不出来或结构不对的文件不会被当成「没有记录」：get 抛出，list 跳过，broken() 列出文件名。
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { readFileSync, openSync, writeSync, fsyncSync, closeSync, renameSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { newKey, addressOf } from './eth-tx.js';
 import { bytesToHex, hexToBytes } from './abi.js';
@@ -83,7 +85,9 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
       if (e.code === 'ENOENT') return null;
       throw e;
     }
-    const rec = JSON.parse(text);
+    let rec;
+    try { rec = JSON.parse(text); } catch { rec = null; }
+    // 不带解析器的错误：里面可能有文件内容
     if (!looksValid(rec)) throw new Error('临时钱包：记录文件已损坏');
     return rec;
   }
@@ -91,8 +95,24 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
   function write(file, rec) {
     mkdirSync(dir, { recursive: true });
     const tmp = file + '.tmp';
-    writeFileSync(tmp, JSON.stringify(rec, null, 2), { mode: 0o600 });
+    // 残留的 .tmp 可能权限更宽，openSync 的 mode 只在新建时生效，所以先删掉
+    rmSync(tmp, { force: true });
+    const fd = openSync(tmp, 'w', 0o600);
+    try {
+      writeSync(fd, JSON.stringify(rec, null, 2));
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
     renameSync(tmp, file);
+    // 让 rename 本身也落盘；Windows 等平台不支持对目录 fsync，忽略错误
+    try {
+      const d = openSync(dir, 'r');
+      try { fsyncSync(d); } finally { closeSync(d); }
+    } catch { /* 尽力而为 */ }
+  }
+
+  /** 目录里符合文件名格式的文件；目录不存在时为空 */
+  function names() {
+    try { return readdirSync(dir).filter((n) => FILE.test(n)); } catch { return []; }
   }
 
   /** 读出记录、修改、写回；没有记录时抛出 */
@@ -110,17 +130,26 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
       const o = addrOf(owner, '持有人');
       const old = read(file);
       if (old) {
-        if (old.owner !== o) throw new Error('这个容器已有另一个持有人的临时钱包');
+        if (old.owner !== o) {
+          // 带上旧记录（不含私钥），让调用方能先把余额退回原持有人
+          const err = new Error('这个容器已有另一个持有人的临时钱包，请先把它的余额退回原持有人');
+          err.code = 'OPERATOR_OWNER_MISMATCH';
+          err.old = publicView(old);
+          throw err;
+        }
         return publicView(old);
       }
       const sk = newKey();
-      // encrypt 抛错（钥匙串不可用）时原样抛出，此时还没写盘
-      const key = Buffer.from(encrypt(bytesToHex(sk))).toString('base64');
-      const rec = {
-        v: 1, chainId, container: container.toLowerCase(), owner: o, address: addressOf(sk),
-        key, pending: null, lastNonce: null, createdAt: now(),
-      };
-      sk.fill(0);
+      let rec;
+      try {
+        // 交给 encrypt 的 hex 字符串没法清零（safeStorage 只收字符串）
+        // encrypt 抛错（钥匙串不可用）时原样抛出，此时还没写盘
+        const key = Buffer.from(encrypt(bytesToHex(sk))).toString('base64');
+        rec = {
+          v: 1, chainId, container: container.toLowerCase(), owner: o, address: addressOf(sk),
+          key, pending: null, lastNonce: null, createdAt: now(),
+        };
+      } finally { sk.fill(0); }
       write(file, rec);
       return publicView(rec);
     },
@@ -139,6 +168,7 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
         sk = hexToBytes(decrypt(Buffer.from(rec.key, 'base64')));
         if (sk.length !== 32 || addressOf(sk) !== rec.address) throw 0;
       } catch {
+        if (sk) sk.fill(0);
         // 不带底层错误：里面可能有密文或私钥的片段
         throw new Error(DECRYPT_FAILED);
       }
@@ -147,7 +177,13 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
 
     setPending(chainId, container, pending) {
       const p = pendingToDisk(pending);
-      update(chainId, container, (rec) => { rec.pending = p; });
+      update(chainId, container, (rec) => {
+        // 不比已确认的 nonce 大：节点落后读到了旧 nonce，签出来的交易会冲掉已确认的
+        if (rec.lastNonce != null && BigInt(p.nonce) <= BigInt(rec.lastNonce)) {
+          throw new Error('交易的 nonce 不比已确认的大，节点可能落后');
+        }
+        rec.pending = p;
+      });
     },
 
     clearPending(chainId, container) {
@@ -169,17 +205,21 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
 
     /** 全部记录（不含私钥），启动时找残留用；坏文件跳过 */
     list() {
-      let names;
-      try { names = readdirSync(dir); } catch { return []; }
       const out = [];
-      for (const name of names) {
-        if (!FILE.test(name)) continue;
+      for (const name of names()) {
         try {
           const rec = read(join(dir, name));
           if (rec) out.push(publicView(rec));
         } catch { /* 坏文件跳过 */ }
       }
       return out;
+    },
+
+    /** 读不出来或结构不对的记录文件名，给界面提示用 */
+    broken() {
+      return names().filter((name) => {
+        try { read(join(dir, name)); return false; } catch { return true; }
+      });
     },
   };
 }
