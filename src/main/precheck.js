@@ -15,8 +15,9 @@ import { MAX_FILE_BYTES } from './config.js';
 import { normalizePath } from './address.js';
 import { extractTitle, IMAGE_FILES, IMAGE_MAX_BYTES, MANIFEST_PATH } from './directory.js';
 import { classify, declaredCategory, CATEGORIES } from './category.js';
+import { CHUNK_BYTES } from './publish-plan.js';
 
-export const CHUNK_SIZE = 24000;
+export const CHUNK_SIZE = CHUNK_BYTES;
 const TITLE_MAX_BYTES = 256 * 1024;
 // 只扫这么大以内的 HTML / CSS 找引用，太大的多半是打包产物，不逐个看
 const SCAN_MAX_BYTES = 2 * 1024 * 1024;
@@ -87,7 +88,7 @@ export async function precheck({ files, skipped = [], truncated = false, read, e
   const index = byPath.get('index.html');
   if (!index) add('error', tr('根目录没有 index.html：网站打不开，目录也不会收录'));
   // 链上文件只增不改，只有单块的首页能在以后替换（publish-plan.js）
-  if (index && index.size > CHUNK_SIZE) add('warn', tr('index.html 有 {size}，超过 24000 字节（一块）。第一次能发布，但以后不能再替换首页；建议把脚本和样式拆出去', { size: kb(index.size) }));
+  if (index && index.size > CHUNK_SIZE) add('warn', tr('index.html 有 {size} 字节，超过一块的 {max} 字节。第一次能发布，但以后不能再替换首页；建议把脚本和样式拆出去', { size: index.size, max: CHUNK_SIZE }));
   const empty = files.filter((f) => f.size === 0).map((f) => f.path);
   if (empty.length) add('error', tr('空文件不能上链：{list}', { list: list(empty, tr) }));
   const huge = files.filter((f) => f.size > MAX_FILE_BYTES).map((f) => `${f.path}（${kb(f.size)}）`);
