@@ -146,6 +146,8 @@
    - 持有人 `ownerSend(openTx(...))`，拿到 hash 后用 `chain.receipt` 轮询到确认。status 0 抛出「开通容器失败」。
    - 确认后核对 `isOpened`、`chain.isDeployed`、`accountOf` 都对得上，然后重新 `inspect`。
 2. **临时钱包**：`store.create(...)` 拿到操作员地址，再 `createOperator(...)`。先 `operator.settle()` 处理上次留下的 pending。
+   - `create` 抛出 `code === 'OPERATOR_OWNER_MISMATCH'`（电路已经转给新地址，旧持有人的临时钱包还在）：先用旧记录 `err.old` 建一个 operator，`settle` 掉它的 pending，把余额退回**旧持有人**，然后 `store.remove`，再重新 `create`。退款只要临时钱包签名，不需要旧持有人在场。退不出来（余额不够付手续费）就保留旧记录，报错让用户知道。
+   - 同一个（chainId, 容器）同时只能有一个 `run` / `refund` 在执行：publisher 里按这个键做内存互斥，第二个调用直接抛出「这个容器正在发布」。主进程已经用 `app.requestSingleInstanceLock()` 保证只有一个应用实例。
 3. **授权**：`chain.operatorState(container, op)`：`!canEdit`，或者 `until < now/1000 + 300` → 持有人 `ownerSend(grantTx(...))`，等确认，再读一次确认已经生效。
 4. **充值**：
    - 需要的金额 = 剩余每块 gas 上限 × gasPrice × 1.2，再减去临时钱包现有余额。
@@ -177,7 +179,9 @@
 - 余额不够时会再次充值；
 - 回执 status 0 时停下并报错；
 - 退款金额不够付手续费时保留记录；
-- 授权快过期时会重新授权。
+- 授权快过期时会重新授权；
+- 电路换了持有人：先把旧临时钱包余额退给旧持有人，再为新持有人新建；
+- 同一个容器并发 `run` 时第二个被拒。
 
 提交信息：`Add publisher run, resume and refund`
 
