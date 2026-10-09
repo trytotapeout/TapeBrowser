@@ -5,8 +5,9 @@
 // index.html 永远最后传：传到一半时，旧首页和它引用的旧文件都还在，网站不会坏。
 
 import { guessType } from './tape-protocol.js';
+import { CHUNK_BYTES } from './config.js';
 
-export const CHUNK_BYTES = 24000;
+export { CHUNK_BYTES };
 // 只有根目录的 index.html 能替换；sub/index.html 是普通文件
 const INDEX = 'index.html';
 
@@ -14,7 +15,7 @@ const mime = (t) => String(t).split(';')[0].trim().toLowerCase();
 /** 链上 contentType 为空时读取端会按扩展名猜，等于一致；否则只比较 ';' 前面的 MIME，不分大小写 */
 export const sameType = (chainType, localType) => !chainType || mime(chainType) === mime(localType);
 
-/** 文件要几块；空文件也要一笔 putFile */
+/** 文件要几块；空文件按一块算（预检查会先拦下空文件，这里只保证计算不出错） */
 export const chunksOf = (size) => Math.max(1, Math.ceil(size / CHUNK_BYTES));
 /** 第 i 块的字节 */
 export const chunkOf = (bytes, i) => bytes.subarray(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES);

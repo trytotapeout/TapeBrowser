@@ -110,7 +110,6 @@ export const SIG = Object.freeze({
   appendChunk: 'appendChunk(address,string,uint256,bytes)',
   setOperator: 'setOperator(address,address,uint256)',
   canEdit: 'canEdit(address,address)',
-  operatorOf: 'operatorOf(address)',
   operatorUntil: 'operatorUntil(address)',
   // 开通器 opener：开通容器（id.tapeout.link）
   open: 'open(address,uint256)',
@@ -135,15 +134,16 @@ export const SEL = Object.freeze({
   appendChunk: '0xe2b51347',
   setOperator: '0xc88cb026',
   canEdit: '0xbcfe519c',
-  operatorOf: '0x636f35d3',
   operatorUntil: '0xc85cf62b',
   open: '0x0a0e5c9d',
   openFee: '0xc57981b5',
   isDeployed: '0xf13906b8',
 });
 
+// SiteRegistry 每块最多 24,000 字节（SPEC 附录 B.5 CHUNK_MAX）
+export const CHUNK_BYTES = 24000;
 // SiteRegistry 单文件上限：350 块 × 24,000 字节
-export const MAX_FILE_BYTES = 350 * 24000;
+export const MAX_FILE_BYTES = 350 * CHUNK_BYTES;
 // readRange 每段读取字节数（SPEC 建议 96 KB）
 export const READ_RANGE = 96000;
 // pathsRange 每页读多少个路径

@@ -1,5 +1,5 @@
 // 发布到容器要用的交易：持有人签的（开通、授权、撤销、充值）和临时操作员签的（上传、退款）。纯函数，不依赖 Electron。
-// 数值一律是 bigint；交给钱包前由调用方转成 0x 十六进制。
+// 交易的 value 和 gas 相关数额一律是 bigint，交给钱包前由调用方转成 0x 十六进制；ABI 参数可以是 number。
 
 import { encodeCall } from './abi.js';
 import { SEL, OPERATOR_TTL, MAX_GAS_PRICE, MAX_UPLOAD_GAS } from './config.js';
@@ -10,7 +10,7 @@ const ZERO = '0x' + '0'.repeat(40);
 const lower = (a) => String(a).toLowerCase();
 const UPLOAD_DATA = /^0x[0-9a-f]{8}0{24}[0-9a-f]{40}(?:[0-9a-f]{2})*$/;
 
-/** 上传一块：第 0 块 putFile（同时写类型和哈希），后面的块 appendChunk（expectIndex 防止重复追加） */
+/** 上传一块：第 0 块 putFile（同时写类型和哈希），后面的块 appendChunk（第三个参数是块序号，合约检查它等于当前块数，防止重复追加） */
 export function uploadTx(net, container, { path, index, row }) {
   const part = chunkOf(row.bytes, index);
   const data = index === 0

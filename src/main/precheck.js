@@ -11,11 +11,11 @@
 // 规则和链上一致：单文件最多 350 块（config.js MAX_FILE_BYTES）；目录收录要有 index.html，
 // 首页超过 256 KB 不取标题，logo / cover 超过 50 KB 不显示（directory.js）。
 
-import { MAX_FILE_BYTES } from './config.js';
+import { MAX_FILE_BYTES, CHUNK_BYTES } from './config.js';
 import { normalizePath } from './address.js';
 import { extractTitle, IMAGE_FILES, IMAGE_MAX_BYTES, MANIFEST_PATH } from './directory.js';
 import { classify, declaredCategory, CATEGORIES } from './category.js';
-import { CHUNK_BYTES } from './publish-plan.js';
+import { chunksOf } from './publish-plan.js';
 
 export const CHUNK_SIZE = CHUNK_BYTES;
 const TITLE_MAX_BYTES = 256 * 1024;
@@ -24,7 +24,7 @@ const SCAN_MAX_BYTES = 2 * 1024 * 1024;
 const MAX_LISTED = 5;
 
 const fill = (s, v) => (v ? s.replace(/\{(\w+)\}/g, (all, k) => (Object.hasOwn(v, k) ? String(v[k]) : all)) : s);
-export const txsOf = (size) => Math.max(1, Math.ceil(size / CHUNK_SIZE));
+export const txsOf = chunksOf;
 const kb = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(2)} MB`);
 
 /** PNG / JPEG 的宽高；认不出返回 null */
