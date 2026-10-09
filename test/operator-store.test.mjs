@@ -441,6 +441,22 @@ test('replacePending：只能用同一个 nonce 的退款替换退款', () => {
     assert.throws(() => store.replacePending(CHAIN, C, { ...next, kind: 'upload' }), /只能用同一个 nonce 的退款替换退款/);
     assert.equal(store.get(CHAIN, C).pending.hash, refund.hash);
     store.replacePending(CHAIN, C, next);
-    assert.deepEqual(store.get(CHAIN, C).pending, next);
+    assert.deepEqual(store.get(CHAIN, C).pending, { ...next, prior: [{ hash: refund.hash, value: 1000n }] });
+  } finally { done(); }
+});
+
+test('replacePending 把被替换的退款记进 prior（最多 3 个，旧的在前）', () => {
+  const { store, make, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    const v = (i) => ({ raw: '0x0' + i, hash: '0x' + String(i).repeat(64), kind: 'refund', nonce: 3n, gasPrice: 5n, value: 1000n - BigInt(i) });
+    store.setPending(CHAIN, C, v(1));
+    for (let i = 2; i <= 5; i++) store.replacePending(CHAIN, C, v(i));
+    const p = make().get(CHAIN, C).pending;
+    assert.equal(p.hash, v(5).hash);
+    assert.deepEqual(p.prior, [2, 3, 4].map((i) => ({ hash: v(i).hash, value: v(i).value })));
+    // 调用方传进来的 prior 不算数
+    store.replacePending(CHAIN, C, { ...v(6), prior: [] });
+    assert.equal(store.get(CHAIN, C).pending.prior.length, 3);
   } finally { done(); }
 });

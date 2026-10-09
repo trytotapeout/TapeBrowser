@@ -87,6 +87,9 @@ const SAFE_POLL_MS = 3000;
 // 退款一直不打包时最多重签 2 次；X Layer 重签时多留 20% 手续费不退（可能有 L1 数据费，没有实测过）
 const MAX_RESIGNS = 2;
 const RESIGN_MARGIN = { xlayer: 20n };
+// 重签的单价至少比旧的高 12.5%：节点按这个比例判断能不能替换交易池里同一个 nonce 的交易
+const BUMP_NUM = 1125n;
+const BUMP_DEN = 1000n;
 
 // 正在执行 run / refund 的（chainId, 容器）。主进程只有一个实例，内存里互斥就够了
 const running = new Map();
@@ -582,11 +585,11 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   }
 
   /**
-   * 按当前单价算退款：gas、gasPrice，金额 = 余额 − gas × gasPrice × (100 + margin)%。
-   * margin 是多留着不退的手续费百分比
+   * 算退款：gas、gasPrice，金额 = 余额 − gas × gasPrice × (100 + margin)%。
+   * margin 是多留着不退的手续费百分比；gasPrice 不给就用当前单价
    */
-  async function refundQuote(ctx, operator, balance, margin = 0n) {
-    const gasPrice = await currentGasPrice();
+  async function refundQuote(ctx, operator, balance, margin = 0n, price = null) {
+    const gasPrice = price ?? await currentGasPrice();
     const gas = await refundGas(ctx, operator, balance, gasPrice);
     return { gas, gasPrice, amount: balance - gas * gasPrice * (100n + margin) / 100n };
   }
@@ -595,6 +598,17 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
    * 余额为 0 时删除记录，但只在持有人没有在途交易的时候：一笔已经广播、还没记下或还看不到的充值，
    * 删掉记录以后到账就取不出来了。返回是否删了
    */
+  /**
+   * 重签用的单价：max(当前单价, 旧单价 × 1.125)，不超过 MAX_GAS_PRICE。
+   * 封顶后不比旧单价高就没法替换，抛出（pending 保留）
+   */
+  async function bumpedPrice(old) {
+    const want = maxOf(await currentGasPrice(), old * BUMP_NUM / BUMP_DEN);
+    if (want <= MAX_GAS_PRICE) return want;
+    if (MAX_GAS_PRICE > old) return MAX_GAS_PRICE;
+    throw new Error('退款交易一直没有打包，Gas 单价已到上限');
+  }
+
   async function removeIfEmpty(ctx, balance) {
     if (balance !== 0n || store.get(net.chainId, ctx.container)?.ownerPending) return false;
     const { latest, pending } = await chain.nonceOf(ctx.owner);
@@ -605,22 +619,24 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
 
   /**
    * 等临时钱包的 pending 确认。是一笔退款、等超时了、nonce 也确实没被用掉（节点收下了却不打包：
-   * 最低单价变了、X Layer 的 L1 数据费），就按当前单价重算金额、用同一个 nonce 重签再等，最多 MAX_RESIGNS 次。
-   * 返回 { receipt, value }：value 是确认的那笔退款的金额（不是退款时为 0n）；没有 pending 时 receipt 为 null
+   * 最低单价变了、X Layer 的 L1 数据费），就用压过旧单价的新单价重算金额、用同一个 nonce 重签再等，最多 MAX_RESIGNS 次。
+   * 返回 { receipt, value }：value 是上链的那个版本的退款金额（重签后可能是旧版本上了链；不是退款时为 0n）；
+   * 没有 pending 时 receipt 为 null
    */
   async function settleRefund(ctx, operator) {
     for (let resigns = 0; ; resigns++) {
       const p = store.get(net.chainId, ctx.container)?.pending;
       try {
         const receipt = await operator.settle();
-        return { receipt, value: p?.kind === 'refund' ? p.value ?? 0n : 0n };
+        return { receipt, value: p?.kind === 'refund' ? receipt?.value ?? 0n : 0n };
       } catch (e) {
         const stuck = store.get(net.chainId, ctx.container)?.pending;
         if (e?.code !== 'PENDING_TIMEOUT' || stuck?.kind !== 'refund' || resigns >= MAX_RESIGNS) throw e;
         if ((await chain.nonceOf(operator.address)).latest > stuck.nonce) throw e;
-        // 这笔没有上链：余额还是全部，按现在的单价重算
+        // 这笔没有上链：余额还是全部，按压过旧单价的新单价重算
         const balance = await operator.balance(hexBlock(ctx.minBlock));
-        const q = await refundQuote(ctx, operator, balance, RESIGN_MARGIN[net.key] ?? 0n);
+        const price = await bumpedPrice(stuck.gasPrice);
+        const q = await refundQuote(ctx, operator, balance, RESIGN_MARGIN[net.key] ?? 0n, price);
         if (q.amount <= 0n) throw new Error('退款交易一直没有打包，余额不够按现在的单价重发');
         const hash = await operator.resignRefund({ value: q.amount, gas: q.gas, gasPrice: q.gasPrice });
         ctx.progress({ stage: 'refund', hash, resigned: true });

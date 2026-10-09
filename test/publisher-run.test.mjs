@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPublisher } from '../src/main/publisher.js';
 import { createOperatorStore } from '../src/main/operator-store.js';
-import { SEL, BSC, XLAYER, CHUNK_BYTES, OPERATOR_TTL } from '../src/main/config.js';
+import { SEL, BSC, XLAYER, CHUNK_BYTES, OPERATOR_TTL, MAX_GAS_PRICE } from '../src/main/config.js';
 import { hexToBytes, bytesToHex, decodeResult } from '../src/main/abi.js';
 import { keccak256 } from '../src/main/keccak.js';
 import { RpcError } from '../src/main/rpc.js';
@@ -199,6 +199,7 @@ function fakeChain({ clock, store, opened = true, chainId = BSC.chainId }) {
       if (tx.nonce > nonce) throw new RpcError('nonce too high', -32000);
       if (c.bal(from) < tx.gas * tx.gasPrice + tx.value) throw new RpcError('insufficient funds for gas * price + value', -32000);
       const item = { kind: 'op', hash, tx, from };
+      c.lastOp = item;
       // drop(tx)：节点收下了却永远不会打包（比如 X Layer 的 L1 数据费不够），只返回哈希
       if (c.hooks.drop?.(tx)) return hash;
       if (c.holdOps) c.queue.push(item);
@@ -1275,5 +1276,58 @@ test('电路换了持有人、上一位持有人的交易还没确认：提示�
     s.store.setOwnerPending(BSC.chainId, CONTAINER, { kind: 'fund', hash: '0x' + 'e'.repeat(64), at: T0, nonce: 0n });
     await assert.rejects(s.p.run(await s.p.inspect({ target })), /上一位持有人的交易还没确认，可以稍后再试/);
     assert.equal(s.store.get(BSC.chainId, CONTAINER).owner, lower(OLD));
+  } finally { s.done(); }
+});
+
+test('重签退款要压过旧的那笔：节点单价没变时 gasPrice 提高 12.5%，哈希不同', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OWNER, 10n ** 15n);
+    // 第一笔永远不打包，节点单价不变
+    let first = null;
+    s.chain.hooks.drop = (tx) => {
+      if (tx.data !== '0x') return false;
+      first ??= tx;
+      return tx.gasPrice === first.gasPrice;
+    };
+    const r = await s.p.refund({ chainId: BSC.chainId, container: CONTAINER });
+    const [back] = refunds(s.chain);
+    const bumped = PRICE * 1125n / 1000n;
+    assert.equal(first.gasPrice, PRICE);
+    assert.equal(back.tx.gasPrice, bumped);
+    assert.notEqual(back.hash, hashOf(s.chain.sent.find((raw) => decodeRaw(raw).gasPrice === PRICE)));
+    assert.deepEqual(r, { refunded: 10n ** 15n - 21000n * bumped, dust: false });
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
+test('重签退款：单价已经在上限，没法再压过旧的那笔：报错并保留 pending', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OWNER, 10n ** 15n);
+    s.chain.price = MAX_GAS_PRICE;
+    s.chain.hooks.drop = (tx) => tx.data === '0x';
+    await assert.rejects(s.p.refund({ chainId: BSC.chainId, container: CONTAINER }), /退款交易一直没有打包，Gas 单价已到上限/);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER).pending.kind, 'refund');
+  } finally { s.done(); }
+});
+
+test('重签之后旧版本上链：按旧版本的金额报退款，不报状态异常', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OWNER, 10n ** 15n);
+    let old = null;
+    s.chain.hooks.drop = (tx) => {
+      if (tx.data !== '0x') return false;
+      if (!old) { old = s.chain.lastOp; return true; }
+      // 重签的那笔还没打包时，旧的那笔先上链了
+      if (s.chain.lastOp.hash !== old.hash && !s.chain.receipts.has(old.hash)) s.chain.mineItem(old);
+      return true;
+    };
+    const r = await s.p.refund({ chainId: BSC.chainId, container: CONTAINER });
+    assert.deepEqual(r, { refunded: old.tx.value, dust: false });
+    assert.equal(refunds(s.chain).length, 1);
+    assert.equal(refunds(s.chain)[0].hash, old.hash);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
   } finally { s.done(); }
 });

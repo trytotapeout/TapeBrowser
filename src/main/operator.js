@@ -22,11 +22,25 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
   const address = rec.address;
   const op = Object.freeze({ address, owner: rec.owner, container: rec.container });
 
-  /** 有回执：先记下 nonce 已用，再清除 pending */
-  function confirm(p, r) {
+  /**
+   * 有回执：先记下 nonce 已用，再清除 pending。v 是上链的那个版本 { hash, value }
+   * （重签过的退款可能是被替换掉的旧版本上了链）；value 是退款金额，上传没有
+   */
+  function confirm(p, v, r) {
     store.setLastNonce(chainId, container, p.nonce);
     store.clearPending(chainId, container);
-    return { hash: p.hash, status: r.status, gasUsed: r.gasUsed, effectiveGasPrice: r.effectiveGasPrice, blockNumber: r.blockNumber };
+    const out = { hash: v.hash, status: r.status, gasUsed: r.gasUsed, effectiveGasPrice: r.effectiveGasPrice, blockNumber: r.blockNumber };
+    if (v.value !== undefined) out.value = v.value;
+    return out;
+  }
+
+  /** 查 pending 每个版本（当前的和被替换掉的）的回执；有一个上链了就确认它，否则返回 null */
+  async function findReceipt(p) {
+    for (const v of [{ hash: p.hash, value: p.value }, ...(p.prior ?? [])]) {
+      const r = await chain.receipt(v.hash);
+      if (r) return confirm(p, v, r);
+    }
+    return null;
   }
 
   /**
@@ -37,12 +51,12 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
    */
   async function check(p, pollMs) {
     const { latest } = await chain.nonceOf(address);
-    let r = await chain.receipt(p.hash);
-    if (r) return confirm(p, r);
+    let done = await findReceipt(p);
+    if (done) return done;
     if (latest <= p.nonce) return null;
     await sleep(pollMs);
-    r = await chain.receipt(p.hash);
-    if (r) return confirm(p, r);
+    done = await findReceipt(p);
+    if (done) return done;
     if ((await chain.nonceOf(address)).latest <= p.nonce) return null;
     // 这个 nonce 不管被谁用掉都不能再用了
     store.setLastNonce(chainId, container, p.nonce);

@@ -12,7 +12,9 @@
 //              （gasPrice 是签名用的单价，回执没有 effectiveGasPrice 时按它算花费；旧记录没有）
 //              （value 是退款的金额：崩溃后再确认时照样能报出退了多少）
 //              已有 pending 时 setPending 拒绝，要先 clearPending；
-//              只有退款可以用 replacePending 换成同一个 nonce 的另一笔退款（重签，见 operator.resignRefund）
+//              只有退款可以用 replacePending 换成同一个 nonce 的另一笔退款（重签，见 operator.resignRefund）；
+//              被替换的版本记在 prior: [{ hash, value }]（旧的在前，最多 PRIOR_MAX 个，value 存十进制字符串）：
+//              它们也可能上链，确认时要一起查
 //   ownerPending  null，或持有人已经发出、还没确认的一笔交易 { kind: 'open' | 'grant' | 'fund', hash, at, nonce }
 //              下次发布先等它确认，不会再发一次（重复交开通费、重复充值）；旧记录没有这个字段，按 null 处理
 //              nonce 是发出前读到的持有人 latest nonce（十进制字符串）：它被别的交易用掉，说明这笔在钱包里被加速或取消了。
@@ -36,6 +38,7 @@ const ADDR = /^0x[0-9a-fA-F]{40}$/;
 const FILE = /^([1-9][0-9]*)-(0x[0-9a-f]{40})\.json$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 const OWNER_KINDS = ['open', 'grant', 'fund'];
+const PRIOR_MAX = 3;
 const DECRYPT_FAILED = '临时钱包无法解密（系统钥匙串可能已重置）';
 
 function chainOf(chainId) {
@@ -101,6 +104,7 @@ function publicView(rec) {
     r.pending = { ...rec.pending, nonce: BigInt(rec.pending.nonce) };
     if (rec.pending.gasPrice != null) r.pending.gasPrice = BigInt(rec.pending.gasPrice);
     if (rec.pending.value != null) r.pending.value = BigInt(rec.pending.value);
+    if (rec.pending.prior) r.pending.prior = rec.pending.prior.map((x) => ({ hash: x.hash, value: BigInt(x.value) }));
   }
   r.ownerPending = rec.ownerPending
     ? { ...rec.ownerPending, nonce: rec.ownerPending.nonce == null ? null : BigInt(rec.ownerPending.nonce) }
@@ -117,7 +121,9 @@ function looksValid(rec) {
     && (rec.minBlock == null || /^[0-9]+$/.test(rec.minBlock))
     && (rec.pending == null || (typeof rec.pending === 'object' && /^[0-9]+$/.test(rec.pending.nonce)
       && (rec.pending.gasPrice == null || /^[0-9]+$/.test(rec.pending.gasPrice))
-      && (rec.pending.value == null || /^[0-9]+$/.test(rec.pending.value))))
+      && (rec.pending.value == null || /^[0-9]+$/.test(rec.pending.value))
+      && (rec.pending.prior == null || (Array.isArray(rec.pending.prior)
+        && rec.pending.prior.every((x) => typeof x?.hash === 'string' && /^[0-9]+$/.test(x.value))))))
     && ownerPendingOk(rec.ownerPending);
 }
 
@@ -245,7 +251,9 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
         if (!cur || cur.kind !== 'refund' || p.kind !== 'refund' || cur.nonce !== p.nonce) {
           throw new Error('临时钱包：只能用同一个 nonce 的退款替换退款');
         }
-        rec.pending = p;
+        // prior 只由这里维护：在原来的 prior 后面接上被替换的这一笔，只留最近的几个
+        const prior = [...(cur.prior ?? []), { hash: cur.hash, value: cur.value ?? '0' }].slice(-PRIOR_MAX);
+        rec.pending = { ...p, prior };
       });
     },
 

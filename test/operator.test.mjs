@@ -487,3 +487,20 @@ test('resignRefund：pending 是上传或没有 pending 时拒绝', async () => 
     assert.equal(chain.sent.length, sent);
   } finally { done(); }
 });
+
+test('重签之后旧版本上链：settle 当成确认，返回旧版本的哈希和金额，不报状态异常', async () => {
+  const { store, chain, op, done } = setup({ latest: 2n });
+  try {
+    const o = op();
+    const first = await o.send({ ...refundTx(OWNER, 1000n), gas: 21000n, gasPrice: 50000000n }, { kind: 'refund' });
+    await o.resignRefund({ value: 900n, gas: 21000n, gasPrice: 60000000n });
+    assert.deepEqual(store.get(BSC.chainId, C).pending.prior, [{ hash: first, value: 1000n }]);
+    chain.mine(first);
+    const r = await o.settle();
+    assert.equal(r.hash, first);
+    assert.equal(r.value, 1000n);
+    assert.equal(r.status, 1);
+    assert.equal(store.get(BSC.chainId, C).pending, null);
+    assert.equal(store.get(BSC.chainId, C).lastNonce, 2n);
+  } finally { done(); }
+});
