@@ -240,7 +240,6 @@ test('safeBlock 节点不支持 safe 时返回 null', async () => {
     new RpcError('invalid block tag', -32000),
     new RpcError('whatever', -32602),
     new RpcError('the method eth_getBlockByNumber does not exist', -32601),
-    new RpcError('safe block not found', -32000),
     new RpcError('tag not supported', -32000),
   ];
   for (const err of cases) {
@@ -256,4 +255,9 @@ test('safeBlock 其他节点错误照常抛出', async () => {
   await assert.rejects(createChain(rpc, NET).safeBlock(), /RPC timeout/);
   const http = fakeRpc({ handlers: { eth_getBlockByNumber: () => { throw new RpcError('HTTP 502', -32603); } } });
   await assert.rejects(createChain(http, NET).safeBlock(), /HTTP 502/);
+  // 网络故障被 rpc.js 包成 -32603，消息里带 invalid 也不能当成不支持 safe
+  const json = fakeRpc({ handlers: { eth_getBlockByNumber: () => { throw new RpcError('invalid json response body', -32603); } } });
+  await assert.rejects(createChain(json, NET).safeBlock(), /invalid json response body/);
+  const notFound = fakeRpc({ handlers: { eth_getBlockByNumber: () => { throw new RpcError('safe block not found', -32000); } } });
+  await assert.rejects(createChain(notFound, NET).safeBlock(), /safe block not found/);
 });

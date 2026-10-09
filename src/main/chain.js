@@ -350,11 +350,17 @@ export function createChain(rpc, net = BSC) {
     }
   }
 
+  /** 节点是否在说「不支持 safe 标签」。-32603 是 rpc.js 包装的网络 / 节点故障，消息里带 invalid 也不算 */
+  function unsupportedTag(e) {
+    if (!(e instanceof RpcError) || e.code === -32603) return false;
+    return e.code === -32601 || e.code === -32602 || /invalid|unsupported|not supported|unknown block/i.test(e.message);
+  }
+
   /** safe 区块号（BigInt）；节点不支持 safe 标签时为 null，超时之类的其他节点错误照常抛出 */
   async function safeBlock() {
     let b;
     try { b = await rpc('eth_getBlockByNumber', ['safe', false]); } catch (e) {
-      if (e instanceof RpcError && (e.code === -32601 || e.code === -32602 || /invalid|unsupported|not supported|unknown block|safe/i.test(e.message))) return null;
+      if (unsupportedTag(e)) return null;
       throw e;
     }
     return b?.number ? BigInt(b.number) : null;
