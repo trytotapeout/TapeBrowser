@@ -105,6 +105,16 @@ export const SIG = Object.freeze({
   readRange: 'readRange(address,string,uint256,uint256)',
   pathCount: 'pathCount(address)',
   pathsRange: 'pathsRange(address,uint256,uint256)',
+  // 写接口（SPEC 附录 B.5）与开通容器（id.tapeout.link）
+  putFile: 'putFile(address,string,string,bytes32,bytes)',
+  appendChunk: 'appendChunk(address,string,uint256,bytes)',
+  setOperator: 'setOperator(address,address,uint256)',
+  canEdit: 'canEdit(address,address)',
+  operatorOf: 'operatorOf(address)',
+  operatorUntil: 'operatorUntil(address)',
+  open: 'open(address,uint256)',
+  openFee: 'FEE()',
+  isDeployed: 'isDeployed(address,uint256)',
 });
 
 export const SEL = Object.freeze({
@@ -120,6 +130,15 @@ export const SEL = Object.freeze({
   readRange: '0x15a4cae2',
   pathCount: '0xb554782b',
   pathsRange: '0xb056072c',
+  putFile: '0xfab2ed82',
+  appendChunk: '0xe2b51347',
+  setOperator: '0xc88cb026',
+  canEdit: '0xbcfe519c',
+  operatorOf: '0x636f35d3',
+  operatorUntil: '0xc85cf62b',
+  open: '0x0a0e5c9d',
+  openFee: '0xc57981b5',
+  isDeployed: '0xf13906b8',
 });
 
 // SiteRegistry 单文件上限：350 块 × 24,000 字节
@@ -132,3 +151,10 @@ export const PATHS_PAGE = 200;
 export const MULTICALL_BATCH = 400;
 // 扫描钱包时单个处理器最多扫多少个编号
 export const MAX_IDS_PER_CPU = 50000;
+// 发布到容器（和官方发布页一致）：操作员授权 6 小时；Gas 单价超过 0.1 gwei 就停，防止节点报出离谱的价格
+export const OPERATOR_TTL = 21600;
+export const MAX_GAS_PRICE = 100000000n;
+// 单笔上传交易的 gas 上限：一块 24 KB 写成合约字节码约 500 万 gas，留足余量
+export const MAX_UPLOAD_GAS = 15000000n;
+// 第一版只开放这两条链（Base 上没有人实测过）
+export const PUBLISH_NETWORKS = Object.freeze(['bnb', 'xlayer']);
