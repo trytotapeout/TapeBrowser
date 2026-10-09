@@ -446,3 +446,44 @@ test('store 拒绝旧 nonce 时 operator 不广播', async () => {
     assert.equal(realGet(BSC.chainId, C).pending, null);
   } finally { done(); }
 });
+
+test('退款的 pending 记下金额', async () => {
+  const { store, op, done } = setup({ latest: 2n });
+  try {
+    await op().send({ ...refundTx(OWNER, 1000n), gas: 21000n, gasPrice: 50000000n }, { kind: 'refund' });
+    assert.equal(store.get(BSC.chainId, C).pending.value, 1000n);
+  } finally { done(); }
+});
+
+test('resignRefund：同一个 nonce 重签退款，替换 pending 后广播；超时错误带 PENDING_TIMEOUT', async () => {
+  const { store, chain, op, done } = setup({ latest: 2n });
+  try {
+    const o = op();
+    const first = await o.send({ ...refundTx(OWNER, 1000n), gas: 21000n, gasPrice: 50000000n }, { kind: 'refund' });
+    await assert.rejects(o.settle({ timeoutMs: 0 }), (e) => e.code === 'PENDING_TIMEOUT');
+    const hash = await o.resignRefund({ value: 900n, gas: 21000n, gasPrice: 60000000n });
+    assert.notEqual(hash, first);
+    const d = decodeRaw(chain.sent.at(-1));
+    assert.deepEqual([d.nonce, d.to, d.value, d.data, d.gasPrice], [2n, OWNER, 900n, '0x', 60000000n]);
+    const p = store.get(BSC.chainId, C).pending;
+    assert.deepEqual([p.hash, p.nonce, p.value, p.gasPrice, p.kind], [hash, 2n, 900n, 60000000n, 'refund']);
+    // 白名单照样检查：金额 0 拒绝，pending 不变
+    await assert.rejects(o.resignRefund({ value: 0n, gas: 21000n, gasPrice: 60000000n }), /不在允许范围内/);
+    assert.equal(store.get(BSC.chainId, C).pending.hash, hash);
+    chain.mine(hash);
+    assert.equal((await o.settle()).hash, hash);
+  } finally { done(); }
+});
+
+test('resignRefund：pending 是上传或没有 pending 时拒绝', async () => {
+  const { store, chain, op, done } = setup();
+  try {
+    const o = op();
+    await assert.rejects(o.resignRefund({ value: 900n, gas: 21000n, gasPrice: 50000000n }), /只有退款交易可以重签/);
+    const hash = await o.send(upload(0), { kind: 'upload' });
+    const sent = chain.sent.length;
+    await assert.rejects(o.resignRefund({ value: 900n, gas: 21000n, gasPrice: 50000000n }), /只有退款交易可以重签/);
+    assert.equal(store.get(BSC.chainId, C).pending.hash, hash);
+    assert.equal(chain.sent.length, sent);
+  } finally { done(); }
+});

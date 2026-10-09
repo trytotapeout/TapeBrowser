@@ -8,9 +8,11 @@
 //   address    临时钱包地址（小写），keyOf 时用它核对解出来的私钥，发现文件被改过
 //   key        encrypt(私钥 hex) 的 base64；明文私钥不落盘、不出现在返回值和错误信息里
 //   pending    null，或最后一笔已发出、还没确认的交易
-//              { raw, hash, kind: 'upload' | 'refund', path?, index?, nonce, gasPrice? }，nonce、gasPrice 存十进制字符串
+//              { raw, hash, kind: 'upload' | 'refund', path?, index?, nonce, gasPrice?, value? }，nonce、gasPrice、value 存十进制字符串
 //              （gasPrice 是签名用的单价，回执没有 effectiveGasPrice 时按它算花费；旧记录没有）
-//              已有 pending 时 setPending 拒绝，要先 clearPending
+//              （value 是退款的金额：崩溃后再确认时照样能报出退了多少）
+//              已有 pending 时 setPending 拒绝，要先 clearPending；
+//              只有退款可以用 replacePending 换成同一个 nonce 的另一笔退款（重签，见 operator.resignRefund）
 //   ownerPending  null，或持有人已经发出、还没确认的一笔交易 { kind: 'open' | 'grant' | 'fund', hash, at, nonce }
 //              下次发布先等它确认，不会再发一次（重复交开通费、重复充值）；旧记录没有这个字段，按 null 处理
 //              nonce 是发出前读到的持有人 latest nonce（十进制字符串）：它被别的交易用掉，说明这笔在钱包里被加速或取消了。
@@ -69,6 +71,10 @@ function pendingToDisk(p) {
     if (typeof p.gasPrice !== 'bigint' || p.gasPrice < 0n) throw new Error('临时钱包：待确认交易的 Gas 单价不正确');
     out.gasPrice = p.gasPrice.toString();
   }
+  if (p.value !== undefined) {
+    if (typeof p.value !== 'bigint' || p.value < 0n) throw new Error('临时钱包：待确认交易的金额不正确');
+    out.value = p.value.toString();
+  }
   return out;
 }
 
@@ -94,6 +100,7 @@ function publicView(rec) {
   if (rec.pending) {
     r.pending = { ...rec.pending, nonce: BigInt(rec.pending.nonce) };
     if (rec.pending.gasPrice != null) r.pending.gasPrice = BigInt(rec.pending.gasPrice);
+    if (rec.pending.value != null) r.pending.value = BigInt(rec.pending.value);
   }
   r.ownerPending = rec.ownerPending
     ? { ...rec.ownerPending, nonce: rec.ownerPending.nonce == null ? null : BigInt(rec.ownerPending.nonce) }
@@ -109,7 +116,8 @@ function looksValid(rec) {
     && (rec.lastNonce == null || /^[0-9]+$/.test(rec.lastNonce))
     && (rec.minBlock == null || /^[0-9]+$/.test(rec.minBlock))
     && (rec.pending == null || (typeof rec.pending === 'object' && /^[0-9]+$/.test(rec.pending.nonce)
-      && (rec.pending.gasPrice == null || /^[0-9]+$/.test(rec.pending.gasPrice))))
+      && (rec.pending.gasPrice == null || /^[0-9]+$/.test(rec.pending.gasPrice))
+      && (rec.pending.value == null || /^[0-9]+$/.test(rec.pending.value))))
     && ownerPendingOk(rec.ownerPending);
 }
 
@@ -221,6 +229,21 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
         // 不比已确认的 nonce 大：节点落后读到了旧 nonce，签出来的交易会冲掉已确认的
         if (rec.lastNonce != null && BigInt(p.nonce) <= BigInt(rec.lastNonce)) {
           throw new Error('交易的 nonce 不比已确认的大，节点可能落后');
+        }
+        rec.pending = p;
+      });
+    },
+
+    /**
+     * 用同一个 nonce 的另一笔退款替换在等确认的退款（一次写盘，不会出现没有 pending 的空档）。
+     * 每个版本都转给同一个持有人、只有一笔能上链，所以替换是安全的；上传不能替换
+     */
+    replacePending(chainId, container, pending) {
+      const p = pendingToDisk(pending);
+      update(chainId, container, (rec) => {
+        const cur = rec.pending;
+        if (!cur || cur.kind !== 'refund' || p.kind !== 'refund' || cur.nonce !== p.nonce) {
+          throw new Error('临时钱包：只能用同一个 nonce 的退款替换退款');
         }
         rec.pending = p;
       });

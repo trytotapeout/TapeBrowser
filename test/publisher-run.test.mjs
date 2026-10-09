@@ -199,6 +199,8 @@ function fakeChain({ clock, store, opened = true, chainId = BSC.chainId }) {
       if (tx.nonce > nonce) throw new RpcError('nonce too high', -32000);
       if (c.bal(from) < tx.gas * tx.gasPrice + tx.value) throw new RpcError('insufficient funds for gas * price + value', -32000);
       const item = { kind: 'op', hash, tx, from };
+      // drop(tx)：节点收下了却永远不会打包（比如 X Layer 的 L1 数据费不够），只返回哈希
+      if (c.hooks.drop?.(tx)) return hash;
       if (c.holdOps) c.queue.push(item);
       else c.mineItem(item);
       // 节点可能对已经上链的交易报 nonce too low
@@ -232,7 +234,7 @@ function fakeChain({ clock, store, opened = true, chainId = BSC.chainId }) {
       const v = c.hooks.pinBlock?.();
       return v !== undefined ? v : '0x' + (c.head - c.lag).toString(16);
     },
-    async gasPrice() { return PRICE; },
+    async gasPrice() { return c.price ?? PRICE; },
     async openFee() { return FEE; },
     async circuitInfos(list, block) {
       c.calls.push(['circuitInfos', block]);
@@ -1152,5 +1154,126 @@ test('refund 和 run 共用容器锁', async () => {
     const running = s.p.run(await s.p.inspect({ target }));
     await assert.rejects(s.p.refund({ chainId: BSC.chainId, container: CONTAINER }), /这个容器正在发布/);
     assert.equal((await running).stage, 'done');
+  } finally { s.done(); }
+});
+
+// ---- 退款不会把钱卡住 ----
+
+/** 节点的最低单价涨到 2 × PRICE：按 PRICE 签的退款永远不会打包（重发也一样），按新单价重签的才会 */
+function dropCheap(s) {
+  s.chain.hooks.drop = (tx) => {
+    if (tx.data !== '0x' || tx.gasPrice >= 2n * PRICE) return false;
+    s.chain.price = 2n * PRICE;
+    return true;
+  };
+}
+
+test('单独 refund：持有人钱包里还有未确认的交易（可能是一笔充值）就不退，记录保留', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OWNER, 10n ** 15n);
+    s.chain.owner.pending = s.chain.owner.latest + 1n;
+    await assert.rejects(s.p.refund({ chainId: BSC.chainId, container: CONTAINER }), /持有人钱包里还有一笔未确认的交易，等它确认后再退款/);
+    assert.ok(s.store.get(BSC.chainId, CONTAINER));
+    assert.equal(s.chain.mined.length, 0);
+  } finally { s.done(); }
+});
+
+test('单独 refund：余额不早于 pinBlock 读；刚确认的充值在 rec.minBlock 上看不到也不会删记录', async () => {
+  const s = setup();
+  try {
+    const rec = oldWallet(s, OWNER, 0n);
+    s.store.setMinBlock(BSC.chainId, CONTAINER, s.chain.head);
+    // 充值刚刚上链：在 rec.minBlock 上余额还是 0，在 latest（落后一块的节点也能看到的块）上有钱
+    s.chain.mineTx('0x' + 'f'.repeat(64), OWNER, { from: OWNER, to: rec.address, value: 10n ** 15n, data: '0x' }, PRICE);
+    s.chain.mineEmpty(1);
+    s.chain.lag = 1n;
+    const pinned = s.chain.head - 1n;
+    const before = s.chain.bal(OWNER);
+    const r = await s.p.refund({ chainId: BSC.chainId, container: CONTAINER });
+    assert.deepEqual(r, { refunded: 10n ** 15n - 21000n * PRICE, dust: false });
+    const reads = s.chain.calls.filter(([n]) => n === 'nativeBalance');
+    assert.ok(reads.length && BigInt(reads[0][1]) >= pinned);
+    assert.equal(s.chain.bal(OWNER) - before, r.refunded);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
+test('退款交易节点一直不打包：同一个 nonce、按当前单价重算金额重签，确认后删除记录', async () => {
+  const s = setup();
+  try {
+    const rec = oldWallet(s, OWNER, 10n ** 15n);
+    dropCheap(s);
+    const r = await s.p.refund({ chainId: BSC.chainId, container: CONTAINER });
+    const raws = s.chain.sent.map(decodeRaw).filter((t) => t.data === '0x');
+    const [first, second] = [raws[0], raws.at(-1)];
+    assert.equal(first.nonce, second.nonce);
+    assert.ok(second.value < first.value);
+    assert.equal(refunds(s.chain).length, 1);
+    assert.equal(refunds(s.chain)[0].tx.value, second.value);
+    assert.deepEqual(r, { refunded: second.value, dust: false });
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+    assert.equal(s.chain.bal(rec.address), 0n);
+  } finally { s.done(); }
+});
+
+test('X Layer 重签退款：多留 20% 手续费不退', async () => {
+  const s = setup({ net: XLAYER });
+  try {
+    const rec = s.store.create({ chainId: XLAYER.chainId, container: CONTAINER, owner: OWNER });
+    s.chain.balances.set(rec.address, 10n ** 15n);
+    dropCheap(s);
+    const r = await s.p.refund({ chainId: XLAYER.chainId, container: CONTAINER });
+    assert.deepEqual(r, { refunded: 10n ** 15n - 21000n * 2n * PRICE * 12n / 10n, dust: false });
+    // 留下的那一点在钱包里，记录保留
+    assert.ok(s.store.get(XLAYER.chainId, CONTAINER));
+  } finally { s.done(); }
+});
+
+test('上次崩溃留下的退款 pending 在开始时确认：refunded 是它的金额', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OWNER, 10n ** 15n);
+    s.chain.hooks.drop = (tx) => tx.data === '0x';
+    s.chain.hooks.onSleep = () => { throw new Error('crash'); };
+    await assert.rejects(s.p.refund({ chainId: BSC.chainId, container: CONTAINER }), /crash/);
+    const p = s.store.get(BSC.chainId, CONTAINER).pending;
+    assert.equal(p.kind, 'refund');
+    // 重启后节点把它打包了
+    s.chain.hooks = {};
+    s.chain.mineItem({ kind: 'op', hash: p.hash, tx: decodeRaw(s.chain.sent.at(-1)), from: s.chain.opAddr() });
+    const r = await s.make().refund({ chainId: BSC.chainId, container: CONTAINER });
+    assert.deepEqual(r, { refunded: p.value, dust: false });
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
+test('核验时节点出错：照样退款，再抛出原来的错误', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    s.chain.readVerified = async () => { throw new Error('节点超时'); };
+    await assert.rejects(s.p.run(await s.p.inspect({ target })), /节点超时/);
+    assert.equal(refunds(s.chain).length, 1);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
+test('核验出错、退款也出错：抛出核验的错误，退款的错误放在 cause 里', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    s.chain.readVerified = async () => { throw new Error('节点超时'); };
+    s.chain.hooks.revert = (tx) => tx.data === '0x';
+    await assert.rejects(s.p.run(await s.p.inspect({ target })), (e) => /节点超时/.test(e.message) && /退款失败/.test(e.cause?.message));
+    assert.ok(s.store.get(BSC.chainId, CONTAINER));
+  } finally { s.done(); }
+});
+
+test('电路换了持有人、上一位持有人的交易还没确认：提示上一位持有人', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    oldWallet(s, OLD, 10n ** 15n);
+    s.store.setOwnerPending(BSC.chainId, CONTAINER, { kind: 'fund', hash: '0x' + 'e'.repeat(64), at: T0, nonce: 0n });
+    await assert.rejects(s.p.run(await s.p.inspect({ target })), /上一位持有人的交易还没确认，可以稍后再试/);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER).owner, lower(OLD));
   } finally { s.done(); }
 });

@@ -411,3 +411,36 @@ test('ownerPending.nonce 落盘为十进制字符串；旧记录没有 nonce 照
     assert.throws(() => make().get(CHAIN, C), /记录文件已损坏/);
   } finally { done(); }
 });
+
+test('退款 pending 可以带 value（十进制落盘，读出 bigint）', () => {
+  const { dir, store, make, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    const p = { raw: '0x01', hash: '0x' + 'cd'.repeat(32), kind: 'refund', nonce: 3n, gasPrice: 5n, value: 1000n };
+    store.setPending(CHAIN, C, p);
+    assert.deepEqual(make().get(CHAIN, C).pending, p);
+    assert.match(allFiles(dir), /"value": "1000"/);
+    store.clearPending(CHAIN, C);
+    assert.throws(() => store.setPending(CHAIN, C, { ...p, value: -1n }));
+  } finally { done(); }
+});
+
+test('replacePending：只能用同一个 nonce 的退款替换退款', () => {
+  const { store, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    const refund = { raw: '0x01', hash: '0x' + 'cd'.repeat(32), kind: 'refund', nonce: 3n, gasPrice: 5n, value: 1000n };
+    const next = { ...refund, raw: '0x02', hash: '0x' + 'ef'.repeat(32), value: 900n };
+    // 没有 pending
+    assert.throws(() => store.replacePending(CHAIN, C, next), /只能用同一个 nonce 的退款替换退款/);
+    store.setPending(CHAIN, C, { raw: '0x03', hash: '0x' + 'aa'.repeat(32), kind: 'upload', path: 'a', index: 0, nonce: 3n });
+    assert.throws(() => store.replacePending(CHAIN, C, next), /只能用同一个 nonce 的退款替换退款/);
+    store.clearPending(CHAIN, C);
+    store.setPending(CHAIN, C, refund);
+    assert.throws(() => store.replacePending(CHAIN, C, { ...next, nonce: 4n }), /只能用同一个 nonce 的退款替换退款/);
+    assert.throws(() => store.replacePending(CHAIN, C, { ...next, kind: 'upload' }), /只能用同一个 nonce 的退款替换退款/);
+    assert.equal(store.get(CHAIN, C).pending.hash, refund.hash);
+    store.replacePending(CHAIN, C, next);
+    assert.deepEqual(store.get(CHAIN, C).pending, next);
+  } finally { done(); }
+});

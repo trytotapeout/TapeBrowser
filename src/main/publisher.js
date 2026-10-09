@@ -84,6 +84,9 @@ const CHECK_EVERY = 10;
 const TRANSFER_GAS = 21000n;
 const SAFE_TIMEOUT_MS = 600000;
 const SAFE_POLL_MS = 3000;
+// 退款一直不打包时最多重签 2 次；X Layer 重签时多留 20% 手续费不退（可能有 L1 数据费，没有实测过）
+const MAX_RESIGNS = 2;
+const RESIGN_MARGIN = { xlayer: 20n };
 
 // 正在执行 run / refund 的（chainId, 容器）。主进程只有一个实例，内存里互斥就够了
 const running = new Map();
@@ -247,10 +250,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     // reused 按开始上传时的计划算：传完以后再看，这次传的文件也都成了复用
     const { reused } = cur.plan;
     await uploadAll(ctx, cur, operator);
-    const check = await verifyAll(ctx);
-    // 核验没通过也先把钱退回持有人，再报错
-    const { refunded, dust } = await refundOperator(ctx, operator);
-    if (check.bad) throw new Error(`核验失败：${check.bad}`);
+    const { check, refunded, dust } = await verifyThenRefund(ctx, operator);
     return {
       stage: 'done', container: ctx.container, label: ctx.target.label,
       uploaded: ctx.uploaded, reused, spent: ctx.spent, refunded, dust,
@@ -378,7 +378,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     const create = () => store.create({ chainId: net.chainId, container: ctx.container, owner: ctx.owner });
     try { create(); } catch (e) {
       if (e?.code !== 'OPERATOR_OWNER_MISMATCH') throw e;
-      const { dust } = await refundRecord(e.old);
+      const { dust } = await refundRecord(e.old, { previous: true });
       if (dust) throw new Error('旧持有人的临时钱包余额不够付退款手续费，已保留记录');
       if (store.get(net.chainId, ctx.container)) throw new Error('旧持有人的临时钱包还没退干净，请稍后再试');
       create();
@@ -549,6 +549,27 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     return { verified: true, reason: null, safeSkipped, bad: null };
   }
 
+  /**
+   * 核验，然后不管核验结果如何都退款：内容对不上、节点出错都先把钱退回持有人，再抛出核验的错误。
+   * 这时退款也出错的话，退款的错误放进核验错误的 cause（已有 cause 时只通过 progress 报告），不盖掉原来的错误
+   */
+  async function verifyThenRefund(ctx, operator) {
+    let check = null;
+    let failure = null;
+    try {
+      check = await verifyAll(ctx);
+      if (check.bad) failure = new Error(`核验失败：${check.bad}`);
+    } catch (e) { failure = e; }
+    let result;
+    try { result = await refundOperator(ctx, operator); } catch (re) {
+      if (!failure) throw re;
+      if (failure.cause === undefined) failure.cause = re;
+      ctx.progress({ stage: 'refund', error: String(re?.message || re) });
+    }
+    if (failure) throw failure;
+    return { check, ...result };
+  }
+
   /** 退款的 gas：持有人是普通地址用 21000；是合约（有代码）用 estimateGas × 1.25，不超过 MAX_UPLOAD_GAS */
   async function refundGas(ctx, operator, balance, gasPrice) {
     const code = (await chain.hasCode([ctx.owner], hexBlock(ctx.minBlock))).get(lower(ctx.owner));
@@ -561,47 +582,104 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   }
 
   /**
-   * 第 7 步：临时钱包的余额减去 gas × gasPrice 转回 ctx.owner。不撤销授权（授权会自己到期）。
-   * 先处理上次留下的 pending；余额在 minBlock 上读。可退金额 ≤ 0 时保留记录，返回 dust: true；
-   * 回执 status 0 抛出「退款失败」并保留记录；确认后在回执区块上余额为 0 才删除记录。返回 { refunded, dust }
+   * 按当前单价算退款：gas、gasPrice，金额 = 余额 − gas × gasPrice × (100 + margin)%。
+   * margin 是多留着不退的手续费百分比
    */
-  async function refundOperator(ctx, operator) {
-    const left = await operator.settle();
-    if (left) confirmed(ctx, left);
-    const balance = await operator.balance(hexBlock(ctx.minBlock));
-    if (balance === 0n) {
-      store.remove(net.chainId, ctx.container);
-      return { refunded: 0n, dust: false };
-    }
+  async function refundQuote(ctx, operator, balance, margin = 0n) {
     const gasPrice = await currentGasPrice();
     const gas = await refundGas(ctx, operator, balance, gasPrice);
-    const amount = balance - gas * gasPrice;
-    if (amount <= 0n) return { refunded: 0n, dust: true };
+    return { gas, gasPrice, amount: balance - gas * gasPrice * (100n + margin) / 100n };
+  }
 
-    const hash = await operator.send({ ...refundTx(ctx.owner, amount), gas, gasPrice }, { kind: 'refund' });
-    ctx.progress({ stage: 'refund', hash });
-    const r = (await operator.settle())
-      ?? (await waitReceipt(hash, { timeoutMs: 120000, message: '退款交易还没确认，可以稍后再退' }));
+  /**
+   * 余额为 0 时删除记录，但只在持有人没有在途交易的时候：一笔已经广播、还没记下或还看不到的充值，
+   * 删掉记录以后到账就取不出来了。返回是否删了
+   */
+  async function removeIfEmpty(ctx, balance) {
+    if (balance !== 0n || store.get(net.chainId, ctx.container)?.ownerPending) return false;
+    const { latest, pending } = await chain.nonceOf(ctx.owner);
+    if (pending > latest) return false;
+    store.remove(net.chainId, ctx.container);
+    return true;
+  }
+
+  /**
+   * 等临时钱包的 pending 确认。是一笔退款、等超时了、nonce 也确实没被用掉（节点收下了却不打包：
+   * 最低单价变了、X Layer 的 L1 数据费），就按当前单价重算金额、用同一个 nonce 重签再等，最多 MAX_RESIGNS 次。
+   * 返回 { receipt, value }：value 是确认的那笔退款的金额（不是退款时为 0n）；没有 pending 时 receipt 为 null
+   */
+  async function settleRefund(ctx, operator) {
+    for (let resigns = 0; ; resigns++) {
+      const p = store.get(net.chainId, ctx.container)?.pending;
+      try {
+        const receipt = await operator.settle();
+        return { receipt, value: p?.kind === 'refund' ? p.value ?? 0n : 0n };
+      } catch (e) {
+        const stuck = store.get(net.chainId, ctx.container)?.pending;
+        if (e?.code !== 'PENDING_TIMEOUT' || stuck?.kind !== 'refund' || resigns >= MAX_RESIGNS) throw e;
+        if ((await chain.nonceOf(operator.address)).latest > stuck.nonce) throw e;
+        // 这笔没有上链：余额还是全部，按现在的单价重算
+        const balance = await operator.balance(hexBlock(ctx.minBlock));
+        const q = await refundQuote(ctx, operator, balance, RESIGN_MARGIN[net.key] ?? 0n);
+        if (q.amount <= 0n) throw new Error('退款交易一直没有打包，余额不够按现在的单价重发');
+        const hash = await operator.resignRefund({ value: q.amount, gas: q.gas, gasPrice: q.gasPrice });
+        ctx.progress({ stage: 'refund', hash, resigned: true });
+      }
+    }
+  }
+
+  /**
+   * 第 7 步：临时钱包的余额减去 gas × gasPrice 转回 ctx.owner。不撤销授权（授权会自己到期）。
+   * 先处理上次留下的 pending：是一笔崩溃前发出的退款，确认了就把它的金额算进 refunded，再看剩下的余额。
+   * 余额在 minBlock 上读。可退金额 ≤ 0 时保留记录，返回 dust: true；回执 status 0 抛出「退款失败」并保留记录；
+   * 确认后在回执区块上余额为 0、持有人也没有在途交易才删除记录。返回 { refunded, dust }
+   */
+  async function refundOperator(ctx, operator) {
+    let refunded = 0n;
+    const left = await settleRefund(ctx, operator);
+    if (left.receipt) {
+      confirmed(ctx, left.receipt);
+      if (left.receipt.status === 1) refunded += left.value;
+    }
+    const balance = await operator.balance(hexBlock(ctx.minBlock));
+    if (balance === 0n) {
+      await removeIfEmpty(ctx, balance);
+      return { refunded, dust: false };
+    }
+    const { gas, gasPrice, amount } = await refundQuote(ctx, operator, balance);
+    if (amount <= 0n) return { refunded, dust: true };
+
+    const sent = await operator.send({ ...refundTx(ctx.owner, amount), gas, gasPrice }, { kind: 'refund' });
+    ctx.progress({ stage: 'refund', hash: sent });
+    // send 遇到 nonceUsed 时已经确认并清掉了 pending，再按哈希等回执
+    const { receipt, value } = await settleRefund(ctx, operator);
+    const r = receipt ?? (await waitReceipt(sent, { timeoutMs: 120000, message: '退款交易还没确认，可以稍后再退' }));
     confirmed(ctx, r);
     if (r.status !== 1) throw new Error('退款失败');
     const after = await operator.balance(hexBlock(BigInt(r.blockNumber)));
-    if (after === 0n) store.remove(net.chainId, ctx.container);
-    return { refunded: amount, dust: false };
+    await removeIfEmpty(ctx, after);
+    return { refunded: refunded + (receipt ? value : amount), dust: false };
   }
 
   /**
    * 按一条记录退款，退给记录里的持有人（电路可能已经转给别人了）。
-   * 先等这个持有人在途的交易（可能是一笔充值，删掉记录以后再到账就取不出来了）；它回执 status 0 不影响退款
+   * 持有人钱包里还有未确认的交易就不退：可能是一笔已经广播、还没记下的充值，删掉记录以后到账就取不出来了。
+   * 再等这个持有人记下的在途交易（它回执 status 0 不影响退款）；余额不早于 pinBlock 读，刚确认的充值也看得到。
+   * previous 为 true 表示退给上一位持有人（电路换了持有人），提示要说清楚是谁的交易
    */
-  async function refundRecord(rec) {
+  async function refundRecord(rec, { previous = false } = {}) {
+    const { latest, pending } = await chain.nonceOf(rec.owner);
+    if (pending > latest) throw new Error('持有人钱包里还有一笔未确认的交易，等它确认后再退款');
     const pinned = BigInt(await chain.pinBlock());
     const ctx = {
       container: rec.container, owner: rec.owner, lastBlock: null, progress: () => {},
       minBlock: rec.minBlock != null && rec.minBlock > pinned ? rec.minBlock : pinned,
     };
     try { await settleOwnerPending(ctx); } catch (e) {
-      // status 0 时记录已经清掉，可以接着退；超时之类还在等，原样抛出
-      if (store.get(net.chainId, ctx.container)?.ownerPending) throw e;
+      // status 0 时记录已经清掉，可以接着退；超时之类还在等
+      if (store.get(net.chainId, ctx.container)?.ownerPending) {
+        throw previous ? new Error('上一位持有人的交易还没确认，可以稍后再试') : e;
+      }
     }
     const operator = createOperator({ store, chain, net, container: rec.container, owner: rec.owner, sleep, now });
     return refundOperator(ctx, operator);

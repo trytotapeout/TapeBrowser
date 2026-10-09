@@ -4,6 +4,8 @@
 //   chain  createChain 的实例：nonceOf / sendRaw / receipt / nativeBalance
 // 一次只允许一笔未确认的交易（pending）：先写盘再广播，崩溃或断网后由 settle 重发同一笔 raw。
 // nonce 取几个节点里的最大值，并且必须比 store 里记的 lastNonce 大，防止节点落后时签出旧 nonce。
+// 退款的 pending 节点永远不打包时（最低单价变了、X Layer 的 L1 数据费），resignRefund 用同一个 nonce 重签，
+// 原子地替换 pending：每个版本都转给同一个持有人，只有一笔能上链。
 // 错误信息和返回值里不会出现私钥。
 
 import { signLegacy, uint } from './eth-tx.js';
@@ -56,7 +58,12 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
     for (;;) {
       const done = await check(p, pollMs);
       if (done) return done;
-      if (now() >= deadline) throw new Error('交易还没确认，可以稍后继续');
+      if (now() >= deadline) {
+        // 带 code：调用方据此判断是「一直没打包」，而不是节点出错
+        const e = new Error('交易还没确认，可以稍后继续');
+        e.code = 'PENDING_TIMEOUT';
+        throw e;
+      }
       // 重发同一笔：节点丢了交易池也能补上；不管返回什么、抛什么都继续轮询
       try { await chain.sendRaw(p.raw); } catch { /* 继续轮询 */ }
       await sleep(pollMs);
@@ -84,6 +91,20 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
     try { return await sendInner(tx, meta); } finally { busy = false; }
   }
 
+  /** 白名单检查后签名；私钥用完立刻清零 */
+  function sign(frozen, kind) {
+    assertOperatorTx(op, net, frozen, { refund: kind === 'refund' });
+    const sk = store.keyOf(chainId, container);
+    try { return signLegacy(sk, frozen); } finally { sk.fill(0); }
+  }
+
+  /** pending 的落盘形式；退款记下金额，崩溃后再确认时能报出退了多少 */
+  function pendingOf({ raw, hash }, frozen, { kind, path, index }) {
+    const p = { raw, hash, kind, path, index, nonce: frozen.nonce, gasPrice: uint('gasPrice', frozen.gasPrice) };
+    if (kind === 'refund') p.value = uint('value', frozen.value);
+    return p;
+  }
+
   async function sendInner(tx, { kind, path, index } = {}) {
     // 先复制，后面的 await 期间调用方改了 tx 也不影响
     const fields = { to: tx.to, value: tx.value, data: tx.data, gas: tx.gas, gasPrice: tx.gasPrice };
@@ -96,14 +117,10 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
     if (lastNonce != null && latest <= lastNonce) throw new Error('节点还没同步到最新区块，请稍后再试');
 
     const frozen = Object.freeze({ ...fields, chainId, nonce: latest });
-    assertOperatorTx(op, net, frozen, { refund: kind === 'refund' });
-
-    let signed;
-    const sk = store.keyOf(chainId, container);
-    try { signed = signLegacy(sk, frozen); } finally { sk.fill(0); }
+    const signed = sign(frozen, kind);
     const { raw, hash } = signed;
 
-    store.setPending(chainId, container, { raw, hash, kind, path, index, nonce: latest, gasPrice: uint('gasPrice', frozen.gasPrice) });
+    store.setPending(chainId, container, pendingOf(signed, frozen, { kind, path, index }));
     // 网络错误原样抛出，pending 保留，由 settle 重发
     const res = await chain.sendRaw(raw);
     if (typeof res === 'string') {
@@ -120,8 +137,26 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
     return hash;
   }
 
+  /**
+   * 用 pending 那笔退款的 nonce 重签一笔退款（金额、gas、单价可以变），替换 pending 后广播，返回新哈希。
+   * 只有 pending 是退款时允许；之后照常 settle。广播出错不要紧：pending 已经是新的这笔，settle 会重发
+   */
+  async function resignRefund({ value, gas, gasPrice }) {
+    enter();
+    try {
+      const p = store.get(chainId, container)?.pending;
+      if (p?.kind !== 'refund') throw new Error('只有退款交易可以重签');
+      const frozen = Object.freeze({ to: op.owner, value, data: '0x', gas, gasPrice, chainId, nonce: p.nonce });
+      const signed = sign(frozen, 'refund');
+      store.replacePending(chainId, container, pendingOf(signed, frozen, { kind: 'refund' }));
+      try { await chain.sendRaw(signed.raw); } catch { /* settle 会重发 */ }
+      return signed.hash;
+    } finally { busy = false; }
+  }
+
   return {
     address,
+    resignRefund,
     // block 可以钉在最近一笔确认交易的区块上，防止落后的节点读到充值之前的余额
     balance: (block) => chain.nativeBalance(address, block),
     send,
