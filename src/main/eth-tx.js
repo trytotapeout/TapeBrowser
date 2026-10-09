@@ -8,6 +8,7 @@ import { keccak256 } from './keccak.js';
 import { hexToBytes, bytesToHex } from './abi.js';
 
 // 同步签名要的哈希函数，用 Node 自带的实现
+// 注意这是 noble 的进程级全局设置，和 noble 自己的 sha256/hmac 等价
 secp.hashes.sha256 = (m) => new Uint8Array(createHash('sha256').update(m).digest());
 secp.hashes.hmacSha256 = (k, m) => new Uint8Array(createHmac('sha256', k).update(m).digest());
 
@@ -20,10 +21,16 @@ function concat(...parts) {
   return out;
 }
 
-/** 非负整数 → 最短大端字节（0 是空串） */
-function intBytes(n) {
-  const v = BigInt(n);
-  if (v < 0n) throw new Error('eth-tx: negative integer');
+/** 严格解析整数字段：只收 bigint >= 0、安全非负整数、0x 十六进制串，其余一律报 bad <name> */
+function uint(name, x) {
+  if (typeof x === 'bigint' && x >= 0n) return x;
+  if (typeof x === 'number' && Number.isSafeInteger(x) && x >= 0) return BigInt(x);
+  if (typeof x === 'string' && /^0x[0-9a-fA-F]+$/.test(x)) return BigInt(x);
+  throw new Error('eth-tx: bad ' + name);
+}
+
+/** 非负 bigint → 最短大端字节（0 是空串） */
+function intBytes(v) {
   if (v === 0n) return EMPTY;
   const h = v.toString(16);
   return hexToBytes(h.length % 2 ? '0' + h : h);
@@ -31,7 +38,7 @@ function intBytes(n) {
 
 function lenPrefix(len, short) {
   if (len < 56) return Uint8Array.of(short + len);
-  const l = intBytes(len);
+  const l = intBytes(BigInt(len));
   return concat(Uint8Array.of(short + 55 + l.length), l);
 }
 
@@ -59,12 +66,17 @@ export const addressOf = (sk) => bytesToHex(keccak256(secp.getPublicKey(sk, fals
  */
 export function signLegacy(sk, tx) {
   if (!/^0x[0-9a-fA-F]{40}$/.test(tx.to || '')) throw new Error('eth-tx: bad to');
-  const chainId = BigInt(tx.chainId);
+  const chainId = uint('chainId', tx.chainId);
   if (chainId <= 0n) throw new Error('eth-tx: bad chainId');
-  const base = [intBytes(tx.nonce), intBytes(tx.gasPrice), intBytes(tx.gas), hexToBytes(tx.to), intBytes(tx.value ?? 0), hexToBytes(tx.data || '0x')];
+  const value = tx.value === undefined ? 0n : uint('value', tx.value);
+  const base = [
+    intBytes(uint('nonce', tx.nonce)), intBytes(uint('gasPrice', tx.gasPrice)), intBytes(uint('gas', tx.gas)),
+    hexToBytes(tx.to), intBytes(value), hexToBytes(tx.data || '0x'),
+  ];
   const sighash = keccak256(rlp([...base, intBytes(chainId), EMPTY, EMPTY]));
   // recovered 格式：第 0 字节是恢复位，后面是 r(32) s(32)；默认 lowS，和以太坊一致
   const sig = secp.sign(sighash, sk, { prehash: false, format: 'recovered' });
+  if (sig[0] > 1) throw new Error('eth-tx: unexpected recovery bit');
   const v = chainId * 2n + 35n + BigInt(sig[0]);
   const r = BigInt(bytesToHex(sig.subarray(1, 33)));
   const s = BigInt(bytesToHex(sig.subarray(33, 65)));
