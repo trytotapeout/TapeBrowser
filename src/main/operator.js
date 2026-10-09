@@ -10,6 +10,7 @@
 
 import { signLegacy, uint } from './eth-tx.js';
 import { assertOperatorTx } from './publish-tx.js';
+import { fail, NO_OPERATOR, OPERATOR_OWNER_MISMATCH, STATE_CHANGED, PENDING_TIMEOUT, BUSY, LATER, WALLET_PENDING } from './publish-errors.js';
 
 const lower = (a) => String(a).toLowerCase();
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -17,8 +18,8 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function createOperator({ store, chain, net, container, owner, sleep = defaultSleep, now = Date.now }) {
   const chainId = net.chainId;
   const rec = store.get(chainId, container);
-  if (!rec) throw new Error('临时钱包不存在');
-  if (rec.owner !== lower(owner)) throw new Error('临时钱包的持有人不一致');
+  if (!rec) throw fail(NO_OPERATOR, '临时钱包不存在');
+  if (rec.owner !== lower(owner)) throw fail(OPERATOR_OWNER_MISMATCH, '临时钱包的持有人不一致');
   const address = rec.address;
   const op = Object.freeze({ address, owner: rec.owner, container: rec.container });
 
@@ -61,7 +62,7 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
     // 这个 nonce 不管被谁用掉都不能再用了
     store.setLastNonce(chainId, container, p.nonce);
     store.clearPending(chainId, container);
-    throw new Error('临时钱包的交易状态异常，请重新检查');
+    throw fail(STATE_CHANGED, '临时钱包的交易状态异常，请重新检查');
   }
 
   /** settle 的实际逻辑，不检查 busy：给 send 内部调用 */
@@ -74,9 +75,7 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
       if (done) return done;
       if (now() >= deadline) {
         // 带 code：调用方据此判断是「一直没打包」，而不是节点出错
-        const e = new Error('交易还没确认，可以稍后继续');
-        e.code = 'PENDING_TIMEOUT';
-        throw e;
+        throw fail(PENDING_TIMEOUT, '交易还没确认，可以稍后继续');
       }
       // 重发同一笔：节点丢了交易池也能补上；不管返回什么、抛什么都继续轮询
       try { await chain.sendRaw(p.raw); } catch { /* 继续轮询 */ }
@@ -88,7 +87,7 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
   // 在第一个 await 之前同步检查并设置
   let busy = false;
   function enter() {
-    if (busy) throw new Error('临时钱包正在处理另一笔交易');
+    if (busy) throw fail(BUSY, '临时钱包正在处理另一笔交易');
     busy = true;
   }
 
@@ -122,13 +121,13 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
   async function sendInner(tx, { kind, path, index } = {}) {
     // 先复制，后面的 await 期间调用方改了 tx 也不影响
     const fields = { to: tx.to, value: tx.value, data: tx.data, gas: tx.gas, gasPrice: tx.gasPrice };
-    if (store.get(chainId, container)?.pending) throw new Error('还有一笔交易在等确认');
+    if (store.get(chainId, container)?.pending) throw fail(LATER, '还有一笔交易在等确认');
 
     const { latest, pending } = await chain.nonceOf(address);
-    if (pending > latest) throw new Error('临时钱包有未确认的交易');
+    if (pending > latest) throw fail(WALLET_PENDING, '临时钱包有未确认的交易');
     // 再读一次记录：lastNonce 以盘上为准
     const lastNonce = store.get(chainId, container)?.lastNonce ?? null;
-    if (lastNonce != null && latest <= lastNonce) throw new Error('节点还没同步到最新区块，请稍后再试');
+    if (lastNonce != null && latest <= lastNonce) throw fail(LATER, '节点还没同步到最新区块，请稍后再试');
 
     const frozen = Object.freeze({ ...fields, chainId, nonce: latest });
     const signed = sign(frozen, kind);
@@ -138,14 +137,14 @@ export function createOperator({ store, chain, net, container, owner, sleep = de
     // 网络错误原样抛出，pending 保留，由 settle 重发
     const res = await chain.sendRaw(raw);
     if (typeof res === 'string') {
-      if (lower(res) !== lower(hash)) throw new Error('节点返回的交易哈希不一致');
+      if (lower(res) !== lower(hash)) throw fail(STATE_CHANGED, '节点返回的交易哈希不一致');
       return hash;
     }
     if (res?.reason === 'nonceUsed') {
       // 可能就是这笔已经上链了，也可能 nonce 被别的交易用掉了；查一次，不轮询（看似被用掉时会多等一轮复查）
       const r = await settleInner({ timeoutMs: 0 });
       if (r && lower(r.hash) === lower(hash)) return hash;
-      throw new Error('临时钱包的交易状态异常，请重新检查');
+      throw fail(STATE_CHANGED, '临时钱包的交易状态异常，请重新检查');
     }
     // reason 'pending'：已在交易池里，算广播成功
     return hash;

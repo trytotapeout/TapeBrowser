@@ -200,7 +200,7 @@ test('节点落后（latest <= lastNonce）时被拒', async () => {
   const { store, chain, op, done } = setup({ latest: 5n });
   try {
     store.setLastNonce(BSC.chainId, C, 5n);
-    await assert.rejects(op().send(upload(0), { kind: 'upload' }), /节点还没同步到最新区块，请稍后再试/);
+    await assert.rejects(op().send(upload(0), { kind: 'upload' }), (e) => e.code === 'LATER' && /节点还没同步到最新区块，请稍后再试/.test(e.message));
     chain.latest = chain.pending = 4n;
     await assert.rejects(op().send(upload(0), { kind: 'upload' }), /节点还没同步到最新区块/);
     assert.equal(chain.sent.length, 0);
@@ -241,7 +241,7 @@ test('sendRaw 返回 nonceUsed、但 nonce 被别的交易用掉：清除 pendin
   const { store, chain, op, done } = setup({ latest: 1n });
   try {
     chain.sendImpl = () => { chain.latest = chain.pending = 2n; return { known: true, reason: 'nonceUsed' }; };
-    await assert.rejects(op().send(upload(0), { kind: 'upload' }), /临时钱包的交易状态异常，请重新检查/);
+    await assert.rejects(op().send(upload(0), { kind: 'upload' }), (e) => e.code === 'STATE_CHANGED' && /临时钱包的交易状态异常，请重新检查/.test(e.message));
     const rec = store.get(BSC.chainId, C);
     assert.equal(rec.pending, null);
     assert.equal(rec.lastNonce, 1n);
@@ -318,7 +318,7 @@ test('settle 时发现 nonce 被别的交易用掉：清除 pending 并报状态
     const o = op();
     await o.send(upload(0), { kind: 'upload' });
     chain.latest = chain.pending = 3n;
-    await assert.rejects(o.settle(), /临时钱包的交易状态异常/);
+    await assert.rejects(o.settle(), (e) => e.code === 'STATE_CHANGED' && /临时钱包的交易状态异常/.test(e.message));
     assert.equal(store.get(BSC.chainId, C).pending, null);
     assert.equal(store.get(BSC.chainId, C).lastNonce, 2n);
   } finally { done(); }
@@ -360,6 +360,7 @@ test('同时两次 send：只签一笔、只广播一次，另一次报正在处
     assert.equal(results[0].status, 'fulfilled');
     assert.equal(results[1].status, 'rejected');
     assert.match(results[1].reason.message, /临时钱包正在处理另一笔交易/);
+    assert.equal(results[1].reason.code, 'BUSY');
     assert.equal(chain.sent.length, 1);
     assert.equal(store.get(BSC.chainId, C).pending.hash, results[0].value);
     // send 进行中时 settle 也被拒；send 结束后可以 settle

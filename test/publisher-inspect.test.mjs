@@ -78,7 +78,7 @@ const resumed = (f, count) => ({ size: count * CHUNK_BYTES, contentType: '', sha
 const done = (f) => ({ size: f.bytes.length, contentType: '', sha256: f.sha256, updatedAt: 1, chunkCount: 1 });
 
 test('链不支持发布就抛出', async () => {
-  await assert.rejects(make({ net: BASE }).inspect({ target }), /这条链暂时不支持发布/);
+  await assert.rejects(make({ net: BASE }).inspect({ target }), (e) => e.code === 'CHAIN_UNSUPPORTED' && /这条链暂时不支持发布/.test(e.message));
 });
 
 test('预检查有错误：返回 blocked，只带错误项，不读链', async () => {
@@ -92,7 +92,7 @@ test('预检查有错误：返回 blocked，只带错误项，不读链', async 
 });
 
 test('电路不存在就抛出', async () => {
-  await assert.rejects(make({ chain: fakeChain({ exists: false }), files: [file('index.html', 10)] }).inspect({ target }), /这个电路不存在/);
+  await assert.rejects(make({ chain: fakeChain({ exists: false }), files: [file('index.html', 10)] }).inspect({ target }), (e) => e.code === 'CIRCUIT_MISSING' && /这个电路不存在/.test(e.message));
 });
 
 
@@ -223,8 +223,8 @@ test('全部复用：没有要传的块，不估 gas，费用为 0', async () =>
 
 test('gasPrice 超限或为 0 就抛出，正好等于上限可以', async () => {
   const run = (gasPrice) => make({ chain: fakeChain({ gasPrice }), files: [file('index.html', 10)] }).inspect({ target });
-  await assert.rejects(run(MAX_GAS_PRICE + 1n), /当前 Gas 单价太高，请稍后再试/);
-  await assert.rejects(run(0n), /读不到有效的 Gas 单价，请稍后再试/);
+  await assert.rejects(run(MAX_GAS_PRICE + 1n), (e) => e.code === 'GAS_PRICE' && /当前 Gas 单价太高，请稍后再试/.test(e.message));
+  await assert.rejects(run(0n), (e) => e.code === 'GAS_PRICE' && /读不到有效的 Gas 单价，请稍后再试/.test(e.message));
   assert.equal((await run(MAX_GAS_PRICE)).gasPrice, MAX_GAS_PRICE);
 });
 
@@ -267,7 +267,7 @@ test('本地文件异常就抛出，不读文件信息', async () => {
   ];
   for (const [name, files, path] of bad) {
     const chain = fakeChain();
-    await assert.rejects(make({ chain, files }).inspect({ target }), (e) => e.message === `本地文件异常：${path}`, name);
+    await assert.rejects(make({ chain, files }).inspect({ target }), (e) => e.message === `本地文件异常：${path}` && e.code === 'LOCAL_FILES', name);
     assert.equal(called(chain, 'fileInfos').length, 0, name);
   }
   // 正好 MAX_FILE_BYTES 可以

@@ -29,11 +29,13 @@
 // 这个文件关系到临时钱包里的钱，写盘要落实：先删掉残留的 .tmp，新建 .tmp（0600）写入并 fsync，
 // 再 rename，最后尽量 fsync 目录。每次读都直接读文件，不缓存。
 // 读不出来或结构不对的文件不会被当成「没有记录」：get 抛出，list 跳过，broken() 列出文件名。
+// 界面要区分的错误带 code（见 publish-errors.js）：DECRYPT、RECORD_BROKEN、NO_OPERATOR、OPERATOR_OWNER_MISMATCH 等；参数校验的错误不带。
 
 import { readFileSync, openSync, writeSync, fsyncSync, closeSync, renameSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { newKey, addressOf } from './eth-tx.js';
 import { bytesToHex, hexToBytes } from './abi.js';
+import { fail, DECRYPT, RECORD_BROKEN, NO_OPERATOR, OPERATOR_OWNER_MISMATCH, LATER } from './publish-errors.js';
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
 const FILE = /^([1-9][0-9]*)-(0x[0-9a-f]{40})\.json$/;
@@ -141,7 +143,7 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
     let rec;
     try { rec = JSON.parse(text); } catch { rec = null; }
     // 不带解析器的错误：里面可能有文件内容
-    if (!looksValid(rec)) throw new Error('临时钱包：记录文件已损坏');
+    if (!looksValid(rec)) throw fail(RECORD_BROKEN, '临时钱包：记录文件已损坏');
     return rec;
   }
 
@@ -172,7 +174,7 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
   function update(chainId, container, fn) {
     const file = fileOf(chainId, container);
     const rec = read(file);
-    if (!rec) throw new Error('临时钱包不存在');
+    if (!rec) throw fail(NO_OPERATOR, '临时钱包不存在');
     if (fn(rec) === false) return;
     write(file, rec);
   }
@@ -185,10 +187,7 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
       if (old) {
         if (old.owner !== o) {
           // 带上旧记录（不含私钥），让调用方能先把余额退回原持有人
-          const err = new Error('这个容器已有另一个持有人的临时钱包，请先把它的余额退回原持有人');
-          err.code = 'OPERATOR_OWNER_MISMATCH';
-          err.old = publicView(old);
-          throw err;
+          throw fail(OPERATOR_OWNER_MISMATCH, '这个容器已有另一个持有人的临时钱包，请先把它的余额退回原持有人', { old: publicView(old) });
         }
         return publicView(old);
       }
@@ -215,7 +214,7 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
     /** 解密后的私钥，只给签名入口用 */
     keyOf(chainId, container) {
       const rec = read(fileOf(chainId, container));
-      if (!rec) throw new Error('临时钱包不存在');
+      if (!rec) throw fail(NO_OPERATOR, '临时钱包不存在');
       let sk;
       try {
         sk = hexToBytes(decrypt(Buffer.from(rec.key, 'base64')));
@@ -223,7 +222,7 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
       } catch {
         if (sk) sk.fill(0);
         // 不带底层错误：里面可能有密文或私钥的片段
-        throw new Error(DECRYPT_FAILED);
+        throw fail(DECRYPT, DECRYPT_FAILED);
       }
       return sk;
     },
@@ -235,7 +234,7 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
         if (rec.pending != null) throw new Error('临时钱包还有一笔交易在等确认');
         // 不比已确认的 nonce 大：节点落后读到了旧 nonce，签出来的交易会冲掉已确认的
         if (rec.lastNonce != null && BigInt(p.nonce) <= BigInt(rec.lastNonce)) {
-          throw new Error('交易的 nonce 不比已确认的大，节点可能落后');
+          throw fail(LATER, '交易的 nonce 不比已确认的大，节点可能落后');
         }
         rec.pending = p;
       });

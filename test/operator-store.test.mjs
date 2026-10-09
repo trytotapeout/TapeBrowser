@@ -92,7 +92,7 @@ test('解密失败或文件被篡改时抛出固定的提示，不带底层错�
     store.create({ chainId: CHAIN, container: C, owner: OWNER });
     const MSG = '临时钱包无法解密（系统钥匙串可能已重置）';
     const broken = make({ decrypt: () => { throw new Error('SECRET-DETAIL'); } });
-    assert.throws(() => broken.keyOf(CHAIN, C), (e) => e.message === MSG);
+    assert.throws(() => broken.keyOf(CHAIN, C), (e) => e.message === MSG && e.code === 'DECRYPT');
     // 改掉记录里的地址：解出的私钥和地址对不上
     const file = join(dir, `${CHAIN}-${C.toLowerCase()}.json`);
     const rec = JSON.parse(readFileSync(file, 'utf8'));
@@ -354,7 +354,7 @@ test('setOwnerPending 校验 kind、hash 和 at', () => {
       assert.throws(() => store.setOwnerPending(CHAIN, C, bad));
     }
     assert.equal(store.get(CHAIN, C).ownerPending, null);
-    assert.throws(() => store.setOwnerPending(CHAIN, '0x' + '99'.repeat(20), ok), /临时钱包不存在/);
+    assert.throws(() => store.setOwnerPending(CHAIN, '0x' + '99'.repeat(20), ok), (e) => e.code === 'NO_OPERATOR' && /临时钱包不存在/.test(e.message));
   } finally { done(); }
 });
 
@@ -378,7 +378,7 @@ test('ownerPending 结构不对的文件算损坏', () => {
     const rec = JSON.parse(readFileSync(file, 'utf8'));
     rec.ownerPending = { kind: 'open', hash: 'nope', at: 1 };
     writeFileSync(file, JSON.stringify(rec));
-    assert.throws(() => make().get(CHAIN, C), /记录文件已损坏/);
+    assert.throws(() => make().get(CHAIN, C), (e) => e.code === 'RECORD_BROKEN' && /记录文件已损坏/.test(e.message));
   } finally { done(); }
 });
 
@@ -408,7 +408,7 @@ test('ownerPending.nonce 落盘为十进制字符串；旧记录没有 nonce 照
     assert.deepEqual(make().get(CHAIN, C).ownerPending, { kind: 'fund', hash: '0x' + 'cd'.repeat(32), at: 1, nonce: null });
     rec.ownerPending.nonce = 'x1';
     writeFileSync(file, JSON.stringify(rec));
-    assert.throws(() => make().get(CHAIN, C), /记录文件已损坏/);
+    assert.throws(() => make().get(CHAIN, C), (e) => e.code === 'RECORD_BROKEN' && /记录文件已损坏/.test(e.message));
   } finally { done(); }
 });
 

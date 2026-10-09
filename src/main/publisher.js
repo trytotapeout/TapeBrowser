@@ -10,13 +10,16 @@
 //   run      开通 → 临时钱包 → 授权 → 充值 → 上传 → 核验 → 退款
 //   refund   放弃发布、只退钱：把临时钱包剩下的余额退回记录里的持有人
 // run 每一步都重新读链，不信任上次的进度；中断后再 run 一次就能接着传。
-// 金额、gas、gasPrice 一律是 bigint；错误信息是给用户看的中文。
+// 金额、gas、gasPrice 一律是 bigint；错误信息是给用户看的中文，界面要区分的错误带 code（见 publish-errors.js）。
 
 import { createHash } from 'node:crypto';
 import { PUBLISH_NETWORKS, MAX_GAS_PRICE, MAX_UPLOAD_GAS, MAX_FILE_BYTES } from './config.js';
 import { planPublish, stepsOf, chunkOf } from './publish-plan.js';
 import { uploadTx, openTx, grantTx, fundTx, refundTx } from './publish-tx.js';
 import { createOperator } from './operator.js';
+import * as E from './publish-errors.js';
+
+const { fail } = E;
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const maxOf = (a, b) => (a > b ? a : b);
@@ -65,13 +68,13 @@ const badPath = (p) => typeof p !== 'string' || !p || p.startsWith('/') || p.inc
 function assertFiles(files, snapshot) {
   const seen = new Set();
   for (const f of files) {
-    const fail = () => { throw new Error(`本地文件异常：${f?.path}`); };
-    if (badPath(f.path) || seen.has(f.path)) fail();
+    const bad = () => { throw fail(E.LOCAL_FILES, `本地文件异常：${f?.path}`); };
+    if (badPath(f.path) || seen.has(f.path)) bad();
     seen.add(f.path);
     const n = f.bytes?.length;
-    if (!(n > 0 && n <= MAX_FILE_BYTES)) fail();
-    if (!SHA.test(String(f.sha256))) fail();
-    if (!snapshot && f.sha256 !== '0x' + createHash('sha256').update(f.bytes).digest('hex')) fail();
+    if (!(n > 0 && n <= MAX_FILE_BYTES)) bad();
+    if (!SHA.test(String(f.sha256))) bad();
+    if (!snapshot && f.sha256 !== '0x' + createHash('sha256').update(f.bytes).digest('hex')) bad();
   }
 }
 
@@ -100,7 +103,7 @@ const running = new Map();
 /** 同步占住这个容器，返回释放函数；已被占用直接抛出。必须在第一个 await 之前调用 */
 function lockContainer(chainId, container) {
   const key = `${chainId}:${lower(container)}`;
-  if (running.has(key)) throw new Error('这个容器正在发布');
+  if (running.has(key)) throw fail(E.BUSY, '这个容器正在发布');
   const token = {};
   running.set(key, token);
   return () => { if (running.get(key) === token) running.delete(key); };
@@ -113,8 +116,8 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   /** 读当前 gas 单价，读不到或太高就抛出 */
   async function currentGasPrice() {
     const gasPrice = await chain.gasPrice();
-    if (gasPrice <= 0n) throw new Error('读不到有效的 Gas 单价，请稍后再试');
-    if (gasPrice > MAX_GAS_PRICE) throw new Error('当前 Gas 单价太高，请稍后再试');
+    if (gasPrice <= 0n) throw fail(E.GAS_PRICE, '读不到有效的 Gas 单价，请稍后再试');
+    if (gasPrice > MAX_GAS_PRICE) throw fail(E.GAS_PRICE, '当前 Gas 单价太高，请稍后再试');
     return gasPrice;
   }
 
@@ -159,7 +162,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
    * simulate 为 false 时不调 estimateGas，每笔只按 stepGasBound × 1.25 算（run 里重新检查用）。
    */
   async function inspect({ target, files, minBlock, simulate = true }) {
-    if (!PUBLISH_NETWORKS.includes(net.key)) throw new Error('这条链暂时不支持发布');
+    if (!PUBLISH_NETWORKS.includes(net.key)) throw fail(E.CHAIN_UNSUPPORTED, '这条链暂时不支持发布');
 
     const snapshot = Boolean(files);
     if (!snapshot) {
@@ -173,7 +176,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     let block = await chain.pinBlock();
     if (minBlock !== undefined && BigInt(block) < minBlock) block = '0x' + minBlock.toString(16);
     const [info] = await chain.circuitInfos([{ circuits: target.circuits, tokenId: target.tokenId }], block);
-    if (!info || !info.exists) throw new Error('这个电路不存在');
+    if (!info || !info.exists) throw fail(E.CIRCUIT_MISSING, '这个电路不存在');
     const { owner, container, opened } = info;
 
     // 没开通的容器里没有文件
@@ -200,13 +203,13 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
 
   // ---- run：开通 → 临时钱包 → 授权 → 充值 → 上传 ----
 
-  /** 轮询交易回执，超时抛出 message */
+  /** 轮询交易回执，超时抛出 message（code LATER） */
   async function waitReceipt(hash, { timeoutMs, pollMs = 3000, message }) {
     const deadline = now() + timeoutMs;
     for (;;) {
       const r = await chain.receipt(hash);
       if (r) return r;
-      if (now() >= deadline) throw new Error(message);
+      if (now() >= deadline) throw fail(E.LATER, message);
       await sleep(pollMs);
     }
   }
@@ -218,7 +221,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
    * 同一个（chainId, 容器）同时只能有一个 run / refund
    */
   async function run(inspected, { onProgress, signal } = {}) {
-    if (inspected?.stage !== 'ready') throw new Error('还没有检查通过，不能发布');
+    if (inspected?.stage !== 'ready') throw fail(E.NOT_READY, '还没有检查通过，不能发布');
     // 同步加锁：第二个并发调用在这里就被拒绝
     const unlock = lockContainer(net.chainId, inspected.container);
     try {
@@ -303,11 +306,11 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       }
       if (r) {
         store.clearOwnerPending(net.chainId, ctx.container);
-        if (r.status !== 1) throw new Error(OWNER_FAIL[kind]);
+        if (r.status !== 1) throw fail(E.OWNER_TX_FAILED, OWNER_FAIL[kind]);
         confirmed(ctx, r);
         return r;
       }
-      if (now() >= deadline) throw new Error('持有人的交易还没确认，可以稍后继续');
+      if (now() >= deadline) throw fail(E.LATER, '持有人的交易还没确认，可以稍后继续');
       await sleep(pollMs);
     }
   }
@@ -341,13 +344,13 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     if (await settleOwnerPending(ctx)) return null;
     ctx.checkAbort();
     const { latest, pending } = await chain.nonceOf(ctx.owner);
-    if (pending > latest) throw new Error('钱包里还有一笔未确认的交易，请等它确认后再继续');
+    if (pending > latest) throw fail(E.WALLET_PENDING, '钱包里还有一笔未确认的交易，请等它确认后再继续');
     const sent = await ownerSend(tx);
     if (typeof sent !== 'string' || !TX_HASH.test(sent)) {
       // 没有哈希就记不了在途记录，下次 run 只能靠上面的 nonce 检查拦住重复的交易。
       // 钱包可能已经广播了，等节点交易池里看得到它（pending > latest）再报错，下次 run 才一定被拦下
       await awaitOwnerQueued(ctx, latest);
-      throw new Error('钱包返回的交易哈希格式不对');
+      throw fail(E.BAD_WALLET_HASH, '钱包返回的交易哈希格式不对');
     }
     const hash = lower(sent);
     // 记这笔交易真正的 nonce：确认框开着时用户可能在钱包里另发了一笔，用掉了发之前读到的 latest，
@@ -391,7 +394,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     const r = await inspect({ target: ctx.target, files: ctx.files, minBlock: ctx.minBlock, simulate: false });
     if (r.stage !== 'ready') {
       const why = r.stage === 'conflicts' ? r.conflicts.map((c) => c.path).join('、') : (r.errors || []).map((e) => e.text).join('；');
-      throw new Error('链上状态变了，请重新检查：' + why);
+      throw fail(E.STATE_CHANGED, '链上状态变了，请重新检查：' + why);
     }
     return r;
   }
@@ -408,9 +411,9 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     const block = hexBlock(ctx.minBlock);
     const [info] = await chain.circuitInfos([{ circuits, tokenId }], block);
     const deployed = await chain.isDeployed(circuits, tokenId, block);
-    if (!info?.opened || lower(info.container) !== lower(cur.container) || !deployed) throw new Error('开通后核对失败');
+    if (!info?.opened || lower(info.container) !== lower(cur.container) || !deployed) throw fail(E.OWNER_TX_FAILED, '开通后核对失败');
     const next = await reinspect(ctx);
-    if (!next.opened || lower(next.container) !== lower(cur.container)) throw new Error('开通后核对失败');
+    if (!next.opened || lower(next.container) !== lower(cur.container)) throw fail(E.OWNER_TX_FAILED, '开通后核对失败');
     return next;
   }
 
@@ -424,8 +427,8 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     try { create(); } catch (e) {
       if (e?.code !== 'OPERATOR_OWNER_MISMATCH') throw e;
       const { dust } = await refundRecord(e.old, { previous: true });
-      if (dust) throw new Error('旧持有人的临时钱包余额不够付退款手续费，已保留记录');
-      if (store.get(net.chainId, ctx.container)) throw new Error('旧持有人的临时钱包还没退干净，请稍后再试');
+      if (dust) throw fail(E.OLD_OWNER_DUST, '旧持有人的临时钱包余额不够付退款手续费，已保留记录');
+      if (store.get(net.chainId, ctx.container)) throw fail(E.LATER, '旧持有人的临时钱包还没退干净，请稍后再试');
       create();
     }
     return createOperator({ store, chain, net, container: ctx.container, owner: ctx.owner, sleep, now });
@@ -451,7 +454,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     confirmed(ctx, r);
     charge(ctx, r, pending?.gasPrice);
     if (pending?.kind === 'upload') {
-      if (r.status !== 1) throw new Error(`上传 ${pending.path} 第 ${pending.index} 块失败`);
+      if (r.status !== 1) throw fail(E.UPLOAD_FAILED, `上传 ${pending.path} 第 ${pending.index} 块失败`);
       ctx.uploaded++;
     }
   }
@@ -466,7 +469,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     const r = await ownerTx(ctx, 'grant', grantTx(net, ctx.owner, ctx.container, operator.address));
     if (r === null) return ensureGrant(ctx, operator);
     const after = await chain.operatorState(ctx.container, operator.address, hexBlock(BigInt(r.blockNumber)));
-    if (!after.canEdit) throw new Error('授权没有生效');
+    if (!after.canEdit) throw fail(E.OWNER_TX_FAILED, '授权没有生效');
   }
 
   /**
@@ -498,7 +501,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
         return minOf(est * PAD_NUM / PAD_DEN, MAX_UPLOAD_GAS);
       } catch (e) {
         if (!isRevert(e)) return fallback;
-        if (attempt >= ESTIMATE_RETRIES) throw new Error(`上传 ${step.path} 第 ${step.index} 块模拟失败：${e?.message || e}`);
+        if (attempt >= ESTIMATE_RETRIES) throw fail(E.UPLOAD_FAILED, `上传 ${step.path} 第 ${step.index} 块模拟失败：${e?.message || e}`);
         await sleep(ESTIMATE_POLL_MS);
       }
     }
@@ -529,7 +532,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
         ?? (await waitReceipt(hash, { timeoutMs: 120000, message: '交易还没确认，可以稍后继续' }));
       confirmed(ctx, r);
       charge(ctx, r, gasPrice);
-      if (r.status !== 1) throw new Error(`上传 ${path} 第 ${index} 块失败`);
+      if (r.status !== 1) throw fail(E.UPLOAD_FAILED, `上传 ${path} 第 ${index} 块失败`);
       ctx.uploaded++;
       const left = cur.steps.length - 1;
       ctx.progress({ stage: 'upload', done: ctx.uploaded, total: ctx.uploaded + left, path, index, hash });
@@ -538,7 +541,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       const fileDone = cur.steps[1]?.path !== path;
       if (fileDone || sinceCheck >= CHECK_EVERY) {
         const fresh = await reinspect(ctx);
-        if (fresh.steps.length > left) throw new Error(`上传后核对失败：${path} 的块数没有增加`);
+        if (fresh.steps.length > left) throw fail(E.UPLOAD_FAILED, `上传后核对失败：${path} 的块数没有增加`);
         cur = fresh;
         sinceCheck = 0;
         if (cur.steps.length) await ensureGrant(ctx, operator);
@@ -612,7 +615,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     let failure = null;
     try {
       check = await verifyAll(ctx);
-      if (check.bad) failure = new Error(`核验失败：${check.bad}`);
+      if (check.bad) failure = fail(E.VERIFY_FAILED, `核验失败：${check.bad}`);
     } catch (e) { failure = e; }
     let result;
     try { result = await refundOperator(ctx, operator); } catch (re) {
@@ -627,7 +630,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
   /** 退款的 gas：持有人是普通地址用 21000；是合约（有代码）用 estimateGas × 1.25，不超过 MAX_UPLOAD_GAS */
   async function refundGas(ctx, operator, balance, gasPrice) {
     const code = (await chain.hasCode([ctx.owner], hexBlock(ctx.minBlock))).get(lower(ctx.owner));
-    if (code === undefined) throw new Error('读不到持有人地址的信息，请稍后再试');
+    if (code === undefined) throw fail(E.LATER, '读不到持有人地址的信息，请稍后再试');
     if (!code) return TRANSFER_GAS;
     // 估算用的金额：先按 21000 留出手续费，余额不够时用 1 试探
     const probe = balance > TRANSFER_GAS * gasPrice ? balance - TRANSFER_GAS * gasPrice : 1n;
@@ -657,7 +660,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     const want = maxOf(await currentGasPrice(), old * BUMP_NUM / BUMP_DEN);
     if (want <= MAX_GAS_PRICE) return want;
     if (MAX_GAS_PRICE > old) return MAX_GAS_PRICE;
-    throw new Error('退款交易一直没有打包，Gas 单价已到上限');
+    throw fail(E.GAS_PRICE, '退款交易一直没有打包，Gas 单价已到上限');
   }
 
   async function removeIfEmpty(ctx, balance) {
@@ -688,7 +691,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
         const balance = await operator.balance(hexBlock(ctx.minBlock));
         const price = await bumpedPrice(stuck.gasPrice);
         const q = await refundQuote(ctx, operator, balance, RESIGN_MARGIN[net.key] ?? 0n, price);
-        if (q.amount <= 0n) throw new Error('退款交易一直没有打包，余额不够按现在的单价重发');
+        if (q.amount <= 0n) throw fail(E.REFUND_FAILED, '退款交易一直没有打包，余额不够按现在的单价重发');
         const hash = await operator.resignRefund({ value: q.amount, gas: q.gas, gasPrice: q.gasPrice });
         ctx.progress({ stage: 'refund', hash, resigned: true });
       }
@@ -722,7 +725,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     const { receipt, value } = await settleRefund(ctx, operator);
     const r = receipt ?? (await waitReceipt(sent, { timeoutMs: 120000, message: '退款交易还没确认，可以稍后再退' }));
     confirmed(ctx, r);
-    if (r.status !== 1) throw new Error('退款失败');
+    if (r.status !== 1) throw fail(E.REFUND_FAILED, '退款失败');
     const after = await operator.balance(hexBlock(BigInt(r.blockNumber)));
     await removeIfEmpty(ctx, after);
     return { refunded: refunded + (receipt ? value : amount), dust: false };
@@ -736,7 +739,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
    */
   async function refundRecord(rec, { previous = false } = {}) {
     const { latest, pending } = await chain.nonceOf(rec.owner);
-    if (pending > latest) throw new Error('持有人钱包里还有一笔未确认的交易，等它确认后再退款');
+    if (pending > latest) throw fail(E.WALLET_PENDING, '持有人钱包里还有一笔未确认的交易，等它确认后再退款');
     const pinned = BigInt(await chain.pinBlock());
     const ctx = {
       container: rec.container, owner: rec.owner, lastBlock: null, progress: () => {},
@@ -745,7 +748,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     try { await settleOwnerPending(ctx); } catch (e) {
       // status 0 时记录已经清掉，可以接着退；超时之类还在等
       if (store.get(net.chainId, ctx.container)?.ownerPending) {
-        throw previous ? new Error('上一位持有人的交易还没确认，可以稍后再试') : e;
+        throw previous ? fail(E.LATER, '上一位持有人的交易还没确认，可以稍后再试') : e;
       }
     }
     const operator = createOperator({ store, chain, net, container: rec.container, owner: rec.owner, sleep, now });
@@ -754,11 +757,11 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
 
   /** 放弃发布、只退钱：返回 { refunded, dust }。和 run 共用同一个容器锁 */
   async function refund({ chainId, container }) {
-    if (chainId !== net.chainId) throw new Error('网络不一致');
+    if (chainId !== net.chainId) throw fail(E.CHAIN_MISMATCH, '网络不一致');
     const unlock = lockContainer(chainId, container);
     try {
       const rec = store.get(chainId, container);
-      if (!rec) throw new Error('没有这个容器的临时钱包');
+      if (!rec) throw fail(E.NO_OPERATOR, '没有这个容器的临时钱包');
       return await refundRecord(rec);
     } finally { unlock(); }
   }
