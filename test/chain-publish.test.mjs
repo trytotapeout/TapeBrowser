@@ -188,6 +188,15 @@ test('estimateGas 把数字形式的 value / gas / gasPrice / nonce 也转成十
   assert.deepEqual(sent, { from: OPERATOR, to: CONTAINER, value: '0x0', gas: '0x7530', gasPrice: '0x3b9aca00', nonce: '0x3', data: '0x' });
 });
 
+test('txNonce 读交易的 nonce（交易池里的也算）；节点不认得这笔交易时为 null', async () => {
+  const H = '0x' + 'ab'.repeat(32);
+  const rpc = fakeRpc({ handlers: { eth_getTransactionByHash: ([h]) => (h === H ? { hash: H, nonce: '0x1f', blockNumber: null } : null) } });
+  const chain = createChain(rpc, NET);
+  assert.equal(await chain.txNonce(H), 31n);
+  assert.equal(await chain.txNonce('0x' + 'cd'.repeat(32)), null);
+  assert.equal(rpc.log.length, 2);
+});
+
 test('receipt 解析哈希、状态、区块号、gas', async () => {
   const rpc = fakeRpc({
     handlers: {

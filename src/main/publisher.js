@@ -90,6 +90,10 @@ const RESIGN_MARGIN = { xlayer: 20n };
 // 重签的单价至少比旧的高 12.5%：节点按这个比例判断能不能替换交易池里同一个 nonce 的交易
 const BUMP_NUM = 1125n;
 const BUMP_DEN = 1000n;
+// 持有人交易发出后查它的 nonce：节点可能还不认得，每 3 秒查一次，最多 5 次
+const TX_NONCE_POLLS = 5;
+const TX_NONCE_POLL_MS = 3000;
+const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
 
 // 正在执行 run / refund 的（chainId, 容器）。主进程只有一个实例，内存里互斥就够了
 const running = new Map();
@@ -338,12 +342,48 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     ctx.checkAbort();
     const { latest, pending } = await chain.nonceOf(ctx.owner);
     if (pending > latest) throw new Error('钱包里还有一笔未确认的交易，请等它确认后再继续');
-    const hash = await ownerSend(tx);
-    // 拿到哈希先落盘，再去等确认：中途崩溃、超时，下次 run 都会等这一笔，不会再发一次
-    // nonce 记发出前的 latest：之后被别的交易用掉，说明这笔被替换了
-    store.setOwnerPending(net.chainId, ctx.container, { kind, hash, at: now(), nonce: latest });
+    const sent = await ownerSend(tx);
+    if (typeof sent !== 'string' || !TX_HASH.test(sent)) {
+      // 没有哈希就记不了在途记录，下次 run 只能靠上面的 nonce 检查拦住重复的交易。
+      // 钱包可能已经广播了，等节点交易池里看得到它（pending > latest）再报错，下次 run 才一定被拦下
+      await awaitOwnerQueued(ctx, latest);
+      throw new Error('钱包返回的交易哈希格式不对');
+    }
+    const hash = lower(sent);
+    // 记这笔交易真正的 nonce：确认框开着时用户可能在钱包里另发了一笔，用掉了发之前读到的 latest，
+    // 按 latest 记会把这笔误判成被替换，再充一次值
+    const nonce = (await sentNonce(hash)) ?? latest;
+    // 拿到 nonce 先落盘，再去等确认：中途崩溃、超时，下次 run 都会等这一笔，不会再发一次
+    store.setOwnerPending(net.chainId, ctx.container, { kind, hash, at: now(), nonce });
     ctx.progress({ stage: kind, hash });
-    return awaitOwner(ctx, { kind, hash, nonce: latest });
+    return awaitOwner(ctx, { kind, hash, nonce });
+  }
+
+  /**
+   * 刚发出的持有人交易的 nonce：节点可能还不认得它，隔一个 pollMs 再查，最多查 TX_NONCE_POLLS 次。
+   * 一直查不到返回 null，由调用方退回发之前读到的 latest。取舍：
+   * 退回 latest 只在「确认框开着时另发了一笔」又碰上节点一直不认得这笔交易时出错（误判成被替换，按链上状态重新判断这一步）；
+   * 不退回就只能一直等或不记在途记录，后者更糟。查询期间崩溃也没有在途记录，这时靠发之前的 nonce 检查拦住重复的交易
+   */
+  async function sentNonce(hash) {
+    for (let i = 0; ; i++) {
+      const n = await chain.txNonce(hash);
+      if (n != null) return n;
+      if (i + 1 >= TX_NONCE_POLLS) return null;
+      await sleep(TX_NONCE_POLL_MS);
+    }
+  }
+
+  /**
+   * 钱包没给出可用的哈希时，等持有人的 pending nonce 越过发之前的 latest（交易池里看得到它），或 latest 也越过了（已经上链）。
+   * 最多等 TX_NONCE_POLLS 次；一直看不到就当钱包没广播
+   */
+  async function awaitOwnerQueued(ctx, before) {
+    for (let i = 0; i < TX_NONCE_POLLS; i++) {
+      const { latest, pending } = await chain.nonceOf(ctx.owner);
+      if (pending > before || latest > before) return;
+      await sleep(TX_NONCE_POLL_MS);
+    }
   }
 
   /** 按 minBlock 重新检查（不模拟），不是 ready 就停下 */

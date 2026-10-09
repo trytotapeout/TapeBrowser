@@ -76,7 +76,7 @@ function fakeChain({ clock, store, opened = true, chainId = BSC.chainId }) {
     circuit: { owner: OWNER, opened, deployed: opened },
     files: new Map(), grant: { operator: null, until: 0 }, balances: new Map(),
     nonces: new Map(), owner: { latest: 0n, pending: 0n }, queue: [], holdOwner: false, holdOps: false,
-    receipts: new Map(), sent: [], mined: [], ownerTxs: [], calls: [], hooks: {},
+    receipts: new Map(), txNonces: new Map(), sent: [], mined: [], ownerTxs: [], calls: [], hooks: {},
     // safeLag：safe 区块比链头落后几块；safe 为 false 时节点不支持 safe 标签（safeBlock 返回 null）
     safeLag: 0n, safe: true,
     // 合约地址（eth_getCode 不是 0x）和给它转账的估算 gas；corrupt 里的路径读回来时内容被改了一个字节
@@ -176,7 +176,12 @@ function fakeChain({ clock, store, opened = true, chainId = BSC.chainId }) {
     async ownerSend(tx) {
       c.ownerTxs.push(tx);
       if (c.hooks.ownerSend) return c.hooks.ownerSend(tx);
+      return c.walletSend(tx);
+    },
+    /** 钱包照常广播一笔持有人交易（ownerSend 的默认行为），nonce 记在 txNonces 里给 txNonce 查 */
+    async walletSend(tx) {
       const hash = bytesToHex(keccak256(new TextEncoder().encode('owner:' + c.ownerTxs.length)));
+      c.txNonces.set(hash, c.owner.pending);
       c.owner.pending += 1n;
       const item = { kind: 'owner', hash, tx };
       // holdOwner 可以是 (tx) => bool，只扣住某一种持有人交易
@@ -185,6 +190,22 @@ function fakeChain({ clock, store, opened = true, chainId = BSC.chainId }) {
       // 钱包已经广播了，却没把哈希交回来
       if (c.hooks.ownerThrows?.(tx)) throw new Error('钱包窗口关掉了');
       return hash;
+    },
+    /** 持有人在钱包里另发了一笔不相干的交易（给自己转 0），立刻出块，用掉一个 nonce */
+    unrelatedOwnerTx() {
+      const hash = bytesToHex(keccak256(new TextEncoder().encode('unrelated:' + c.head)));
+      c.txNonces.set(hash, c.owner.pending);
+      c.owner.pending += 1n;
+      return c.mineItem({ kind: 'owner', hash, tx: { from: OWNER, to: OWNER, value: 0n, data: '0x' } });
+    },
+    /** 交易的 nonce（交易池里的也查得到）；不认得的哈希返回 null */
+    async txNonce(hash) {
+      c.calls.push(['txNonce', hash]);
+      if (c.hooks.txNonce) {
+        const v = c.hooks.txNonce(hash);
+        if (v !== undefined) return v;
+      }
+      return c.txNonces.get(hash) ?? null;
     },
     async sendRaw(raw) {
       c.sent.push(raw);
@@ -906,6 +927,83 @@ test('等确认途中交易被替换：这次 run 就清掉 ownerPending，按�
     assert.equal(r.stage, 'done');
     assert.equal(opens(s.chain), 1);
     assert.equal(recOf(s).ownerPending, null);
+  } finally { s.done(); }
+});
+
+test('确认框开着时用户在钱包里另发了一笔：按这笔真正的 nonce 记，不误判成被替换，不再充一次值', async () => {
+  const files = threeFiles();
+  const s = setup({ files });
+  try {
+    s.chain.holdOwner = (tx) => tx.data === '0x';
+    // 不相干的那笔用掉 nonce N，我们的充值用 N + 1，在交易池里等几轮才出块
+    s.chain.hooks.ownerSend = async (tx) => {
+      if (tx.data === '0x') s.chain.unrelatedOwnerTx();
+      return s.chain.walletSend(tx);
+    };
+    let polls = 0;
+    s.chain.hooks.onSleep = () => { if (++polls === 3) { s.chain.holdOwner = false; s.chain.mineQueued(); } };
+    const events = [];
+    const r = await s.p.run(await s.p.inspect({ target }), { onProgress: (e) => events.push(e) });
+    assert.equal(r.stage, 'done');
+    assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
+    assert.ok(!events.some((e) => e.replaced));
+    for (const f of files) assert.ok(sameBytes(s.chain, f), f.path);
+  } finally { s.done(); }
+});
+
+test('节点一时还不认得刚发的持有人交易：多查几次，记下它真正的 nonce', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    s.chain.holdOwner = (tx) => tx.data === '0x';
+    s.chain.hooks.ownerSend = async (tx) => {
+      if (tx.data === '0x') s.chain.unrelatedOwnerTx();
+      return s.chain.walletSend(tx);
+    };
+    let misses = 2;
+    s.chain.hooks.txNonce = () => (misses-- > 0 ? null : undefined);
+    const seen = [];
+    const set = s.store.setOwnerPending;
+    s.store.setOwnerPending = (id, c, p) => { seen.push(p); set(id, c, p); };
+    s.chain.hooks.onSleep = () => { if (seen.some((p) => p.kind === 'fund')) { s.chain.holdOwner = false; s.chain.mineQueued(); } };
+    const r = await s.p.run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'done');
+    // grant 用 nonce 0，不相干的那笔用 1，充值用 2
+    assert.equal(seen.find((p) => p.kind === 'fund').nonce, 2n);
+    assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
+  } finally { s.done(); }
+});
+
+test('一直查不到持有人交易的 nonce：退回发之前读到的 latest', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    s.chain.hooks.txNonce = () => null;
+    const seen = [];
+    const set = s.store.setOwnerPending;
+    s.store.setOwnerPending = (id, c, p) => { seen.push(p); set(id, c, p); };
+    const r = await s.p.run(await s.p.inspect({ target }));
+    assert.equal(r.stage, 'done');
+    assert.deepEqual(seen.map((p) => [p.kind, p.nonce]), [['grant', 0n], ['fund', 1n]]);
+  } finally { s.done(); }
+});
+
+test('钱包返回的哈希格式不对：等交易池里看得到它再报错；下次 run 被 nonce 检查拦下，不会再充一次', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    s.chain.holdOwner = (tx) => tx.data === '0x';
+    s.chain.hooks.ownerSend = async (tx) => {
+      if (tx.data !== '0x') return s.chain.walletSend(tx);
+      // 钱包广播了，但交易池要过一会儿才在节点上看得到
+      const hash = await s.chain.walletSend(tx);
+      s.chain.owner.pending -= 1n;
+      s.chain.hooks.onSleep = () => { s.chain.owner.pending = s.chain.owner.latest + 1n; };
+      return { hash };
+    };
+    await assert.rejects(s.p.run(await s.p.inspect({ target })), /钱包返回的交易哈希格式不对/);
+    assert.equal(s.store.get(BSC.chainId, CONTAINER).ownerPending, null);
+    assert.ok(s.chain.owner.pending > s.chain.owner.latest);
+    s.chain.hooks = {};
+    await assert.rejects(s.make().run(await s.p.inspect({ target })), /钱包里还有一笔未确认的交易，请等它确认后再继续/);
+    assert.deepEqual(ownerKinds(s.chain), ['grant', 'fund']);
   } finally { s.done(); }
 });
 

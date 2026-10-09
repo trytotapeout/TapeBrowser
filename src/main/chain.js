@@ -326,6 +326,12 @@ export function createChain(rpc, net = BSC) {
     return BigInt(await rpc('eth_estimateGas', [params]));
   }
 
+  /** 交易的 nonce（bigint）：交易池里的也查得到；节点不认得这笔交易时为 null。只问一个节点 */
+  async function txNonce(hash) {
+    const t = await rpc('eth_getTransactionByHash', [hash]);
+    return t?.nonce == null ? null : BigInt(t.nonce);
+  }
+
   /** 交易回执：还没上链时为 null */
   async function receipt(hash) {
     const r = await rpc('eth_getTransactionReceipt', [hash]);
@@ -371,5 +377,5 @@ export function createChain(rpc, net = BSC) {
     return b?.number ? BigInt(b.number) : null;
   }
 
-  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, v3Price, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, allPaths, hasCode, readRange, readVerified, openFee, isDeployed, operatorState, gasPrice, nonceOf, nonceAt, estimateGas, receipt, sendRaw, safeBlock };
+  return { pinBlock, crossRead, tokenInfo, tokenBalance, nativeBalance, v3Price, multicall, cpuList, holdings, maxTokenId, nextIds, openedFlags, ownedIds, circuitInfos, fileInfos, fileInfo, allPaths, hasCode, readRange, readVerified, openFee, isDeployed, operatorState, gasPrice, nonceOf, nonceAt, txNonce, estimateGas, receipt, sendRaw, safeBlock };
 }
