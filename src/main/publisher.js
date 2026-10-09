@@ -7,19 +7,25 @@
 //   precheck   已绑定参数的预检查 → { items: [{ level, text }] }
 // 流程分三步：
 //   inspect  检查网络、预检查、电路状态、发布计划，估算费用；只读链，不发交易
-//   run      开通 → 授权 → 充值 → 上传 → 核验（后续任务）
+//   run      开通 → 临时钱包 → 授权 → 充值 → 上传（核验、退款在后续任务接上）
 //   refund   把临时钱包剩下的余额退回持有人（后续任务）
+// run 每一步都重新读链，不信任上次的进度；中断后再 run 一次就能接着传。
 // 金额、gas、gasPrice 一律是 bigint；错误信息是给用户看的中文。
 
 import { createHash } from 'node:crypto';
 import { PUBLISH_NETWORKS, MAX_GAS_PRICE, MAX_UPLOAD_GAS, MAX_FILE_BYTES } from './config.js';
 import { planPublish, stepsOf, chunkOf } from './publish-plan.js';
-import { uploadTx } from './publish-tx.js';
+import { uploadTx, openTx, grantTx, fundTx } from './publish-tx.js';
+import { createOperator } from './operator.js';
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const maxOf = (a, b) => (a > b ? a : b);
 const utf8Len = (s) => BigInt(Buffer.byteLength(String(s), 'utf8'));
 const slots = (n) => (n + 31n) / 32n;
+const minOf = (a, b) => (a < b ? a : b);
+const lower = (a) => String(a).toLowerCase();
+const hexBlock = (n) => '0x' + n.toString(16);
+const sumOf = (xs) => xs.reduce((a, b) => a + b, 0n);
 // 每笔 gas 最后乘 1.25，和 Task 10 发交易时的 gasLimit 用同一个系数，充值按它算才够
 const PAD_NUM = 125n;
 const PAD_DEN = 100n;
@@ -69,19 +75,46 @@ function assertFiles(files, snapshot) {
   }
 }
 
+// run 里的固定参数：授权剩下不到 5 分钟就重新授权；估算回滚时隔 3 秒重试，最多重试 2 次；每 10 笔重新检查一次
+const GRANT_MARGIN_SEC = 300;
+const ESTIMATE_POLL_MS = 3000;
+const ESTIMATE_RETRIES = 2;
+const CHECK_EVERY = 10;
+
+// 正在执行 run / refund 的（chainId, 容器）。主进程只有一个实例，内存里互斥就够了
+const running = new Map();
+/** 同步占住这个容器，返回释放函数；已被占用直接抛出。必须在第一个 await 之前调用 */
+function lockContainer(chainId, container) {
+  const key = `${chainId}:${lower(container)}`;
+  if (running.has(key)) throw new Error('这个容器正在发布');
+  const token = {};
+  running.set(key, token);
+  return () => { if (running.get(key) === token) running.delete(key); };
+}
+
+// signal.aborted 时在两笔交易之间抛出它，run 捕获后返回 { stage: 'paused' }
+const PAUSED = Symbol('paused');
+
 export function createPublisher({ chain, net, ownerSend, store, readFiles, precheck, now = Date.now, sleep = defaultSleep }) {
+  /** 读当前 gas 单价，读不到或太高就抛出 */
+  async function currentGasPrice() {
+    const gasPrice = await chain.gasPrice();
+    if (gasPrice <= 0n) throw new Error('读不到有效的 Gas 单价，请稍后再试');
+    if (gasPrice > MAX_GAS_PRICE) throw new Error('当前 Gas 单价太高，请稍后再试');
+    return gasPrice;
+  }
+
   /**
    * 估算上传的 gas：每笔先按上限算；已开通时用节点模拟第一笔 putFile 和第一笔能成功的 appendChunk
    * （只有续传那一行的下一块和链上状态对得上；新文件、整个替换的后续块要等 putFile 上链，模拟必然回滚，就只用上限），
    * 算出这类交易除字节以外的固定开销，套到同类型的每一笔，和上限取较大的；每笔再乘 1.25。
    * 模拟遇到合约回滚返回 { revert }，节点问题就只用上限。
    */
-  async function estimateUpload({ owner, container, opened, steps }) {
-    const gasPrice = await chain.gasPrice();
-    if (gasPrice <= 0n) throw new Error('读不到有效的 Gas 单价，请稍后再试');
-    if (gasPrice > MAX_GAS_PRICE) throw new Error('当前 Gas 单价太高，请稍后再试');
+  async function estimateUpload({ owner, container, opened, steps, simulate }) {
+    const gasPrice = await currentGasPrice();
     const overhead = {};
-    if (opened) {
+    // simulate 为 false（run 里重新检查）时不模拟：latest 可能落在落后的节点上，把正常的 appendChunk 模拟成回滚
+    if (opened && simulate) {
       const firstPut = steps.find((s) => s.index === 0);
       const firstAppend = steps.find((s) => s.row.action === 'append' && s.index === s.row.from);
       for (const [type, first] of [['put', firstPut], ['append', firstAppend]]) {
@@ -109,8 +142,9 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
    * 发布前检查：返回 blocked / conflicts / ready 三种结果之一；网络不支持、电路不存在、本地文件异常、gas 单价不对直接抛出。
    * 传了 files（上一次 inspect 的快照）就跳过预检查和读文件，保证上传途中改了文件也不影响计划。
    * 同一次检查里的链上读取都钉在同一个区块；给了 minBlock（bigint）就不早于它，节点落后时直接用 minBlock（读不到由调用方重试）。
+   * simulate 为 false 时不调 estimateGas，每笔只按 stepGasBound × 1.25 算（run 里重新检查用）。
    */
-  async function inspect({ target, files, minBlock }) {
+  async function inspect({ target, files, minBlock, simulate = true }) {
     if (!PUBLISH_NETWORKS.includes(net.key)) throw new Error('这条链暂时不支持发布');
 
     const snapshot = Boolean(files);
@@ -141,7 +175,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     if (plan.conflicts.length) return { stage: 'conflicts', conflicts: plan.conflicts, plan };
 
     const steps = stepsOf(plan);
-    const est = await estimateUpload({ owner, container, opened, steps });
+    const est = await estimateUpload({ owner, container, opened, steps, simulate });
     if (est.revert) return { stage: 'blocked', errors: [{ level: 'error', text: '链上模拟上传失败：' + est.revert }] };
     const { gasPrice, stepGas, uploadGas, uploadCost } = est;
     return {
@@ -150,5 +184,210 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     };
   }
 
-  return { inspect };
+  // ---- run：开通 → 临时钱包 → 授权 → 充值 → 上传 ----
+
+  /** 轮询持有人交易的回执：超时抛出，让用户稍后继续（下次 run 会重新读链，交易上了链就不会重发） */
+  async function waitReceipt(hash, { timeoutMs = 300000, pollMs = 3000 } = {}) {
+    const deadline = now() + timeoutMs;
+    for (;;) {
+      const r = await chain.receipt(hash);
+      if (r) return r;
+      if (now() >= deadline) throw new Error('持有人的交易还没确认，可以稍后继续');
+      await sleep(pollMs);
+    }
+  }
+
+  /**
+   * 执行一次发布：inspected 是 inspect 返回的 ready 结果；opts = { onProgress, signal }。
+   * 返回 { stage: 'uploaded', container, label, uploaded, reused, spent, lastBlock } 或 { stage: 'paused' }。
+   * 同一个（chainId, 容器）同时只能有一个 run / refund
+   */
+  async function run(inspected, { onProgress, signal } = {}) {
+    if (inspected?.stage !== 'ready') throw new Error('还没有检查通过，不能发布');
+    // 同步加锁：第二个并发调用在这里就被拒绝
+    const unlock = lockContainer(net.chainId, inspected.container);
+    try {
+      return await runInner(inspected, { onProgress, signal });
+    } catch (e) {
+      if (e === PAUSED) return { stage: 'paused' };
+      throw e;
+    } finally { unlock(); }
+  }
+
+  async function runInner(inspected, { onProgress, signal }) {
+    const ctx = {
+      target: inspected.target,
+      files: inspected.files,
+      // 最近一笔已确认交易的区块；之后的读取都不早于它
+      minBlock: BigInt(inspected.block),
+      lastBlock: null,
+      uploaded: 0,
+      spent: 0n,
+      progress: (e) => onProgress?.(e),
+      checkAbort: () => { if (signal?.aborted) throw PAUSED; },
+    };
+    let cur = inspected;
+    if (!cur.opened) cur = await openContainer(ctx, cur);
+    const operator = await prepareOperator(ctx, cur);
+    await ensureGrant(ctx, cur, operator);
+    cur = await reinspect(ctx);
+    await uploadAll(ctx, cur, operator);
+    // 10b：在这里接核验和退款
+    return {
+      stage: 'uploaded', container: cur.container, label: ctx.target.label,
+      uploaded: ctx.uploaded, reused: cur.plan.reused, spent: ctx.spent, lastBlock: ctx.lastBlock,
+    };
+  }
+
+  /** 记下一笔已确认的交易：推进 minBlock / lastBlock */
+  function confirmed(ctx, r) {
+    const b = BigInt(r.blockNumber);
+    if (b > ctx.minBlock) ctx.minBlock = b;
+    if (ctx.lastBlock === null || b > ctx.lastBlock) ctx.lastBlock = b;
+  }
+
+  /** 临时钱包交易的花费：gasUsed × effectiveGasPrice（节点没给就用签名时的 gasPrice） */
+  function charge(ctx, r, gasPrice) {
+    ctx.spent += BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice ?? gasPrice);
+  }
+
+  /** 持有人发一笔交易并等确认；status 0 抛出 failMsg */
+  async function ownerTx(ctx, stage, tx, failMsg) {
+    ctx.checkAbort();
+    const hash = await ownerSend(tx);
+    ctx.progress({ stage, hash });
+    const r = await waitReceipt(hash);
+    if (r.status !== 1) throw new Error(failMsg);
+    confirmed(ctx, r);
+    return r;
+  }
+
+  /** 按 minBlock 重新检查（不模拟），不是 ready 就停下 */
+  async function reinspect(ctx) {
+    const r = await inspect({ target: ctx.target, files: ctx.files, minBlock: ctx.minBlock, simulate: false });
+    if (r.stage !== 'ready') {
+      const why = r.stage === 'conflicts' ? r.conflicts.map((c) => c.path).join('、') : (r.errors || []).map((e) => e.text).join('；');
+      throw new Error('链上状态变了，请重新检查：' + why);
+    }
+    return r;
+  }
+
+  /** 第 1 步：开通容器，确认后在回执区块上核对开通状态、容器地址、合约已部署，再重新检查 */
+  async function openContainer(ctx, cur) {
+    const { circuits, tokenId } = ctx.target;
+    await ownerTx(ctx, 'open', openTx(net, cur.owner, { circuits, tokenId }, cur.openFee), '开通容器失败');
+    const block = hexBlock(ctx.minBlock);
+    const [info] = await chain.circuitInfos([{ circuits, tokenId }], block);
+    const deployed = await chain.isDeployed(circuits, tokenId, block);
+    if (!info?.opened || lower(info.container) !== lower(cur.container) || !deployed) throw new Error('开通后核对失败');
+    const next = await reinspect(ctx);
+    if (!next.opened || lower(next.container) !== lower(cur.container)) throw new Error('开通后核对失败');
+    return next;
+  }
+
+  /**
+   * 第 2 步：取出或新建这个容器的临时钱包，先处理上次留下的 pending。
+   * 上次停在一笔上传上时，它确认了也算这次的上传；status 0 照常报错。
+   * OPERATOR_OWNER_MISMATCH（电路换了持有人）原样抛出，由后续任务处理
+   */
+  async function prepareOperator(ctx, cur) {
+    store.create({ chainId: net.chainId, container: cur.container, owner: cur.owner });
+    const operator = createOperator({ store, chain, net, container: cur.container, owner: cur.owner, sleep, now });
+    const pending = store.get(net.chainId, cur.container)?.pending;
+    const r = await operator.settle();
+    if (r) {
+      confirmed(ctx, r);
+      charge(ctx, r, 0n);
+      if (pending?.kind === 'upload') {
+        if (r.status !== 1) throw new Error(`上传 ${pending.path} 第 ${pending.index} 块失败`);
+        ctx.uploaded++;
+      }
+    }
+    return operator;
+  }
+
+  /** 第 3 步：没有编辑权限或授权快到期就重新授权，确认后在回执区块上再读一次，必须已经生效 */
+  async function ensureGrant(ctx, cur, operator) {
+    const state = await chain.operatorState(cur.container, operator.address, hexBlock(ctx.minBlock));
+    if (state.canEdit && state.until >= now() / 1000 + GRANT_MARGIN_SEC) return;
+    const r = await ownerTx(ctx, 'grant', grantTx(net, cur.owner, cur.container, operator.address), '授权失败');
+    const after = await chain.operatorState(cur.container, operator.address, hexBlock(BigInt(r.blockNumber)));
+    if (!after.canEdit) throw new Error('授权没有生效');
+  }
+
+  /**
+   * 第 4 步：充值。节点广播前检查「余额 ≥ gasLimit × gasPrice」，所以每笔上传前都要检查。
+   * 第一笔之前（first）按剩下的全部算；之后只在余额不够这一笔时才补。
+   * 金额 = max(剩下各步 stepGas 之和 × gasPrice − 余额, 这一笔 gasLimit × gasPrice − 余额)：
+   * 节点估出的 gas 比 stepGas 大时也一定能往前走。首页的块在剩下的 steps 里，总是算进去
+   */
+  async function ensureFunds(ctx, cur, operator, { rest, gasLimit, gasPrice, first }) {
+    const balance = await operator.balance();
+    if (!first && balance >= gasLimit * gasPrice) return;
+    const amount = maxOf(sumOf(rest) * gasPrice, gasLimit * gasPrice) - balance;
+    if (amount <= 0n) return;
+    await ownerTx(ctx, 'fund', fundTx(cur.owner, operator.address, amount), '充值失败');
+  }
+
+  /**
+   * 一笔上传的 gasLimit：用临时钱包地址估算 × 1.25，不超过 MAX_UPLOAD_GAS。
+   * 合约回滚可能是节点落后，隔一个 pollMs 重试 2 次仍回滚才报错；超时、限流之类的节点问题用这一步的 stepGas
+   */
+  async function uploadGasLimit(cur, operator, step, fallback) {
+    const tx = { from: operator.address, ...uploadTx(net, cur.container, step) };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const est = BigInt(await chain.estimateGas(tx));
+        return minOf(est * PAD_NUM / PAD_DEN, MAX_UPLOAD_GAS);
+      } catch (e) {
+        if (!isRevert(e)) return fallback;
+        if (attempt >= ESTIMATE_RETRIES) throw new Error(`上传 ${step.path} 第 ${step.index} 块模拟失败：${e?.message || e}`);
+        await sleep(ESTIMATE_POLL_MS);
+      }
+    }
+  }
+
+  /**
+   * 第 5 步：逐笔上传。每笔先读 gas 单价、估 gasLimit、检查余额，再由临时钱包签名发出并等确认。
+   * 每传完一个文件、每 10 笔，按 minBlock 重新检查，用链上的最新状态继续（不信任本地进度），
+   * 并核对剩下的笔数确实减少了
+   */
+  async function uploadAll(ctx, cur, operator) {
+    let first = true;
+    let sinceCheck = 0;
+    while (cur.steps.length) {
+      const [step] = cur.steps;
+      ctx.checkAbort();
+      const gasPrice = await currentGasPrice();
+      const gasLimit = await uploadGasLimit(cur, operator, step, cur.stepGas[0]);
+      await ensureFunds(ctx, cur, operator, { rest: cur.stepGas, gasLimit, gasPrice, first });
+      first = false;
+      ctx.checkAbort();
+
+      const { path, index } = step;
+      const hash = await operator.send({ ...uploadTx(net, cur.container, step), gas: gasLimit, gasPrice }, { kind: 'upload', path, index });
+      // send 遇到 nonceUsed 时已经在内部确认并清掉了 pending，settle 返回 null，回执直接查
+      const r = (await operator.settle()) ?? (await chain.receipt(hash));
+      if (!r) throw new Error('交易还没确认，可以稍后继续');
+      confirmed(ctx, r);
+      charge(ctx, r, gasPrice);
+      if (r.status !== 1) throw new Error(`上传 ${path} 第 ${index} 块失败`);
+      ctx.uploaded++;
+      const left = cur.steps.length - 1;
+      ctx.progress({ stage: 'upload', done: ctx.uploaded, total: ctx.uploaded + left, path, index, hash });
+
+      sinceCheck++;
+      const fileDone = cur.steps[1]?.path !== path;
+      if (fileDone || sinceCheck >= CHECK_EVERY) {
+        const fresh = await reinspect(ctx);
+        if (fresh.steps.length > left) throw new Error(`上传后核对失败：${path} 的块数没有增加`);
+        cur = fresh;
+        sinceCheck = 0;
+      } else {
+        cur = { ...cur, steps: cur.steps.slice(1), stepGas: cur.stepGas.slice(1) };
+      }
+    }
+  }
+
+  return { inspect, run };
 }

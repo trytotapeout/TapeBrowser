@@ -309,3 +309,14 @@ test('乘 1.25 之后每笔仍然不超过 MAX_UPLOAD_GAS', async () => {
   const r = await make({ chain: fakeChain({ opened: false }), files: [file(path, 10)] }).inspect({ target });
   assert.deepEqual(r.stepGas, [MAX_UPLOAD_GAS]);
 });
+
+test('simulate: false：不调 estimateGas，每笔按上限 × 1.25 封顶', async () => {
+  const f = file('a.js', 30000);
+  const chain = fakeChain({ infos: { 'a.js': resumed(f, 1) }, estimate: () => { throw new Error('不该估算'); } });
+  const p = make({ chain });
+  const r = await p.inspect({ target, files: [f, file('index.html', 10)], simulate: false });
+  assert.equal(r.stage, 'ready');
+  assert.equal(called(chain, 'estimateGas').length, 0);
+  assert.deepEqual(r.stepGas, r.steps.map((s) => pad(stepGasBound(s))));
+  assert.equal(r.uploadGas, sum(r.stepGas));
+});
