@@ -17,9 +17,9 @@
 | Windows（x64） | `TapeBrowser-<版本>-win-x64-setup.exe` |
 | Linux（x86_64） | `TapeBrowser-<版本>-linux-x86_64.AppImage` |
 
-每个版本都附有 `SHA256SUMS.txt`，可以核对下载的文件。安装包还没有签名，第一次打开时：
+每个版本都附有 `SHA256SUMS.txt`，可以核对下载的文件。第一次打开时：
 
-- macOS：把应用拖进「应用程序」后双击，系统提示无法验证开发者时点「完成」，再到「系统设置 → 隐私与安全性」底部点「仍要打开」。如果仍然提示「已损坏」（0.9.0 及更早的版本会这样），在终端运行 `xattr -dr com.apple.quarantine /Applications/TapeBrowser.app` 后再打开
+- macOS：从 0.14.0 开始，安装包用 Apple 开发者证书签名并通过公证，拖进「应用程序」后双击就能打开。0.13.0 及更早的版本没有公证，系统提示无法验证开发者时点「完成」，再到「系统设置 → 隐私与安全性」底部点「仍要打开」。如果仍然提示「已损坏」（0.9.0 及更早的版本会这样），在终端运行 `xattr -dr com.apple.quarantine /Applications/TapeBrowser.app` 后再打开
 - Windows：SmartScreen 提示时点「更多信息 → 仍要运行」
 - Linux：先 `chmod +x` 再运行 AppImage
 
@@ -161,7 +161,19 @@ npm run dist:linux
 
 打包产物都在 `dist/`：mac 是 Apple 芯片（arm64）和 Intel（x64）两个 `.dmg`，Windows 是 x64 的 `.exe` 安装包，Linux 是 x64 的 `.AppImage`。文件名统一为 `TapeBrowser-<版本>-<平台>-<架构>`，例如 `TapeBrowser-0.8.2-mac-x64.dmg`。三个平台都可以在 mac 上直接交叉打包，不需要装 Wine；`npm run dist:all` 依次打全部三个。
 
-打包产物没有开发者签名：mac 包只做了临时签名（ad-hoc，见 package.json 的 `build.mac.identity`），没有经过 Apple 公证，第一次打开时 Gatekeeper 会拦截，打开方法见上面「下载」一节；Windows 会弹 SmartScreen 提示，点「更多信息 → 仍要运行」；Linux 的 AppImage 需要先 `chmod +x` 再运行。
+mac 包签名和公证：钥匙串里有 Developer ID Application 证书时，electron-builder 会自动用它签名（开启 hardened runtime，权限见 `build/entitlements.mac.plist`），没有证书就不签名，照样能打包。公证需要先把 Apple 账号的 App 专用密码存进钥匙串（只做一次）：
+
+```bash
+xcrun notarytool store-credentials "tapebrowser-notary" --apple-id "<Apple ID>" --team-id "<Team ID>"
+```
+
+打包时带上 `APPLE_KEYCHAIN_PROFILE`，签名后会自动提交公证并把公证票据钉进应用：
+
+```bash
+APPLE_KEYCHAIN_PROFILE=tapebrowser-notary npm run dist:mac
+```
+
+不设这个变量就只签名、不公证。Windows 和 Linux 包没有签名：Windows 会弹 SmartScreen 提示，点「更多信息 → 仍要运行」；Linux 的 AppImage 需要先 `chmod +x` 再运行。
 
 ## 代码结构
 

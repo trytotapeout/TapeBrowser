@@ -81,32 +81,42 @@
           </tbody>
         </table>
         <div class="hint">
-          <p>每个文件的 SHA-256 见 <a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.13.0/SHA256SUMS.txt">SHA256SUMS.txt</a>。安装包还没有签名，第一次打开时：</p>
+          <p>每个文件的 SHA-256 见 <a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.13.0/SHA256SUMS.txt">SHA256SUMS.txt</a>。第一次打开时：</p>
           <ul>
-            <li>macOS：按下面的步骤操作</li>
+            <li>macOS：安装包已经用 Apple 开发者证书签名并通过公证，拖进「应用程序」后双击就能打开。0.13.0 及更早的版本还要多一步，见<a href="#changelog">更新日志</a> 0.14.0</li>
             <li>Windows：SmartScreen 提示时点「更多信息 → 仍要运行」</li>
             <li>Linux：先 <code>chmod +x</code> 再运行 AppImage</li>
           </ul>
         </div>
-
-        <h3 class="steps-title">macOS 第一次打开</h3>
-        <ol class="steps">
-          <li>
-            <p>打开下载的 dmg，把 TapeBrowser 拖进「Applications」（应用程序），再双击打开。系统会提示「Apple 无法验证」，点「完成」。</p>
-            <img src="img/mac-open-1.jpg" width="1100" height="929" loading="lazy" alt="macOS 提示：未打开 TapeBrowser.app，Apple 无法验证它是否包含可能危害 Mac 安全或泄漏隐私的恶意软件，只有一个「完成」按钮">
-          </li>
-          <li>
-            <p>打开「系统设置 → 隐私与安全性」，滚到「安全性」一栏，在「已阻止 TapeBrowser.app 以保护 Mac」旁边点「仍要打开」，输入密码确认。之后就能正常打开了。</p>
-            <img src="img/mac-open-2.jpg" width="1100" height="1061" loading="lazy" alt="系统设置的隐私与安全性页面，安全性一栏显示已阻止 TapeBrowser.app 以保护 Mac，右边的「仍要打开」按钮被红圈标出">
-          </li>
-        </ol>
-        <p class="hint">如果提示的是「已损坏，无法打开」（0.9.0 及更早的版本会这样），在终端运行 <code>xattr -dr com.apple.quarantine /Applications/TapeBrowser.app</code> 后再打开。</p>
       </div>
     </section>
 
     <section id="changelog" class="log" aria-labelledby="changelog-title">
       <div class="wrap">
         <h2 id="changelog-title">更新日志</h2>
+
+        <h3>0.14.0</h3>
+        <ul>
+          <li>macOS 安装包用 Apple 开发者证书（Developer ID）签名，并通过 Apple 公证，下载后双击就能打开，不用再去系统设置里点「仍要打开」</li>
+        </ul>
+        <details class="older-mac">
+          <summary>0.13.0 及更早的版本怎么打开</summary>
+            <p>0.13.0 及更早的版本第一次打开时：</p>
+            <ol class="steps">
+              <li>
+                <p>打开下载的 dmg，把 TapeBrowser 拖进「Applications」（应用程序），再双击打开。系统会提示「Apple 无法验证」，点「完成」。</p>
+                <img src="img/mac-open-1.jpg" width="1100" height="929" loading="lazy" alt="macOS 提示：未打开 TapeBrowser.app，Apple 无法验证它是否包含可能危害 Mac 安全或泄漏隐私的恶意软件，只有一个「完成」按钮">
+              </li>
+              <li>
+                <p>打开「系统设置 → 隐私与安全性」，滚到「安全性」一栏，在「已阻止 TapeBrowser.app 以保护 Mac」旁边点「仍要打开」，输入密码确认。之后就能正常打开了。</p>
+                <img src="img/mac-open-2.jpg" width="1100" height="1061" loading="lazy" alt="系统设置的隐私与安全性页面，安全性一栏显示已阻止 TapeBrowser.app 以保护 Mac，右边的「仍要打开」按钮被红圈标出">
+              </li>
+            </ol>
+            <p class="hint">如果提示的是「已损坏，无法打开」（0.9.0 及更早的版本会这样），在终端运行 <code>xattr -dr com.apple.quarantine /Applications/TapeBrowser.app</code> 后再打开。</p>
+        </details>
+
+        <details class="older">
+          <summary>更早的版本</summary>
 
         <h3>0.13.0 <span class="date">2026-10-09</span></h3>
         <ul>
@@ -207,6 +217,7 @@
           <li>页内查找、缩放、历史记录和书签</li>
           <li>网站信息面板；本机内容缓存，读链失败时用缓存兜底</li>
         </ul>
+        </details>
       </div>
     </section>
 

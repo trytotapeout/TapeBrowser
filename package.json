@@ -67,8 +67,10 @@
       ],
       "icon": "build/icon.icns",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
-      "identity": "-",
-      "hardenedRuntime": false
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
     },
     "win": {
       "target": [

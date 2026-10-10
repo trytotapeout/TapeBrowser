@@ -53,7 +53,6 @@ th { color: var(--muted); font-weight: 500; }
 .hint { color: var(--muted); font-size: 14px; }
 .hint ul { margin: 8px 0 0; padding-left: 20px; }
 
-.steps-title { font-size: 18px; margin: 32px 0 8px; }
 .steps { margin: 0; padding-left: 22px; }
 .steps li { margin: 0 0 24px; }
 .steps p { margin: 0 0 10px; }
@@ -63,6 +62,11 @@ th { color: var(--muted); font-weight: 500; }
 .log h3 .date { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 8px; }
 .log ul { margin: 6px 0 0; padding-left: 20px; }
 .log li { margin: 3px 0; }
+.log details { margin-top: 16px; }
+.log summary { cursor: pointer; color: var(--link); font-size: 15px; }
+.log details[open] > summary { margin-bottom: 8px; }
+.log .steps { margin-top: 12px; }
+.log .steps li { margin: 0 0 24px; }
 
 /* 分享链接落地页 open/ */
 .open-page { padding: 72px 0 80px; }
