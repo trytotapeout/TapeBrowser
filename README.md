@@ -24,6 +24,8 @@
 - Windows：SmartScreen 提示时点「更多信息 → 仍要运行」
 - Linux：先 `chmod +x` 再运行 AppImage
 
+从 0.15.0 开始，TapeBrowser 启动时会检查有没有新版本（一天最多一次，只读 GitHub Releases 的最新版本号）。有新版本时弹窗提示，点「去下载」打开发布页，自己下载安装覆盖旧版，书签和设置都会保留；也可以选「跳过这个版本」。不会自动下载或安装。随时可以在菜单里点「检查更新…」（mac 在 TapeBrowser 菜单，Windows / Linux 在帮助菜单）。
+
 ## 地址栏能输入什么
 
 | 输入 | 效果 |
