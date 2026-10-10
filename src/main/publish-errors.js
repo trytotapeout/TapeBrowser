@@ -22,6 +22,11 @@ export const UPLOAD_FAILED = 'UPLOAD_FAILED';     // 上传回执失败、模拟
 export const REFUND_FAILED = 'REFUND_FAILED';
 export const NO_OPERATOR = 'NO_OPERATOR';         // 没有这个容器的临时钱包
 export const NOT_DUST = 'NOT_DUST';               // 临时钱包里的余额还能退回，不能直接放弃
+export const WALLET_NOT_CONNECTED = 'WALLET_NOT_CONNECTED'; // 钱包没连接（桥接页没打开或没授权）
+export const WALLET_ACCOUNT = 'WALLET_ACCOUNT';   // 钱包当前账户不是电路持有人
+export const WALLET_CHAIN = 'WALLET_CHAIN';       // 钱包不在要发布的链上，切链被拒绝或没切成
+export const USER_REJECTED = 'USER_REJECTED';     // 用户在钱包里拒绝了交易
+export const WALLET_LOST = 'WALLET_LOST';         // 发交易时钱包没回应（超时、桥接断开），交易可能已经发出
 // 只有 operator-store.create 抛出的 OPERATOR_OWNER_MISMATCH 带 old（旧记录，不含私钥），调用方据此先退款给旧持有人
 export const OPERATOR_OWNER_MISMATCH = 'OPERATOR_OWNER_MISMATCH'; // 容器已有另一个持有人的临时钱包，带 old
 export const OWNER_MISMATCH_OPERATOR = 'OWNER_MISMATCH_OPERATOR'; // createOperator 传入的持有人和记录不一致，不带 old

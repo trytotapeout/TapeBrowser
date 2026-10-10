@@ -346,7 +346,7 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     ctx.checkAbort();
     const { latest, pending } = await chain.nonceOf(ctx.owner);
     if (pending > latest) throw fail(E.WALLET_PENDING, '钱包里还有一笔未确认的交易，请等它确认后再继续');
-    const sent = await ownerSend(tx);
+    const sent = await ownerSend(tx, kind);
     if (typeof sent !== 'string' || !TX_HASH.test(sent)) {
       // 没有哈希就记不了在途记录，下次 run 只能靠上面的 nonce 检查拦住重复的交易。
       // 钱包可能已经广播了，等节点交易池里看得到它（pending > latest）再报错，下次 run 才一定被拦下
