@@ -5,7 +5,7 @@ import { PUBLISH_MESSAGES, translateMessage, matchMessage } from '../src/main/pu
 
 const FILES = [
   'src/main/publisher.js', 'src/main/operator.js', 'src/main/operator-store.js',
-  'src/main/publish-service.js', 'src/main/owner-send.js', 'src/main/sites.js',
+  'src/main/publish-service.js', 'src/main/owner-send.js', 'src/main/sites.js', 'src/main/main.js',
 ];
 // fail(code, 这些) 是运行时才知道的文字（钱包原样返回的错误、waitReceipt 的参数），不进列表
 const DYNAMIC = new Set(['e?.message', 'message']);

@@ -556,7 +556,7 @@
  "你在钱包里拒绝了这笔交易": "You rejected this transaction in your wallet",
  "参数不对：{name}": "Invalid argument: {name}",
  "这个文件夹没有在本地预览里打开过": "This folder hasn't been opened in Local Preview",
- "正在处理另一笔退款，请等它结束": "Another refund is in progress. Wait for it to finish",
+ "正在处理另一个退款或放弃零头操作，请等它结束": "Another refund or dust discard is in progress. Wait for it to finish",
  "有 {n} 个临时钱包无法解密（系统钥匙串可能已重置），里面的余额找不回来了": "{n} temporary wallet(s) can't be decrypted (the system keychain may have been reset), and their balance can't be recovered",
  "有 {n} 个临时钱包记录文件已损坏，里面的余额可能找不回来": "{n} temporary wallet record file(s) are corrupted, and their balance may not be recoverable"
 }

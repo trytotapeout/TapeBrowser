@@ -400,7 +400,7 @@ function registerIpc() {
   // 退款 / 放弃零头：确认框开着或调用还没结束时再点，直接拒绝，不叠第二个确认框
   let confirming = false;
   const once = (fn) => async (...args) => {
-    if (confirming) throw fail(BUSY, tr('正在处理另一笔退款，请等它结束'));
+    if (confirming) throw fail(BUSY, '正在处理另一个退款或放弃零头操作，请等它结束');
     confirming = true;
     try { return await fn(...args); } finally { confirming = false; }
   };
