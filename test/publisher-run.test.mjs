@@ -1345,6 +1345,21 @@ test('钱包发持有人交易报 WALLET_LOST：等到节点交易池里看得�
   } finally { s.done(); }
 });
 
+test('WALLET_LOST 之后等交易池时节点出错：仍然抛出 WALLET_LOST，不被节点错误替换', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    const inspected = await s.p.inspect({ target });
+    const real = s.chain.nonceOf;
+    s.chain.hooks.ownerSend = async () => {
+      // 钱包没回应之后，查 nonce 的节点也挂了
+      s.chain.nonceOf = async () => { throw new RpcError('节点挂了'); };
+      throw Object.assign(new Error('钱包没有回应'), { code: 'WALLET_LOST' });
+    };
+    await assert.rejects(s.p.run(inspected), (e) => e.code === 'WALLET_LOST' && e.message === '钱包没有回应');
+    s.chain.nonceOf = real;
+  } finally { s.done(); }
+});
+
 test('用户在钱包里拒绝：不等交易池，直接抛出', async () => {
   const s = setup({ files: threeFiles() });
   try {

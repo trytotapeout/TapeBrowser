@@ -358,7 +358,10 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       sent = await ownerSend(tx, kind);
     } catch (e) {
       // 钱包可能已经广播了：和下面拿不到哈希一样，等交易池里看得到它再抛，下次 run 的 nonce 检查才一定拦得住
-      if (e?.code === E.WALLET_LOST) await awaitOwnerQueued(ctx, latest);
+      if (e?.code === E.WALLET_LOST) {
+        // 等交易池时节点出错不能盖掉 WALLET_LOST：界面要靠它提示交易可能已经发出
+        try { await awaitOwnerQueued(ctx, latest); } catch { /* 照样抛 WALLET_LOST */ }
+      }
       throw e;
     }
     if (typeof sent !== 'string' || !TX_HASH.test(sent)) {

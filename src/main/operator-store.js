@@ -307,7 +307,6 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
       });
     },
 
-    /** 只能往大改：比现有值小或相等时不写盘 */
     /** 持有人要发交易了：记下时间（毫秒），只能往大改，比现有值小或相等时不写盘 */
     touchOwner(chainId, container, at) {
       if (!Number.isSafeInteger(at) || at < 0) throw new Error('临时钱包：时间不正确');
@@ -317,6 +316,7 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
       });
     },
 
+    /** 只能往大改：比现有值小或相等时不写盘 */
     setMinBlock(chainId, container, block) {
       if (typeof block !== 'bigint' || block < 0n) throw new Error('临时钱包：区块号不正确');
       update(chainId, container, (rec) => {
