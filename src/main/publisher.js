@@ -161,16 +161,17 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
    * 传了 files（上一次 inspect 的快照）就跳过预检查和读文件，保证上传途中改了文件也不影响计划。
    * 同一次检查里的链上读取都钉在同一个区块；给了 minBlock（bigint）就不早于它，节点落后时直接用 minBlock（读不到由调用方重试）。
    * simulate 为 false 时不调 estimateGas，每笔只按 stepGasBound × 1.25 算（run 里重新检查用）。
+   * readFiles / precheck 可以按这一次检查传入（发布服务按本次的文件夹绑定），不传就用创建时给的。
    */
-  async function inspect({ target, files, minBlock, simulate = true }) {
+  async function inspect({ target, files, minBlock, simulate = true, readFiles: readNow = readFiles, precheck: checkNow = precheck }) {
     if (!PUBLISH_NETWORKS.includes(net.key)) throw fail(E.CHAIN_UNSUPPORTED, '这条链暂时不支持发布');
 
     const snapshot = Boolean(files);
     if (!snapshot) {
-      const { items } = await precheck();
+      const { items } = await checkNow();
       const errors = items.filter((i) => i.level === 'error');
       if (errors.length) return { stage: 'blocked', errors };
-      files = await readFiles();
+      files = await readNow();
     }
     assertFiles(files, snapshot);
 

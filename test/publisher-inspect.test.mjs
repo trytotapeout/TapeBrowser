@@ -320,3 +320,14 @@ test('simulate: false：不调 estimateGas，每笔按上限 × 1.25 封顶', as
   assert.deepEqual(r.stepGas, r.steps.map((s) => pad(stepGasBound(s))));
   assert.equal(r.uploadGas, sum(r.stepGas));
 });
+
+test('inspect 传入 readFiles / precheck：这一次用传入的，不调创建时给的', async () => {
+  const p = make({ files: [file('a.js', 10)] });
+  const mine = [file('index.html', 20)];
+  const r = await p.inspect({ target, readFiles: async () => mine, precheck: async () => ({ items: [] }) });
+  assert.equal(r.stage, 'ready');
+  assert.deepEqual(r.files.map((f) => f.path), ['index.html']);
+  assert.deepEqual(p.seen, { readFiles: 0, precheck: 0 });
+  const blocked = await p.inspect({ target, readFiles: async () => mine, precheck: async () => ({ items: [{ level: 'error', text: '坏' }] }) });
+  assert.equal(blocked.stage, 'blocked');
+});

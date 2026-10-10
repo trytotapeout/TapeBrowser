@@ -28,6 +28,7 @@ export const WALLET_CHAIN = 'WALLET_CHAIN';       // 钱包不在要发布的链
 export const USER_REJECTED = 'USER_REJECTED';     // 用户在钱包里拒绝了交易
 export const WALLET_LOST = 'WALLET_LOST';         // 发交易时钱包没回应（超时、桥接断开），交易可能已经发出
 export const WALLET_ERROR = 'WALLET_ERROR';       // 钱包返回的其他错误，原始错误在 cause，钱包的错误码在 walletCode
+export const NO_ENCRYPTION = 'NO_ENCRYPTION';     // 这台电脑无法安全保存临时钱包（safeStorage 不可用或是 basic_text），不能发布
 // 只有 operator-store.create 抛出的 OPERATOR_OWNER_MISMATCH 带 old（旧记录，不含私钥），调用方据此先退款给旧持有人
 export const OPERATOR_OWNER_MISMATCH = 'OPERATOR_OWNER_MISMATCH'; // 容器已有另一个持有人的临时钱包，带 old
 export const OWNER_MISMATCH_OPERATOR = 'OWNER_MISMATCH_OPERATOR'; // createOperator 传入的持有人和记录不一致，不带 old
