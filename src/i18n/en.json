@@ -662,5 +662,14 @@
  "发布计划": "Publishing plan",
  "没发完或没退干净的临时钱包": "Unfinished or unrefunded temporary wallets",
  "不含你钱包自己发这几笔交易的手续费；Gas 单价上涨时充值会多一些，可能要多确认一次补充值，没用完的会退回": "This doesn't include the fees for the transactions your own wallet sends. If the gas price rises, funding will be a bit higher and you may need to confirm one more top-up. Anything unused is refunded",
- "将把当前文件夹 {root} 发布到 {label}": "The current folder {root} will be published to {label}"
+ "将把当前文件夹 {root} 发布到 {label}": "The current folder {root} will be published to {label}",
+ "检查更新…": "Check for Updates…",
+ "TapeBrowser {version} 已发布": "TapeBrowser {version} is available",
+ "你现在用的是 {current}。到 GitHub 发布页下载新版本，安装后覆盖旧版即可，书签和设置都会保留。": "You're on {current}. Download the new version from the GitHub release page and install it over the old one. Your bookmarks and settings are kept.",
+ "去下载": "Download",
+ "以后再说": "Later",
+ "跳过这个版本": "Skip This Version",
+ "已是最新版本 {current}": "You're on the latest version ({current})",
+ "检查更新失败": "Couldn't check for updates",
+ "检查 TapeBrowser 更新": "TapeBrowser Updates"
 }

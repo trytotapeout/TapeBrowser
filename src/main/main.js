@@ -26,6 +26,7 @@ import { prepareTip, parseBem } from './tip.js';
 import { formatBem } from './bem.js';
 import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
 import { createPublishService } from './publish-service.js';
+import { checkLatest, autoCheck } from './updates.js';
 import { translateMessage, matchMessage, fail, NO_OPERATOR, NO_ENCRYPTION, NOT_LOCAL, BUSY } from './publish-errors.js';
 import { createRequire } from 'node:module';
 const i18n = createRequire(import.meta.url)('../i18n/i18n.cjs');
@@ -707,6 +708,39 @@ async function showAbout() {
   else if (r.response === 3) { clipboard.writeText(DONATE_ADDRESS); notify(tr('已复制钱包地址'), 'ok'); }
 }
 
+/** 检查更新：只提示，打开 GitHub 发布页让用户自己下载。manual 是从菜单点的：已是最新、出错也要告诉用户 */
+let checkingUpdate = false;
+async function checkForUpdates(manual) {
+  if (checkingUpdate) return;
+  checkingUpdate = true;
+  try {
+    const fetchImpl = (url, init) => net.fetch(url, init);
+    const current = app.getVersion();
+    const r = manual ? await checkLatest({ current, fetchImpl }) : await autoCheck({ current, fetchImpl, settings });
+    const parent = win && !win.isDestroyed() ? win : undefined;
+    if (r.status === 'new') {
+      const d = await dialog.showMessageBox(parent, {
+        type: 'info',
+        title: tr('检查 TapeBrowser 更新'),
+        message: tr('TapeBrowser {version} 已发布', { version: r.version }),
+        detail: tr('你现在用的是 {current}。到 GitHub 发布页下载新版本，安装后覆盖旧版即可，书签和设置都会保留。', { current }),
+        buttons: [tr('去下载'), tr('以后再说'), tr('跳过这个版本')],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (d.response === 0) shell.openExternal(r.url);
+      else if (d.response === 2) settings.set('updateSkip', r.version);
+    } else if (manual && r.status === 'latest') {
+      await dialog.showMessageBox(parent, { type: 'info', title: tr('检查 TapeBrowser 更新'), message: tr('已是最新版本 {current}', { current }), buttons: [tr('好')] });
+    } else if (r.status === 'error') {
+      console.error('update check:', r.message);
+      if (manual) await dialog.showMessageBox(parent, { type: 'warning', title: tr('检查 TapeBrowser 更新'), message: tr('检查更新失败'), detail: r.message, buttons: [tr('好')] });
+    }
+  } finally {
+    checkingUpdate = false;
+  }
+}
+
 function buildMenu() {
   const isMac = process.platform === 'darwin';
   // 键盘焦点可能在网页里，先把焦点拉回外壳界面
@@ -716,6 +750,7 @@ function buildMenu() {
       label: 'TapeBrowser',
       submenu: [
         { label: tr('关于 TapeBrowser'), click: () => showAbout() },
+        { label: tr('检查更新…'), click: () => checkForUpdates(true) },
         { type: 'separator' },
         { role: 'services', label: tr('服务') },
         { type: 'separator' },
@@ -797,7 +832,7 @@ function buildMenu() {
       submenu: [
         { label: tr('使用帮助'), click: ui('help') },
         // Windows、Linux 没有应用菜单，关于放在帮助里
-        ...(isMac ? [] : [{ type: 'separator' }, { label: tr('关于 TapeBrowser'), click: () => showAbout() }]),
+        ...(isMac ? [] : [{ type: 'separator' }, { label: tr('检查更新…'), click: () => checkForUpdates(true) }, { label: tr('关于 TapeBrowser'), click: () => showAbout() }]),
       ],
     },
   ];
@@ -920,6 +955,8 @@ app.whenReady().then(async () => {
   createWindow();
   // 上次没发完或没退干净的临时钱包：提示一次，发布页里再列出来（契约第 4 条）
   publish.leftovers().then(noticeLeftovers).catch((e) => console.error('publish leftovers:', e));
+  // 启动稍等一会儿再自动检查更新，不和窗口加载抢；开发模式下不查
+  if (app.isPackaged) setTimeout(() => { checkForUpdates(false).catch((e) => console.error('update check:', e)); }, 8000).unref?.();
 
   app.on('activate', () => { if (!win) createWindow(); });
 
