@@ -31,6 +31,7 @@ async function harness({ secureOk = true, backend = 'keychain', ready = true, ac
   }
   const dir = join(base, 'operators');
   const clock = { t: T0 };
+  const h = { on: null, cpusGate: null };
   const chains = {};
   const sleep = async (ms) => { clock.t += ms; for (const c of Object.values(chains)) c.hooks.onSleep?.(); };
   const now = () => clock.t;
@@ -54,7 +55,10 @@ async function harness({ secureOk = true, backend = 'keychain', ready = true, ac
   };
   const scans = [];
   const sites = {
-    async cpus() { return Array.from({ length: 8 }, (_, i) => (i === 7 ? CIRCUITS : null)); },
+    async cpus() {
+      await h.cpusGate;
+      return Array.from({ length: 8 }, (_, i) => (i === 7 ? CIRCUITS : null));
+    },
     async circuitsOf(netKey, wallet, onProgress) {
       scans.push({ netKey, wallet });
       onProgress?.({ stage: 'circuits', total: 1n });
@@ -65,11 +69,12 @@ async function harness({ secureOk = true, backend = 'keychain', ready = true, ac
   const { root } = await localSites.add(site);
   const secure = { available: () => secureOk, backend, encrypt, decrypt };
   const events = [];
-  const h = { on: null };
   const onEvent = (name, data) => { events.push([name, data]); h.on?.(name, data); };
   const svc = createPublishService({ chains, sites, localSites, precheck, bridge, secure, dir, now, sleep, onEvent });
   return Object.assign(h, {
-    svc, chains, bridge, root, site, dir, events, scans, localSites, clock,
+    svc, chains, bridge, root, site, dir, events, scans, localSites, clock, now,
+    /** 这条链的 operator-store（和服务读同一个目录、同一个时钟） */
+    storeOf: (key, o = {}) => createOperatorStore({ dir: join(dir, key), encrypt, decrypt, now, ...o }),
     ins: (extra = {}) => svc.inspect({ root, netKey: 'bnb', tokenId: 7, cpu: 7, ...extra }),
     done: () => rmSync(base, { recursive: true, force: true }),
   });
@@ -217,6 +222,7 @@ test('sessions 只留最近 5 个：最早的 id 失效', async () => {
   } finally { h.done(); }
 });
 
+const HOUR = 3600000;
 const isJsonSafe = (v) => { try { JSON.stringify(v); return true; } catch { return false; } };
 
 test('run 按 id 取主进程里的原件：传对象、伪造的 inspected、不认识的 id 都不认', async () => {
@@ -322,21 +328,24 @@ test('refund：暂停后把临时钱包的钱退回持有人，金额是字符�
 test('leftovers：删掉余额为 0 且没有在途交易的空记录，列出有余额 / pending / ownerPending 的，坏文件单列', async () => {
   const h = await harness();
   try {
-    const bnb = createOperatorStore({ dir: join(h.dir, 'bnb'), encrypt, decrypt });
-    const xl = createOperatorStore({ dir: join(h.dir, 'xlayer'), encrypt, decrypt });
+    const bnb = h.storeOf('bnb');
+    const xl = h.storeOf('xlayer');
     const empty = bnb.create({ chainId: BSC.chainId, container: ADDR2, owner: OWNER });
     const rich = bnb.create({ chainId: BSC.chainId, container: ADDR3, owner: OWNER });
     h.chains.bnb.balances.set(lower(rich.address), 123n);
     xl.create({ chainId: 196, container: ADDR4, owner: OWNER });
     xl.setOwnerPending(196, ADDR4, { kind: 'fund', hash: '0x' + 'e'.repeat(64), at: 1, nonce: 0n });
     writeFileSync(join(h.dir, 'xlayer', `196-${ADDR2}.json`), '{ broken');
+    h.clock.t += HOUR;
     const r = await h.svc.leftovers();
     assert.ok(isJsonSafe(r));
     assert.deepEqual(r.records.map((x) => [x.netKey, x.container, x.balance, x.pending, x.ownerPending]), [
       ['bnb', ADDR3, '123', false, false],
       ['xlayer', ADDR4, '0', false, true],
     ]);
-    assert.deepEqual(Object.keys(r.records[0]).sort(), ['address', 'balance', 'container', 'netKey', 'owner', 'ownerPending', 'pending']);
+    assert.deepEqual(Object.keys(r.records[0]).sort(), ['address', 'balance', 'cleanup', 'container', 'decryptable', 'netKey', 'owner', 'ownerPending', 'pending']);
+    assert.deepEqual(r.records.map((x) => [x.decryptable, x.cleanup]), [[true, null], [true, null]]);
+    assert.deepEqual(r.errors, []);
     assert.equal(r.records[0].owner, lower(OWNER));
     assert.deepEqual(r.broken, [{ netKey: 'xlayer', file: `196-${ADDR2}.json` }]);
     assert.equal(bnb.get(BSC.chainId, empty.container), null);
@@ -386,5 +395,133 @@ test('leftovers：latest 落后时余额不早于记录里最近确认的区块�
     const r = await h.svc.leftovers();
     assert.equal(r.records.length, 1);
     assert.ok(BigInt(r.records[0].balance) > 0n);
+  } finally { h.done(); }
+});
+
+/** run 到充值那一步时钱包广播了交易却断开（WALLET_LOST）：没有 ownerPending。visible 为 false 时节点也看不到这笔交易 */
+async function lostFund(h, { visible = true } = {}) {
+  const s = await h.ins();
+  const c = h.chains.bnb;
+  c.hooks.ownerSend = async (tx) => {
+    if (tx.data !== '0x') return c.walletSend(tx);
+    c.holdOwner = true;
+    await c.walletSend(tx);
+    if (!visible) c.owner.pending = c.owner.latest;
+    throw { code: 4900, message: 'disconnected' };
+  };
+  await assert.rejects(h.svc.run({ id: s.id }), code(E.WALLET_LOST));
+  assert.equal(h.storeOf('bnb').get(BSC.chainId, CONTAINER).ownerPending, null);
+  return s;
+}
+
+test('充值时 WALLET_LOST、过了宽限期：持有人钱包还有未确认的交易，记录保留；到账后列出余额', async () => {
+  const h = await harness();
+  try {
+    await lostFund(h);
+    h.clock.t += HOUR;
+    const r = await h.svc.leftovers();
+    assert.deepEqual(r.records.map((x) => [x.container, x.balance, x.cleanup]), [[CONTAINER, '0', 'pending']]);
+    assert.ok(h.storeOf('bnb').get(BSC.chainId, CONTAINER));
+    h.chains.bnb.mineQueued();
+    const after = await h.svc.leftovers();
+    assert.ok(BigInt(after.records[0].balance) > 0n);
+  } finally { h.done(); }
+});
+
+test('充值时 WALLET_LOST、节点还看不到这笔交易（nonce 已经对上）：宽限期内照样保留', async () => {
+  const h = await harness();
+  try {
+    await lostFund(h, { visible: false });
+    h.clock.t += HOUR - 1000;
+    const r = await h.svc.leftovers();
+    assert.deepEqual(r.records.map((x) => [x.container, x.balance, x.cleanup]), [[CONTAINER, '0', 'recent']]);
+    assert.ok(h.storeOf('bnb').get(BSC.chainId, CONTAINER));
+  } finally { h.done(); }
+});
+
+test('leftovers：建了超过 1 小时的空记录通过 publisher 删掉，不列出', async () => {
+  const h = await harness();
+  try {
+    const store = h.storeOf('bnb');
+    store.create({ chainId: BSC.chainId, container: ADDR2, owner: OWNER });
+    h.clock.t += HOUR;
+    assert.deepEqual(await h.svc.leftovers(), { records: [], broken: [], errors: [] });
+    assert.equal(store.get(BSC.chainId, ADDR2), null);
+  } finally { h.done(); }
+});
+
+test('leftovers：一条链的节点出错，另一条链照样列出，错误单列', async () => {
+  const h = await harness();
+  try {
+    const rich = h.storeOf('bnb').create({ chainId: BSC.chainId, container: ADDR3, owner: OWNER });
+    h.chains.bnb.balances.set(lower(rich.address), 9n);
+    h.storeOf('xlayer').create({ chainId: 196, container: ADDR4, owner: OWNER });
+    h.chains.xlayer.hooks.pinBlock = () => { throw Object.assign(new Error('rpc down'), { code: 'X_RPC' }); };
+    let pins = 0;
+    const pin = h.chains.bnb.pinBlock;
+    h.chains.bnb.pinBlock = async () => { pins++; return pin(); };
+    h.storeOf('bnb').create({ chainId: BSC.chainId, container: ADDR4, owner: OWNER });
+    h.chains.bnb.balances.set(lower(h.storeOf('bnb').get(BSC.chainId, ADDR4).address), 1n);
+    const r = await h.svc.leftovers();
+    assert.deepEqual(r.records.map((x) => [x.netKey, x.container, x.balance]), [['bnb', ADDR3, '9'], ['bnb', ADDR4, '1']]);
+    assert.deepEqual(r.errors, [{ netKey: 'xlayer', code: 'X_RPC', message: 'rpc down' }]);
+    // 每条链只钉一次区块
+    assert.equal(pins, 1);
+    assert.ok(isJsonSafe(r));
+  } finally { h.done(); }
+});
+
+test('leftovers：私钥解不开的记录标出 decryptable: false', async () => {
+  const h = await harness();
+  try {
+    const bad = h.storeOf('bnb', { encrypt: () => Buffer.from('enc:not-a-key') }).create({ chainId: BSC.chainId, container: ADDR2, owner: OWNER });
+    h.chains.bnb.balances.set(lower(bad.address), 4n);
+    const good = h.storeOf('bnb').create({ chainId: BSC.chainId, container: ADDR3, owner: OWNER });
+    h.chains.bnb.balances.set(lower(good.address), 4n);
+    const r = await h.svc.leftovers();
+    assert.deepEqual(r.records.map((x) => [x.container, x.decryptable]), [[ADDR2, false], [ADDR3, true]]);
+  } finally { h.done(); }
+});
+
+test('refund 和 leftovers 同时处理同一个容器：leftovers 报 busy，不删记录', async () => {
+  const h = await harness();
+  try {
+    const store = h.storeOf('bnb');
+    store.create({ chainId: BSC.chainId, container: CONTAINER, owner: OWNER });
+    h.clock.t += HOUR;
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const nonceOf = h.chains.bnb.nonceOf;
+    h.chains.bnb.nonceOf = async (a) => { await gate; return nonceOf(a); };
+    const refunding = h.svc.refund({ netKey: 'bnb', container: CONTAINER });
+    const r = await h.svc.leftovers();
+    assert.deepEqual(r.records.map((x) => [x.container, x.cleanup]), [[CONTAINER, 'busy']]);
+    assert.ok(store.get(BSC.chainId, CONTAINER));
+    release();
+    await refunding;
+  } finally { h.done(); }
+});
+
+test('discardDust 经过服务：余额不够付退款手续费时删掉记录，金额是字符串', async () => {
+  const h = await harness();
+  try {
+    const rec = h.storeOf('bnb').create({ chainId: BSC.chainId, container: CONTAINER, owner: OWNER });
+    h.chains.bnb.balances.set(lower(rec.address), 21000n * 50000000n);
+    assert.deepEqual(await h.svc.discardDust({ netKey: 'bnb', container: CONTAINER }), { discarded: (21000n * 50000000n).toString() });
+    assert.equal(h.storeOf('bnb').get(BSC.chainId, CONTAINER), null);
+  } finally { h.done(); }
+});
+
+test('同一时间只能有一个 inspect：第二个 BUSY，第一个结束后可以再 inspect', async () => {
+  const h = await harness();
+  try {
+    let release;
+    h.cpusGate = new Promise((r) => { release = r; });
+    const first = h.ins();
+    await assert.rejects(h.ins({ netKey: 'xlayer' }), code(E.BUSY));
+    release();
+    assert.equal((await first).stage, 'ready');
+    h.cpusGate = null;
+    assert.equal((await h.ins()).stage, 'ready');
   } finally { h.done(); }
 });

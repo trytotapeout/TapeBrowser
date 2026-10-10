@@ -227,6 +227,14 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
       return sk;
     },
 
+    /** 私钥能不能解出来（解密并核对地址，用完清零）：启动时找残留用，解不开意味着钱找不回来。不抛错 */
+    canDecrypt(chainId, container) {
+      try {
+        this.keyOf(chainId, container).fill(0);
+        return true;
+      } catch { return false; }
+    },
+
     setPending(chainId, container, pending) {
       const p = pendingToDisk(pending);
       update(chainId, container, (rec) => {

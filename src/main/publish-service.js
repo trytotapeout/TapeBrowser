@@ -88,8 +88,10 @@ export function createPublishService({
   const bundles = new Map();
   // id → { netKey, bundle, inspected }：inspect 的原件只留在主进程（契约第 2 条）
   const sessions = new Map();
-  // 正在跑的 run：{ id, netKey, container, controller }。服务级别同时只有一个
+  // 正在跑的 run：{ id, controller }。服务级别同时只有一个
   let current = null;
+  // 正在进行的 inspect：同一时间只有一个（读整个文件夹、估 gas，不让渲染进程并发刷）
+  let inspecting = false;
 
   function available() {
     if (!secure?.available?.()) return { ok: false, reason: 'no-encryption' };
@@ -177,6 +179,15 @@ export function createPublishService({
     const cpu = uint(a.cpu, 'cpu');
     requireSecure();
     const root = rootOf(a.root);
+    if (inspecting) throw fail(E.BUSY, '正在检查另一次发布');
+    // 同步占住：第二个并发调用在上面就被拒绝
+    inspecting = true;
+    try {
+      return await inspectInner(net, tokenId, cpu, root);
+    } finally { inspecting = false; }
+  }
+
+  async function inspectInner(net, tokenId, cpu, root) {
     const circuits = await circuitsOf(net, cpu);
     const label = siteLabel(tokenId, cpu, net.area);
     const target = { circuits, tokenId, cpu, label };
@@ -220,7 +231,7 @@ export function createPublishService({
     if (current) throw fail(E.BUSY, '正在发布另一个网站');
     const controller = new AbortController();
     // 同步占住：第二个并发调用在上面就被拒绝
-    current = { id, netKey: s.netKey, container: String(s.inspected.container).toLowerCase(), controller };
+    current = { id, controller };
     try {
       const { publisher } = bundleOf(netOf(s.netKey));
       const r = await publisher.run(s.inspected, {
@@ -254,40 +265,48 @@ export function createPublishService({
   const discardDust = (args) => forward(args, 'discardDust');
 
   /**
-   * 启动时找残留（契约第 4 条）：每条发布链的记录和坏文件。余额为 0、没有在途交易的空记录直接删掉；
-   * 有余额、pending 或 ownerPending 的列出来，界面提示「继续发布」或「退款」。
-   * 删记录就是删私钥，两处防护：正在 run 的那个容器不删（临时钱包刚建好、充值还没发出时余额是 0、也没有在途记录）；
-   * 余额不早于记录里最近确认的区块读（latest 落后时刚确认的充值看不到）。refund / discardDust 自己会删记录，不用管
+   * 启动时找残留（契约第 4 条）：每条发布链的记录和坏文件，返回 { records, broken, errors }。
+   * 余额为 0、没有在途交易的记录交给 publisher.cleanupIfEmpty 删（容器锁、持有人 nonce 检查、1 小时宽限期都在那里），
+   * 服务自己不删记录；没删掉的照样列出，cleanup 是原因（busy / pending / recent …），删掉的不列。
+   * 有余额、pending 或 ownerPending 的列出来，界面提示「继续发布」或「退款」；decryptable 为 false 表示私钥解不开，钱找不回来。
+   * 余额不早于记录的 minBlock 读（latest 落后时刚确认的充值也看得到），每条链只钉一次区块。
+   * 一条链出错不影响别的链，错误放在 errors 里
    */
-  /** latest 和 block 里较新的那个（block 为 'latest' 时就是 latest） */
-  async function atLeast(key, block) {
-    if (block === 'latest') return block;
-    const pinned = await chains[key].pinBlock();
-    return BigInt(pinned) > BigInt(block) ? pinned : block;
-  }
-
   async function leftovers() {
     if (!available().ok) return { unavailable: true };
     const records = [];
     const broken = [];
+    const errors = [];
     for (const key of networks) {
       if (!PUBLISH_NETWORKS.includes(key) || !Object.hasOwn(chains, key)) continue;
-      const { net, store } = bundleOf(netOf(key));
-      for (const file of store.broken()) broken.push({ netKey: key, file });
-      for (const rec of store.list()) {
-        const block = rec.minBlock != null ? '0x' + rec.minBlock.toString(16) : 'latest';
-        const balance = await chains[key].nativeBalance(rec.address, await atLeast(key, block));
-        const pending = Boolean(rec.pending);
-        const ownerPending = Boolean(rec.ownerPending);
-        const running = current?.netKey === key && current.container === rec.container;
-        if (balance === 0n && !pending && !ownerPending && !running) {
-          store.remove(net.chainId, rec.container);
-          continue;
+      try {
+        const { net, store, publisher } = bundleOf(netOf(key));
+        for (const file of store.broken()) broken.push({ netKey: key, file });
+        const list = store.list();
+        if (!list.length) continue;
+        const pinned = BigInt(await chains[key].pinBlock());
+        for (const rec of list) {
+          const block = rec.minBlock != null && rec.minBlock > pinned ? rec.minBlock : pinned;
+          const balance = await chains[key].nativeBalance(rec.address, '0x' + block.toString(16));
+          const pending = Boolean(rec.pending);
+          const ownerPending = Boolean(rec.ownerPending);
+          let cleanup = null;
+          if (balance === 0n && !pending && !ownerPending) {
+            const c = await publisher.cleanupIfEmpty({ chainId: net.chainId, container: rec.container });
+            if (c.removed) continue;
+            cleanup = c.reason;
+          }
+          records.push({
+            netKey: key, container: rec.container, owner: rec.owner, address: rec.address,
+            balance: balance.toString(), pending, ownerPending,
+            decryptable: store.canDecrypt(net.chainId, rec.container), cleanup,
+          });
         }
-        records.push({ netKey: key, container: rec.container, owner: rec.owner, address: rec.address, balance: balance.toString(), pending, ownerPending });
+      } catch (e) {
+        errors.push({ netKey: key, code: e?.code ?? null, message: String(e?.message || e) });
       }
     }
-    return { records, broken };
+    return { records, broken, errors };
   }
 
   return { available, targets, inspect, run, pause, refund, discardDust, leftovers };

@@ -99,6 +99,10 @@ const TX_NONCE_POLLS = 5;
 const TX_NONCE_POLL_MS = 3000;
 const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
 
+// 启动时自动清理空记录的宽限期：建好不到这么久的记录不删。持有人的充值可能已经广播、钱包却没把哈希交回来（WALLET_LOST），
+// 这时没有 ownerPending，节点也可能还看不到这笔交易，删掉记录以后到账就取不出来了
+const CLEANUP_GRACE_MS = 3600000;
+
 // 正在执行 run / refund 的（chainId, 容器）。主进程只有一个实例，内存里互斥就够了
 const running = new Map();
 /** 同步占住这个容器，返回释放函数；已被占用直接抛出。必须在第一个 await 之前调用 */
@@ -797,5 +801,36 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     } finally { unlock(); }
   }
 
-  return { inspect, run, refund, discardDust };
+  /**
+   * 余额为 0、没有在途交易的空记录才删（启动时找残留用，代替直接 store.remove）。和 run / refund 共用容器锁，
+   * 锁内重新读记录。返回 { removed, reason }，reason：
+   *   busy     容器正在 run / refund / discardDust
+   *   missing  没有记录
+   *   pending  临时钱包或持有人有在途交易，或持有人钱包里有未确认的交易
+   *   recent   建好不到 1 小时（CLEANUP_GRACE_MS）
+   *   balance  余额不为 0（不早于记录的 minBlock 和 pinBlock 读）
+   */
+  async function cleanupIfEmpty({ chainId, container }) {
+    if (chainId !== net.chainId) throw fail(E.CHAIN_MISMATCH, '网络不一致');
+    let unlock;
+    try { unlock = lockContainer(chainId, container); } catch (e) {
+      if (e?.code === E.BUSY) return { removed: false, reason: 'busy' };
+      throw e;
+    }
+    try {
+      const rec = store.get(chainId, container);
+      if (!rec) return { removed: false, reason: 'missing' };
+      if (rec.pending || rec.ownerPending) return { removed: false, reason: 'pending' };
+      if (now() - rec.createdAt < CLEANUP_GRACE_MS) return { removed: false, reason: 'recent' };
+      const pinned = BigInt(await chain.pinBlock());
+      const block = rec.minBlock != null && rec.minBlock > pinned ? rec.minBlock : pinned;
+      const balance = await chain.nativeBalance(rec.address, hexBlock(block));
+      if (balance !== 0n) return { removed: false, reason: 'balance' };
+      // removeIfEmpty 再查一次 ownerPending，并且持有人钱包没有未确认的交易才删
+      const removed = await removeIfEmpty({ container: rec.container, owner: rec.owner }, balance);
+      return { removed, reason: removed ? null : 'pending' };
+    } finally { unlock(); }
+  }
+
+  return { inspect, run, refund, discardDust, cleanupIfEmpty };
 }

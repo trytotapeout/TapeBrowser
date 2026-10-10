@@ -475,3 +475,17 @@ test('replacePending 把被替换的退款记进 prior（最多 3 个，旧的�
     assert.equal(store.get(CHAIN, C).pending.prior.length, 3);
   } finally { done(); }
 });
+
+test('canDecrypt：能解密并且地址对得上返回 true；解不开、地址被改、没有记录返回 false，不抛错', () => {
+  const { dir, store, make, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    assert.equal(store.canDecrypt(CHAIN, C), true);
+    assert.equal(make({ decrypt: () => { throw new Error('keychain reset'); } }).canDecrypt(CHAIN, C), false);
+    const file = join(dir, readdirSync(dir)[0]);
+    const rec = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...rec, address: '0x' + '9'.repeat(40) }));
+    assert.equal(store.canDecrypt(CHAIN, C), false);
+    assert.equal(store.canDecrypt(CHAIN, '0x' + '7'.repeat(40)), false);
+  } finally { done(); }
+});

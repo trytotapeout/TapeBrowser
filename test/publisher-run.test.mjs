@@ -1228,3 +1228,76 @@ test('重签之后旧版本上链：按旧版本的金额报退款，不报状�
     assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
   } finally { s.done(); }
 });
+
+// ---- cleanupIfEmpty：启动时清理空记录，只走 publisher 的检查和容器锁 ----
+const HOUR = 3600000;
+const cleanup = (s) => s.p.cleanupIfEmpty({ chainId: BSC.chainId, container: CONTAINER });
+
+test('cleanupIfEmpty：余额 0、没有在途交易、建了超过 1 小时：删掉记录', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OWNER, 0n);
+    s.clock.t += HOUR;
+    assert.deepEqual(await cleanup(s), { removed: true, reason: null });
+    assert.equal(s.store.get(BSC.chainId, CONTAINER), null);
+  } finally { s.done(); }
+});
+
+test('cleanupIfEmpty：刚建不到 1 小时不删（充值可能已经广播、还没记下）', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OWNER, 0n);
+    s.clock.t += HOUR - 1;
+    assert.deepEqual(await cleanup(s), { removed: false, reason: 'recent' });
+    assert.ok(s.store.get(BSC.chainId, CONTAINER));
+  } finally { s.done(); }
+});
+
+test('cleanupIfEmpty：有余额、pending、ownerPending、持有人钱包有未确认的交易都不删', async () => {
+  const s = setup();
+  try {
+    const rec = oldWallet(s, OWNER, 5n);
+    s.clock.t += HOUR;
+    assert.deepEqual(await cleanup(s), { removed: false, reason: 'balance' });
+    s.chain.balances.set(rec.address, 0n);
+    s.store.setOwnerPending(BSC.chainId, CONTAINER, { kind: 'fund', hash: '0x' + 'e'.repeat(64), at: 1, nonce: 0n });
+    assert.deepEqual(await cleanup(s), { removed: false, reason: 'pending' });
+    s.store.clearOwnerPending(BSC.chainId, CONTAINER);
+    s.store.setPending(BSC.chainId, CONTAINER, { raw: '0x01', hash: '0x' + 'f'.repeat(64), kind: 'upload', nonce: 0n });
+    assert.deepEqual(await cleanup(s), { removed: false, reason: 'pending' });
+    s.store.clearPending(BSC.chainId, CONTAINER);
+    s.chain.owner.pending = s.chain.owner.latest + 1n;
+    assert.deepEqual(await cleanup(s), { removed: false, reason: 'pending' });
+    assert.ok(s.store.get(BSC.chainId, CONTAINER));
+  } finally { s.done(); }
+});
+
+test('cleanupIfEmpty：余额不早于 minBlock 读，latest 落后时刚到账的钱看得到', async () => {
+  const s = setup();
+  try {
+    const rec = oldWallet(s, OWNER, 0n);
+    s.chain.mineEmpty(1);
+    s.chain.balances.set(rec.address, 7n);
+    s.store.setMinBlock(BSC.chainId, CONTAINER, s.chain.head);
+    s.chain.lag = 1n;
+    s.clock.t += HOUR;
+    assert.deepEqual(await cleanup(s), { removed: false, reason: 'balance' });
+  } finally { s.done(); }
+});
+
+test('cleanupIfEmpty：容器正在 run / refund 时返回 busy，不删；没有记录返回 missing', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    assert.deepEqual(await cleanup(s), { removed: false, reason: 'missing' });
+    const inspected = await s.p.inspect({ target });
+    let seen;
+    s.chain.hooks.ownerSend = async (tx) => {
+      delete s.chain.hooks.ownerSend;
+      s.clock.t += HOUR;
+      seen = await cleanup(s);
+      return s.chain.walletSend(tx);
+    };
+    assert.equal((await s.p.run(inspected)).stage, 'done');
+    assert.deepEqual(seen, { removed: false, reason: 'busy' });
+  } finally { s.done(); }
+});
