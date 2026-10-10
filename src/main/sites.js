@@ -12,7 +12,8 @@
 // 所以文件信息按「网络 + 容器」记。
 
 import { splitDigits, siteLabel, siteUrl, siteHost } from './address.js';
-import { MAX_IDS_PER_CPU, NETWORKS, networkByArea } from './config.js';
+import { MAX_IDS_PER_CPU, NETWORKS, PUBLISH_NETWORKS, networkByArea, networkByKey } from './config.js';
+import { fail, CHAIN_UNSUPPORTED } from './publish-errors.js';
 
 const CPU_TTL = 10 * 60 * 1000;
 const SITE_TTL = 60 * 1000;
@@ -256,8 +257,11 @@ export function createSites(chains, store = null) {
     };
   }
 
-  /** 一条链上扫描钱包持有的电路 */
-  async function scanWalletOn(net, wallet, onProgress) {
+  /**
+   * 一条链上钱包持有的全部电路（不管有没有开通）：{found: [{tokenId, cpu, circuits}], skipped, block, progress}。
+   * id 太多的处理器放进 skipped 不逐个查；block 是这次扫描固定的区块，后续读取沿用
+   */
+  async function ownedCircuits(net, wallet, onProgress) {
     const chain = chains[net.key];
     const progress = (p) => onProgress?.({ ...p, network: net.name });
     progress({ stage: 'cpus' });
@@ -275,8 +279,45 @@ export function createSites(chains, store = null) {
       });
       for (const tokenId of ids) found.push({ tokenId, cpu: h.cpu, circuits: h.circuits });
     }
+    return { found, skipped, block, progress };
+  }
+
+  /** 一条链上扫描钱包持有的电路，只返回有首页的网站 */
+  async function scanWalletOn(net, wallet, onProgress) {
+    const { found, skipped, progress } = await ownedCircuits(net, wallet, onProgress);
     progress({ stage: 'index', total: found.length });
     return { circuits: found.length, sites: await withIndex(found, net.area), skipped };
+  }
+
+  /**
+   * 发布用：钱包在一条链上持有的全部电路，包括没开通的、开通了没首页的。
+   * 返回 {circuits: [{tokenId, cpu, circuits, label, container, opened, hasIndex}], skipped}，按处理器、编号排序（即 label 顺序）。
+   * 只支持 PUBLISH_NETWORKS 里的链；进度事件和 scanWallet 相同，读电路信息前多一个 {stage: 'circuits', total}
+   */
+  async function circuitsOf(netKey, wallet, onProgress) {
+    const net = networkByKey(netKey);
+    if (!net || !PUBLISH_NETWORKS.includes(net.key)) throw fail(CHAIN_UNSUPPORTED, '这条链暂时不支持发布');
+    const chain = chainOf(net.area);
+    const { found, skipped, block, progress } = await ownedCircuits(net, wallet, onProgress);
+    progress({ stage: 'circuits', total: found.length });
+    if (!found.length) return { circuits: [], skipped };
+    const infos = await chain.circuitInfos(found, block);
+    const circuits = found.map((c, i) => ({
+      tokenId: c.tokenId,
+      cpu: c.cpu,
+      circuits: c.circuits,
+      label: siteLabel(c.tokenId, c.cpu, net.area),
+      container: infos[i].container,
+      opened: !!(infos[i].exists && infos[i].opened && infos[i].container),
+      hasIndex: false,
+    }));
+    const opened = circuits.filter((c) => c.opened);
+    if (opened.length) {
+      const files = await chain.fileInfos(opened.map((c) => ({ container: c.container, path: 'index.html' })), block);
+      opened.forEach((c, i) => { c.hasIndex = !!files[i]; });
+    }
+    circuits.sort((a, b) => a.cpu - b.cpu || Number(a.tokenId) - Number(b.tokenId));
+    return { circuits, skipped };
   }
 
   /**
@@ -293,5 +334,5 @@ export function createSites(chains, store = null) {
     };
   }
 
-  return { cpus, site, readFile, siteFiles, describe, verify, indexInfo, containerAssets, enumerateDigits, scanWallet, networks: enabled };
+  return { cpus, site, readFile, siteFiles, describe, verify, indexInfo, containerAssets, enumerateDigits, scanWallet, circuitsOf, networks: enabled };
 }

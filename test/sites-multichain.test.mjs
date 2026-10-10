@@ -7,7 +7,9 @@ const sha = (b) => '0x' + createHash('sha256').update(b).digest('hex');
 const enc = (s) => new TextEncoder().encode(s);
 
 // 每条链：处理器列表 + 有首页的电路（"tokenId-cpu"）+ 首页内容
-function fakeChain({ cpus, sites, body = 'x', down = false }) {
+// 钱包扫描用（可选）：holds = [{cpu, ids, maxId?}] 钱包持有的电路；containers = {"tokenId-cpu": 容器} 已开通的电路；
+// indexed = [容器] 有首页的容器。给了 containers 时 sites 不再决定开通状态
+function fakeChain({ cpus, sites = [], body = 'x', down = false, holds = [], containers = null, indexed = null }) {
   const calls = [];
   const up = () => { if (down) throw new Error('rpc down'); };
   return {
@@ -17,9 +19,32 @@ function fakeChain({ cpus, sites, body = 'x', down = false }) {
     async circuitInfos(items) {
       up();
       calls.push(['circuitInfos', items.map((s) => `${s.tokenId}-${s.cpu}`)]);
+      if (containers) {
+        return items.map((s) => {
+          const c = containers[`${s.tokenId}-${s.cpu}`];
+          return { exists: true, owner: '0xo', container: c ?? '0xpredicted', opened: !!c };
+        });
+      }
       return items.map((s) => ({ exists: true, owner: '0xo', container: '0xsame', opened: sites.includes(`${s.tokenId}-${s.cpu}`) }));
     },
-    async fileInfos(pairs) { up(); return pairs.map(() => ({ size: 1, contentType: 'text/html', sha256: sha(enc(body)), updatedAt: 1, chunkCount: 1 })); },
+    async fileInfos(pairs) {
+      up();
+      calls.push(['fileInfos', pairs.map((p) => `${p.container}/${p.path}`)]);
+      return pairs.map((p) => (indexed && !indexed.includes(p.container) ? null : { size: 1, contentType: 'text/html', sha256: sha(enc(body)), updatedAt: 1, chunkCount: 1 }));
+    },
+    async holdings(wallet, list) {
+      up();
+      return holds.map((h) => ({ cpu: h.cpu, circuits: list[h.cpu], balance: BigInt(h.ids.length) }));
+    },
+    async maxTokenId(circuits) {
+      const h = holds.find((x) => cpus[x.cpu] === circuits);
+      return h.maxId ?? Math.max(...h.ids);
+    },
+    async ownedIds(circuits, wallet, from, to, balance, block, onProgress) {
+      const h = holds.find((x) => cpus[x.cpu] === circuits);
+      onProgress?.(h.ids.length, h.ids.length);
+      return h.ids;
+    },
     async fileInfo() { up(); return { size: body.length, contentType: 'text/html', sha256: sha(enc(body)), updatedAt: 1, chunkCount: 1 }; },
     async readVerified() { return enc(body); },
   };
@@ -115,4 +140,46 @@ test('容器资产：网站所在链的原生币，有 BEM 的链再加 BEM；�
   assert.match(x[1].error, /rpc down/);
   // Base 上没有 BEM，只查 ETH
   assert.deepEqual((await s.containerAssets(1, 0, 3)).map((a) => a.symbol), ['ETH']);
+});
+
+// 钱包在 X Layer 上持有：1.2.5（没开通）、1.2.12（开通、没首页）、1.2.3（开通、有首页）、1.2.40（开通、有首页），
+// 处理器 7 的 id 太多被跳过
+const walletChain = () => fakeChain({
+  cpus: many(10),
+  holds: [{ cpu: 5, ids: [3, 1] }, { cpu: 2, ids: [12, 5, 40] }, { cpu: 7, ids: [1], maxId: 10 ** 9 }],
+  containers: { '1-5': '0xa', '12-2': '0xb', '40-2': '0xc' },
+  indexed: ['0xa', '0xc'],
+});
+
+test('circuitsOf：没开通、开通没首页、开通有首页的电路都列出来，按处理器、编号排序', async () => {
+  const xlayer = walletChain();
+  const s = createSites({ bnb: fakeChain({ cpus: [] }), xlayer });
+  const events = [];
+  const r = await s.circuitsOf('xlayer', '0xw', (p) => events.push(p.stage));
+  assert.deepEqual(r.circuits, [
+    { tokenId: 5, cpu: 2, circuits: '0xcpu2', label: '5.2.2.tape', container: '0xpredicted', opened: false, hasIndex: false },
+    { tokenId: 12, cpu: 2, circuits: '0xcpu2', label: '12.2.2.tape', container: '0xb', opened: true, hasIndex: false },
+    { tokenId: 40, cpu: 2, circuits: '0xcpu2', label: '40.2.2.tape', container: '0xc', opened: true, hasIndex: true },
+    { tokenId: 1, cpu: 5, circuits: '0xcpu5', label: '1.2.5.tape', container: '0xa', opened: true, hasIndex: true },
+    { tokenId: 3, cpu: 5, circuits: '0xcpu5', label: '3.2.5.tape', container: '0xpredicted', opened: false, hasIndex: false },
+  ]);
+  assert.deepEqual(r.skipped.map((x) => [x.cpu, x.network]), [[7, 'X Layer']]);
+  // 只读已开通电路的首页
+  assert.deepEqual(xlayer.calls.find((c) => c[0] === 'fileInfos')[1].sort(), ['0xa/index.html', '0xb/index.html', '0xc/index.html']);
+  assert.ok(events.includes('circuits'));
+  assert.ok(events.indexOf('circuits') > events.lastIndexOf('ids'));
+});
+
+test('circuitsOf：不在发布链列表里的链抛 CHAIN_UNSUPPORTED', async () => {
+  const s = createSites({ bnb: fakeChain({ cpus: [] }), base: walletChain() });
+  await assert.rejects(s.circuitsOf('base', '0xw'), (e) => e.code === 'CHAIN_UNSUPPORTED');
+});
+
+test('scanWallet 仍然只返回有首页的网站', async () => {
+  const s = createSites({ bnb: fakeChain({ cpus: [] }), xlayer: walletChain() });
+  const r = await s.scanWallet('0xw');
+  assert.equal(r.circuits, 5);
+  assert.deepEqual(r.sites.map((x) => x.label).sort(), ['1.2.5.tape', '40.2.2.tape']);
+  assert.deepEqual(r.skipped.map((x) => x.cpu), [7]);
+  assert.deepEqual(r.failed, []);
 });
