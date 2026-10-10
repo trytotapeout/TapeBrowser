@@ -16,14 +16,14 @@
     badBody: 'Share links look like …/open/?4454.0. Circuit addresses such as 1.2.248 (X Layer) or 1.3.5 (Base) work too.',
     home: 'About TapeBrowser',
     source: 'Source code',
-    mac: 'For macOS, pick the Apple chip or Intel build on the download page.',
+    mac: 'For macOS, download the Apple chip build (.dmg). Intel Macs can use 0.13.0.',
     win: 'For Windows, download the x64 installer (.exe).',
     linux: 'For Linux, download the AppImage.',
     other: 'TapeBrowser is a desktop app for macOS, Windows and Linux. Open this link on a computer.',
     title: 'Open {label} in TapeBrowser',
   };
   const ZH = {
-    mac: 'macOS 请在下载页选择 Apple 芯片或 Intel 版本。',
+    mac: 'macOS 请下载 Apple 芯片版本（.dmg）。Intel 芯片的 Mac 可以使用 0.13.0。',
     win: 'Windows 请下载 x64 安装包（.exe）。',
     linux: 'Linux 请下载 AppImage。',
     other: 'TapeBrowser 是 macOS、Windows、Linux 上的桌面应用，请在电脑上打开这个链接。',

@@ -25,7 +25,7 @@
     "start": "electron .",
     "test": "node --test test/*.test.mjs",
     "live": "node test/live.mjs",
-    "dist:mac": "electron-builder --mac --arm64 --x64",
+    "dist:mac": "electron-builder --mac --arm64",
     "dist:win": "electron-builder --win --x64",
     "dist:linux": "electron-builder --linux --x64",
     "dist:all": "npm run dist:mac && npm run dist:win && npm run dist:linux"
@@ -60,8 +60,7 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],

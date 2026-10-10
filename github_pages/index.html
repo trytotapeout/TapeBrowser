@@ -76,7 +76,6 @@
           <thead><tr><th scope="col">平台</th><th scope="col">文件</th><th scope="col">下载</th></tr></thead>
           <tbody>
             <tr><td>macOS（Apple 芯片）</td><td><code>TapeBrowser-0.14.0-mac-arm64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.14.0/TapeBrowser-0.14.0-mac-arm64.dmg">下载（121 MB）</a></td></tr>
-            <tr><td>macOS（Intel）</td><td><code>TapeBrowser-0.14.0-mac-x64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.14.0/TapeBrowser-0.14.0-mac-x64.dmg">下载（127 MB）</a></td></tr>
             <tr><td>Windows（x64）</td><td><code>TapeBrowser-0.14.0-win-x64-setup.exe</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.14.0/TapeBrowser-0.14.0-win-x64-setup.exe">下载（106 MB）</a></td></tr>
             <tr><td>Linux（x86_64）</td><td><code>TapeBrowser-0.14.0-linux-x86_64.AppImage</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.14.0/TapeBrowser-0.14.0-linux-x86_64.AppImage">下载（119 MB）</a></td></tr>
           </tbody>
@@ -99,6 +98,7 @@
         <h3>0.14.0 <span class="date">2026-10-10</span></h3>
         <ul>
           <li>macOS 安装包用 Apple 开发者证书（Developer ID）签名，并通过 Apple 公证，下载后双击就能打开，不用再去系统设置里点「仍要打开」</li>
+          <li>不再提供 macOS Intel 版本，只提供 Apple 芯片版本。Intel 芯片的 Mac 可以继续使用 <a href="https://github.com/trytotapeout/TapeBrowser/releases/tag/v0.13.0">0.13.0</a></li>
           <li>发布到容器（实验功能）：本地预览的预检查面板里点「发布到容器…」，选链（BNB Chain / X Layer）和自己的电路，先看发布计划和预估花费，再一键上传。没开通容器的电路可以顺带开通。钱包通常只需确认 2 到 3 笔交易（开通、授权临时钱包 6 小时、充值 Gas），之后由临时钱包自动上传，发完核对链上内容并退回剩下的 Gas</li>
           <li>发布可以暂停、中断后接着发；链上已经有的相同文件直接复用，不重复上传。临时钱包的私钥用系统钥匙串加密保存在本机，不能导出</li>
           <li>链上文件只增不改：内容变了的文件要换文件名，只有首页 index.html 可以在最后整个替换。预检查会提示首页超过一块（24000 字节）时替换要分几笔、替换期间网站会暂时打不开</li>

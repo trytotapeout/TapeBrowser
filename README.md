@@ -13,9 +13,10 @@
 | 平台 | 文件 |
 | --- | --- |
 | macOS（Apple 芯片） | `TapeBrowser-<版本>-mac-arm64.dmg` |
-| macOS（Intel） | `TapeBrowser-<版本>-mac-x64.dmg` |
 | Windows（x64） | `TapeBrowser-<版本>-win-x64-setup.exe` |
 | Linux（x86_64） | `TapeBrowser-<版本>-linux-x86_64.AppImage` |
+
+从 0.14.0 开始不再提供 macOS Intel 版本，Intel 芯片的 Mac 可以继续使用 [0.13.0](https://github.com/trytotapeout/TapeBrowser/releases/tag/v0.13.0)。
 
 每个版本都附有 `SHA256SUMS.txt`，可以核对下载的文件。第一次打开时：
 
@@ -170,7 +171,7 @@ npm run dist:linux
 
 `npm run live` 是主网只读冒烟测试，需要联网。
 
-打包产物都在 `dist/`：mac 是 Apple 芯片（arm64）和 Intel（x64）两个 `.dmg`，Windows 是 x64 的 `.exe` 安装包，Linux 是 x64 的 `.AppImage`。文件名统一为 `TapeBrowser-<版本>-<平台>-<架构>`，例如 `TapeBrowser-0.8.2-mac-x64.dmg`。三个平台都可以在 mac 上直接交叉打包，不需要装 Wine；`npm run dist:all` 依次打全部三个。
+打包产物都在 `dist/`：mac 是 Apple 芯片（arm64）的 `.dmg`，Windows 是 x64 的 `.exe` 安装包，Linux 是 x64 的 `.AppImage`。文件名统一为 `TapeBrowser-<版本>-<平台>-<架构>`，例如 `TapeBrowser-0.14.0-mac-arm64.dmg`。三个平台都可以在 mac 上直接交叉打包，不需要装 Wine；`npm run dist:all` 依次打全部三个。
 
 mac 包签名和公证：钥匙串里有 Developer ID Application 证书时，electron-builder 会自动用它签名（开启 hardened runtime，权限见 `build/entitlements.mac.plist`），没有证书就不签名，照样能打包。公证需要先把 Apple 账号的 App 专用密码存进钥匙串（只做一次）：
 
