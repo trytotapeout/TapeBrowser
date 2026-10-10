@@ -1,6 +1,6 @@
 // TapeBrowser 主进程：窗口、标签、tape:// 协议、钱包桥接、菜单。
 
-import { app, BrowserWindow, protocol, session as electronSession, ipcMain, dialog, shell, net, Menu, nativeTheme, clipboard } from 'electron';
+import { app, BrowserWindow, protocol, session as electronSession, ipcMain, dialog, shell, net, Menu, nativeTheme, clipboard, safeStorage } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { watch } from 'node:fs';
@@ -19,12 +19,14 @@ import { createLibrary } from './library.js';
 import { createContentStore } from './content-store.js';
 import { createDirectory, QUICK_CHECK_EVERY } from './directory.js';
 import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
-import { createAnalyzer } from './risk.js';
+import { createAnalyzer, formatUnits } from './risk.js';
 import { createPageAudit } from './page-audit.js';
 import { createBemBalances } from './bem.js';
 import { prepareTip, parseBem } from './tip.js';
 import { formatBem } from './bem.js';
 import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
+import { createPublishService } from './publish-service.js';
+import { translateMessage, fail, NO_OPERATOR, NO_ENCRYPTION } from './publish-errors.js';
 import { createRequire } from 'node:module';
 const i18n = createRequire(import.meta.url)('../i18n/i18n.cjs');
 
@@ -77,6 +79,8 @@ let tabs = null;
 let tabSession = null;
 let bridge = null;
 let host = null;
+// 发布到容器：整个应用只有这一个（阶段 3 契约第 6 条），bridge 建好之后创建
+let publish = null;
 let scanning = false;
 // 外壳界面加载完成前，外部传入的链接先排队
 let uiLoaded = false;
@@ -380,6 +384,79 @@ function registerIpc() {
     if (opts?.background) tabs.open(url, { background: true });
     else submit(url);
   });
+
+  // 发布到容器：全部返回 { ok: true, value } 或 { error: { code, message } }，不 throw 给渲染进程。
+  // 参数一律逐个挑出来再交给发布服务（不展开渲染进程传来的对象），服务里还会再核对一遍
+  const pub = (name, fn) => ui(name, async (...args) => {
+    try {
+      if (!publish) throw new Error(tr('发布服务还没准备好'));
+      return { ok: true, value: await fn(...args) };
+    } catch (e) {
+      return { error: publishError(e) };
+    }
+  });
+  const arg = (a) => (a && typeof a === 'object' && !Array.isArray(a) ? a : {});
+  pub('publishAvailable', () => publish.available());
+  pub('publishTargets', (netKey) => publish.targets({ netKey }));
+  // 渲染进程不知道本地文件夹的真实路径：按当前本地预览标签的网址在主进程里找（契约第 2、3 条）
+  pub('publishInspect', (args) => {
+    const { url, netKey, tokenId, cpu } = arg(args);
+    const root = localSites.rootOf(typeof url === 'string' ? url : tabs?.active()?.url);
+    if (!root) throw new Error(tr('请先在本地预览里打开要发布的文件夹'));
+    return publish.inspect({ root, netKey, tokenId, cpu });
+  });
+  pub('publishRun', (id) => publish.run({ id }));
+  pub('publishPause', (id) => publish.pause({ id }));
+  pub('publishRefund', async (args) => {
+    const { netKey, container } = arg(args);
+    const rec = await leftoverOf(netKey, container);
+    const net = networkByKey(netKey);
+    const r = await dialog.showMessageBox(win, {
+      type: 'question',
+      buttons: [tr('退款'), tr('取消')],
+      defaultId: 0,
+      cancelId: 1,
+      message: tr('把临时钱包里的余额退回持有人？'),
+      detail: tr('临时钱包 {address} 里现在有 {amount} {currency}，扣掉转账手续费后全部退回持有人地址 {owner}。\n退款由临时钱包自己签名，不需要在钱包里确认。', {
+        address: rec.address, amount: formatUnits(rec.balance), currency: net.currency, owner: rec.owner,
+      }),
+    });
+    if (r.response !== 0) return { ok: false, cancelled: true };
+    return publish.refund({ netKey, container });
+  });
+  pub('publishDiscard', async (args) => {
+    const { netKey, container } = arg(args);
+    const rec = await leftoverOf(netKey, container);
+    const net = networkByKey(netKey);
+    const r = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: [tr('取消'), tr('放弃这笔零头')],
+      defaultId: 0,
+      cancelId: 0,
+      message: tr('放弃临时钱包里的零头？'),
+      detail: tr('临时钱包 {address} 里只剩 {amount} {currency}，不够付退回 {owner} 的转账手续费，所以退不出来。\n放弃后会删掉这个临时钱包，这笔钱永久拿不回来。', {
+        address: rec.address, amount: formatUnits(rec.balance), currency: net.currency, owner: rec.owner,
+      }),
+    });
+    if (r.response !== 1) return { ok: false, cancelled: true };
+    return publish.discardDust({ netKey, container });
+  });
+  pub('publishLeftovers', () => publish.leftovers());
+}
+
+/** 发布出错 → 给渲染进程的 { code, message }：带 code 的按 PUBLISH_MESSAGES 翻译，其余的套一层「发布出错」 */
+function publishError(e) {
+  if (e?.code && typeof e.code === 'string') return { code: e.code, message: translateMessage(e.message, (...a) => tr(...a)) };
+  return { code: null, message: tr('发布出错：{0}', { 0: String(e?.message || e) }) };
+}
+
+/** 退款、放弃零头前确认用的残留记录：按链和容器在 leftovers() 里找，找不到就拒绝（不凭渲染进程传来的地址弹窗） */
+async function leftoverOf(netKey, container) {
+  const l = await publish.leftovers();
+  if (l.unavailable) throw fail(NO_ENCRYPTION, '这台电脑无法安全保存临时钱包，暂时不能发布');
+  const rec = typeof container === 'string' && l.records.find((r) => r.netKey === netKey && r.container.toLowerCase() === container.toLowerCase());
+  if (!rec || !networkByKey(netKey)) throw fail(NO_OPERATOR, '没有这个容器的临时钱包');
+  return rec;
 }
 // 本地预览的文件夹监听：root → watcher。文件一改，打开这个文件夹的标签自动刷新
 const watchers = new Map();
@@ -765,6 +842,21 @@ app.whenReady().then(async () => {
   host = createProviderHost({ bridge, rpcs, settings, openBridge: () => shell.openExternal(bridge.url()), confirm, emit });
   bridge.on('state', (s) => { send('wallet', walletView()); bem.setAccount(s.ready ? s.accounts?.[0] : null); });
 
+  // 临时钱包的私钥用系统钥匙串加密；不可用、或 Linux 上只有 basic_text 时服务拒绝发布（契约第 5 条）
+  const secure = {
+    available: () => safeStorage.isEncryptionAvailable(),
+    // ready 之后才能读；只有 Linux 有这个方法，每次现读
+    get backend() { return process.platform === 'linux' ? safeStorage.getSelectedStorageBackend?.() ?? null : null; },
+    encrypt: (s) => safeStorage.encryptString(s),
+    decrypt: (b) => safeStorage.decryptString(b),
+  };
+  publish = createPublishService({
+    chains, sites, localSites, precheck, bridge, secure,
+    dir: join(app.getPath('userData'), 'publish'),
+    onEvent: send,
+    tr: (...a) => tr(...a),
+  });
+
   registerIpc();
   // ready 之后系统语言才准
   lang = i18n.pick(settings.get('lang'), app.getLocale());
@@ -775,6 +867,14 @@ app.whenReady().then(async () => {
   const argUrl = process.argv.find((a) => /^tape:\/\//i.test(a));
   if (argUrl) pendingExternal.push(argUrl);
   createWindow();
+  // 上次没发完或没退干净的临时钱包：提示一次，发布页里再列出来（契约第 4 条）
+  publish.leftovers().then((l) => {
+    const n = l?.records?.length ?? 0;
+    if (!n) return;
+    // 外壳界面还没加载完时 notice 会丢：等它加载完再发
+    const show = () => notify(tr('有 {n} 个临时钱包里还有余额或在途交易，可以在发布页里继续发布或退款', { n }), 'info');
+    if (uiLoaded) show(); else win?.webContents.once('did-finish-load', show);
+  }).catch((e) => console.error('publish leftovers:', e));
 
   app.on('activate', () => { if (!win) createWindow(); });
 

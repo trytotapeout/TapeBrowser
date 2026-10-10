@@ -37,3 +37,94 @@ export const OWNER_MISMATCH_OPERATOR = 'OWNER_MISMATCH_OPERATOR'; // createOpera
 export function fail(code, message, extra) {
   return Object.assign(new Error(message), { code }, extra);
 }
+
+/**
+ * 上面这些错误码抛出时用的全部 message（中文，同时是 en.json 的 key）。IPC 层用 translateMessage 翻译。
+ * {name} 是消息里拼进去的变量（文件路径、块序号、链名之类）；test/publish-messages.test.mjs 核对它和源码一致
+ */
+export const PUBLISH_MESSAGES = [
+  // publish-service.js
+  '这台电脑无法安全保存临时钱包，暂时不能发布',
+  '这条链暂时不支持发布',
+  '这个电路不存在',
+  '请先连接钱包',
+  '正在检查另一次发布',
+  '本地文件异常：{path}',
+  '还没有检查通过，不能发布',
+  '正在发布另一个网站',
+  // operator.js
+  '临时钱包不存在',
+  '临时钱包的持有人不一致',
+  '临时钱包的交易状态异常，请重新检查',
+  '交易还没确认，可以稍后继续',
+  '临时钱包正在处理另一笔交易',
+  '还有一笔交易在等确认',
+  '临时钱包有未确认的交易',
+  '节点还没同步到最新区块，请稍后再试',
+  '节点返回的交易哈希不一致',
+  // operator-store.js
+  '临时钱包无法解密（系统钥匙串可能已重置）',
+  '临时钱包：记录文件已损坏',
+  '这个容器已有另一个持有人的临时钱包，请先把它的余额退回原持有人',
+  '交易的 nonce 不比已确认的大，节点可能落后',
+  // publisher.js
+  '这个容器正在发布',
+  '读不到有效的 Gas 单价，请稍后再试',
+  '当前 Gas 单价太高，请稍后再试',
+  '开通容器失败',
+  '授权失败',
+  '充值失败',
+  '持有人的交易还没确认，可以稍后继续',
+  '钱包里还有一笔未确认的交易，请等它确认后再继续',
+  '钱包返回的交易哈希格式不对',
+  '链上状态变了，请重新检查：{reason}',
+  '开通后核对失败',
+  '旧持有人的临时钱包余额不够付退款手续费，已保留记录',
+  '旧持有人的临时钱包还没退干净，请稍后再试',
+  '上传 {path} 第 {index} 块失败',
+  '授权没有生效',
+  '上传 {path} 第 {index} 块模拟失败：{error}',
+  '上传后核对失败：{path} 的块数没有增加',
+  '核验失败：{path}',
+  '读不到持有人地址的信息，请稍后再试',
+  '退款交易一直没有打包，Gas 单价已到上限',
+  '退款交易一直没有打包，余额不够按现在的单价重发',
+  '退款交易还没确认，可以稍后再退',
+  '退款失败',
+  '持有人钱包里还有一笔未确认的交易，等它确认后再退款',
+  '上一位持有人的交易还没确认，可以稍后再试',
+  '网络不一致',
+  '没有这个容器的临时钱包',
+  '临时钱包还有一笔交易在等确认',
+  '持有人还有一笔交易在等确认',
+  '持有人钱包里还有一笔未确认的交易，等它确认后再处理',
+  '临时钱包里的余额还能退回，请先退款',
+  // owner-send.js
+  '钱包当前账户不是这个电路的持有人',
+  '钱包没有回应，交易可能已经发出；稍后继续时会先检查',
+  '钱包没有切换到 {chain}',
+  '你在钱包里拒绝了这笔交易',
+];
+
+// 不转义 { }：留给下面换成捕获组
+const escapeRe = (s) => s.replace(/[.*+?^$()[\]\\|]/g, '\\$&');
+// 带变量的消息：{name} → 捕获组，按整句匹配
+const TEMPLATES = PUBLISH_MESSAGES.filter((m) => /\{\w+\}/.test(m)).map((m) => {
+  const names = [...m.matchAll(/\{(\w+)\}/g)].map((x) => x[1]);
+  const re = new RegExp('^' + escapeRe(m).replace(/\{\w+\}/g, '([\\s\\S]*?)') + '$');
+  return { key: m, names, re };
+});
+
+/**
+ * 把错误的 message 翻译成界面语言：完全一样的直接查字典，带变量的按 PUBLISH_MESSAGES 里的模板拆出变量再填回去。
+ * 都对不上（钱包原样返回的错误之类）原样交给 tr，没有翻译就显示原文
+ */
+export function translateMessage(message, tr) {
+  const m = String(message ?? '');
+  if (PUBLISH_MESSAGES.includes(m)) return tr(m);
+  for (const t of TEMPLATES) {
+    const hit = t.re.exec(m);
+    if (hit) return tr(t.key, Object.fromEntries(t.names.map((n, i) => [n, hit[i + 1]])));
+  }
+  return tr(m);
+}

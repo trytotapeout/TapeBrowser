@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { PUBLISH_MESSAGES } from '../src/main/publish-errors.js';
 
 const i18n = createRequire(import.meta.url)('../src/i18n/i18n.cjs');
 const CJK = /[一-鿿]/;
 
-/** 代码里所有 tr('…') 和 index.html 里的中文 */
+/** 代码里所有 tr('…')、index.html 里的中文，和发布流程抛出的错误文字（IPC 层用 translateMessage 动态翻译，扫不到） */
 function usedKeys() {
   const keys = new Set();
   for (const f of ['src/main/main.js', 'src/main/tabs.js', 'src/main/risk.js', 'src/main/tip.js', 'src/main/precheck.js', 'src/main/safety.js', 'src/ui/ui.js']) {
@@ -16,6 +17,7 @@ function usedKeys() {
   const html = readFileSync('src/ui/index.html', 'utf8').replace(/<script[\s\S]*?<\/script>|<!--[\s\S]*?-->/g, '');
   for (const m of html.matchAll(/>([^<>]+)</g)) { const t = m[1].trim(); if (CJK.test(t)) keys.add(t); }
   for (const m of html.matchAll(/(?:title|aria-label|placeholder)="([^"]+)"/g)) if (CJK.test(m[1])) keys.add(m[1]);
+  for (const m of PUBLISH_MESSAGES) keys.add(m);
   return keys;
 }
 
