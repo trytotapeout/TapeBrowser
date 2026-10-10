@@ -226,3 +226,37 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 .addr-list .kind { display: inline-block; min-width: 4.5em; margin-right: 8px; font-size: 11px; color: var(--muted); }
 .addr-list .kind.wallet { color: #b7791f; }
 #siteinfo { max-height: 70vh; overflow: auto; }
+
+/* 发布页：沿用设置页、帮助页的样式 */
+#publish-close { margin-bottom: 8px; }
+#publish-page button:disabled { opacity: .5; cursor: default; }
+.pub-chains, .pub-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; }
+.pub-chains button, .pub-actions button:not(.link) { border: 1px solid var(--line); border-radius: 6px; background: var(--tab); padding: 4px 12px; cursor: pointer; }
+.pub-chains button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.pub-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pub-note { margin: 4px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.pub-note.warn { color: #b7791f; }
+.pub-note.bad { color: var(--bad); }
+/* 电路列表：整行可点，选中的左边一条强调色 */
+.list li.pub-row { padding: 0; }
+.list .pub-target { flex: 1; min-width: 0; display: flex; gap: 12px; align-items: baseline; padding: 8px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; }
+.list .pub-target:hover:not(:disabled) { background: var(--tab); }
+.list .pub-target[aria-pressed="true"] { background: var(--notice); box-shadow: inset 3px 0 0 var(--accent); }
+.pub-target .t, .pub-left .t { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+.pub-target .s, .pub-left .s { color: var(--muted); font-size: 12px; }
+.pub-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0; }
+.pub-facts dt { color: var(--muted); }
+.pub-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pub-facts dd.total { font-weight: 600; }
+/* 醒目提示：钱包确认、完成、出错 */
+.pub-banner { margin: 8px 0; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 8px; background: var(--notice); font-weight: 600; line-height: 1.5; }
+.pub-banner.ok { border-color: var(--ok); color: var(--ok); background: transparent; }
+.pub-banner.warn { border-color: #b7791f; color: #b7791f; background: transparent; }
+.pub-banner.bad { border-color: var(--bad); color: var(--bad); background: transparent; }
+progress.pub-bar { display: block; width: 100%; height: 8px; margin: 6px 0; border: 0; border-radius: 4px; background: var(--line); -webkit-appearance: none; appearance: none; overflow: hidden; }
+progress.pub-bar::-webkit-progress-bar { background: var(--line); border-radius: 4px; }
+progress.pub-bar::-webkit-progress-value { background: var(--accent); border-radius: 4px; }
+/* 残留的临时钱包 */
+.list li.pub-left { display: block; }
+.pub-left .head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.pub-left .actions { margin-top: 4px; }

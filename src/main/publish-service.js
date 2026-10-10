@@ -17,7 +17,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { PUBLISH_NETWORKS, networkByKey } from './config.js';
-import { siteLabel } from './address.js';
+import { siteLabel, siteUrl } from './address.js';
 import { createPublisher } from './publisher.js';
 import { createOperatorStore } from './operator-store.js';
 import { createOwnerSend } from './owner-send.js';
@@ -53,7 +53,7 @@ function plain(v) {
 const str = (v) => (v === undefined || v === null ? null : v.toString());
 
 /** inspect 的结果 → 给渲染进程的摘要：只有可序列化的字段，没有文件内容、sha256、计划步骤和 store 记录 */
-function summaryOf(id, netKey, label, r) {
+function summaryOf(id, netKey, label, url, r) {
   const rows = r.plan?.rows ?? [];
   const counts = { create: 0, append: 0, replace: 0, reuse: 0 };
   for (const row of rows) counts[row.action]++;
@@ -62,6 +62,8 @@ function summaryOf(id, netKey, label, r) {
     id,
     stage: r.stage,
     label,
+    // 发布后打开网站用的网址：tape://7-7/
+    url,
     netKey,
     container: r.container ?? null,
     opened: r.opened ?? null,
@@ -214,7 +216,7 @@ export function createPublishService({
       // 只留最近的几次：Map 按插入顺序，最早的在前
       while (sessions.size > MAX_SESSIONS) sessions.delete(sessions.keys().next().value);
     }
-    return summaryOf(id, net.key, label, r);
+    return summaryOf(id, net.key, label, siteUrl(tokenId, cpu, '', net.area), r);
   }
 
   /**

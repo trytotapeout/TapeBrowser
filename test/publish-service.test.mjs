@@ -153,6 +153,7 @@ test('inspect：摘要能 JSON 序列化，没有 bytes、bigint、store 里的�
     assert.equal(s.stage, 'ready');
     assert.equal(typeof s.id, 'string');
     assert.equal(s.label, '7.7.tape');
+    assert.equal(s.url, 'tape://7-7/');
     assert.equal(s.netKey, 'bnb');
     assert.equal(s.container, CONTAINER);
     assert.equal(s.opened, false);

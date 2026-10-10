@@ -124,7 +124,7 @@
     $('reload').title = t && t.loading ? tr('停止') : tr('重新加载');
     if (!editing) $('address').value = t && t.url ? t.url : '';
     document.title = t ? t.title + ' - TapeBrowser' : 'TapeBrowser';
-    $('newtab-page').hidden = settingsOpen || helpOpen || Boolean(t && t.url);
+    $('newtab-page').hidden = settingsOpen || helpOpen || pub.open || Boolean(t && t.url);
     if (pendingOwner && t && !t.url) {
       $('dir-search').value = pendingOwner;
       $('dir-net').value = '';
@@ -136,6 +136,7 @@
     }
     $('settings-page').hidden = !settingsOpen;
     $('help-page').hidden = !helpOpen;
+    $('publish-page').hidden = !pub.open;
     $('quickstart').hidden = library.history.length > 0;
     const zoom = t ? t.zoom : 100;
     // 新标签页画在外壳界面里，只缩放这一块，标签栏和地址栏不变
@@ -319,6 +320,10 @@
     }
     row(tr('卡片预览')).append(localCard(c.card));
     safetyRow(dl);
+    // 发布到容器：打开全屏发布页
+    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('发布到容器…') });
+    go.addEventListener('click', () => openPublish(true));
+    row(tr('发布')).append(go);
   }
 
   const LEVEL_TEXT = { danger: tr('高危'), warn: tr('留意'), info: tr('信息') };
@@ -864,19 +869,21 @@
   function closePages() {
     if (settingsOpen) setSettings(false);
     if (helpOpen) setHelp(false);
+    if (pub.open) openPublish(false);
   }
 
   function setHelp(on) {
     helpOpen = on;
     if (on && settingsOpen) settingsOpen = false;
-    tb.invoke('overlay', on || settingsOpen);
+    if (on) pub.open = false;
+    tb.invoke('overlay', on || settingsOpen || pub.open);
     renderNav();
   }
 
   async function setSettings(on) {
     settingsOpen = on;
-    if (on) helpOpen = false;
-    tb.invoke('overlay', on);
+    if (on) { helpOpen = false; pub.open = false; }
+    tb.invoke('overlay', on || pub.open);
     renderNav();
     if (on) await loadSettings();
   }
@@ -900,6 +907,523 @@
     renderWallet();
     const u = await tb.invoke('cacheUsage');
     $('cache-usage').textContent = tr('已缓存 {files} 个文件，共 {0} MB', { files: u.files, 0: (u.bytes / 1024 / 1024).toFixed(1) });
+  }
+
+  // ---- 发布到容器：全屏页面，和设置页一样盖住网页（overlay） ----
+  // 主进程只给脱敏摘要和 id（契约第 2 条）；这里按 id、链和电路编号调用，按错误码决定提示和按钮（契约第 7 条）
+  const PUB_NETS = [{ key: 'bnb', name: 'BNB Chain', currency: 'BNB' }, { key: 'xlayer', name: 'X Layer', currency: 'OKB' }];
+  const pubNet = (key) => PUB_NETS.find((n) => n.key === key) || null;
+  // 发布页的全部状态
+  const pub = {
+    open: false,
+    url: null,        // 打开发布页时的本地预览网址，inspect 在主进程里按它找文件夹
+    root: null,       // 本地文件夹路径，只用来显示
+    available: null,  // publishAvailable：{ ok, reason }
+    netKey: null,
+    targets: null,    // publishTargets：{ circuits, skipped } | { error }
+    scan: null,       // publishScan 的最新进度
+    pick: null,       // 选中的电路 { tokenId, cpu }
+    plan: null,       // inspect 摘要 | { error }
+    run: null,        // 正在发布：{ id, site, stage, done, total, path, index, hash, wallet, pausing, warn }
+    result: null,     // 发布结束：run 的结果 + { id, site } | { error, id, site }
+    leftovers: null,  // publishLeftovers
+    flash: null,      // 页面顶部的一条提示 { level, text }（退款、放弃零头的结果之类）
+    busy: new Set(),  // 正在等结果的调用，相关按钮禁用
+    seq: 0,           // 选链、选电路的序号：过时的结果直接丢掉
+  };
+  const AVAIL_TEXT = {
+    'no-encryption': tr('这台电脑的系统钥匙串不可用，无法安全保存发布用的临时钱包，所以不能发布。'),
+    'basic-text': tr('这台电脑没有可用的系统密码库（只能明文保存），无法安全保存发布用的临时钱包，所以不能发布。'),
+  };
+
+  /** 十进制字符串（wei）→ 数额：去掉末尾的 0，小数最多 6 位有效数字 */
+  function formatUnits(raw, decimals = 18) {
+    let v;
+    try { v = BigInt(raw); } catch { return '—'; }
+    const neg = v < 0n;
+    if (neg) v = -v;
+    const base = 10n ** BigInt(decimals);
+    const whole = v / base;
+    let frac = (v % base).toString().padStart(decimals, '0');
+    const lead = frac.search(/[1-9]/);
+    frac = lead < 0 ? '' : frac.slice(0, whole ? 6 : lead + 6).replace(/0+$/, '');
+    return (neg ? '-' : '') + whole.toString() + (frac ? '.' + frac : '');
+  }
+  const coin = (raw, netKey) => `${formatUnits(raw)} ${(pubNet(netKey) || {}).currency || ''}`.trim();
+  /** 建一个元素：props 直接赋值，kids 是元素或文字（文字一律当文本节点，不解析 HTML） */
+  const mk = (tag, props, ...kids) => {
+    const el = Object.assign(document.createElement(tag), props || {});
+    el.append(...kids.filter((k) => k !== null && k !== undefined && k !== false));
+    return el;
+  };
+  const shortAddr = (a) => (a ? a.slice(0, 6) + '…' + a.slice(-4) : '—');
+  // 在发布前就会被拒绝、碰不到临时钱包的错误：没有残留记录时不给「退款」
+  const PRE_START = new Set(['BUSY', 'NOT_READY', 'NO_ENCRYPTION', 'BAD_ARGS', 'CHAIN_UNSUPPORTED', 'NOT_LOCAL', 'CIRCUIT_MISSING', 'LOCAL_FILES']);
+  const originOfUrl = (u) => (/^tape:\/\/[^/?#]+/i.exec(u || '') || [''])[0].toLowerCase();
+
+  /**
+   * 调用发布 IPC：key 记进 busy（相关按钮禁用），返回 { ok, value } | { error } | { cancelled }。
+   * invoke 自己抛错也转成 { error }；NO_ENCRYPTION 时整页只显示原因
+   */
+  async function pubCall(key, name, ...args) {
+    pub.busy.add(key);
+    renderPublish();
+    let r;
+    try {
+      r = await tb.invoke(name, ...args);
+      if (!r || typeof r !== 'object') r = { error: { code: null, message: tr('发布服务没有回应') } };
+    } catch (e) {
+      r = { error: { code: null, message: errText(e) } };
+    }
+    pub.busy.delete(key);
+    if (r.error && r.error.code === 'NO_ENCRYPTION') pub.available = { ok: false, error: r.error.message };
+    renderPublish();
+    return r;
+  }
+
+  /** 打开 / 关闭发布页。只能从本地预览打开；换了文件夹时从选链开始（正在发布时保留进度） */
+  function openPublish(on) {
+    if (on) {
+      const t = active();
+      if (!pub.run && !(t && isLocal(t.url))) { notice(tr('请先在本地预览里打开要发布的文件夹'), 'error'); return; }
+      if (!pub.run && originOfUrl(pub.url) !== originOfUrl(t.url)) {
+        Object.assign(pub, { url: t.url, root: null, netKey: null, targets: null, scan: null, pick: null, plan: null, result: null });
+        pub.seq++;
+      }
+      if (!pub.run && siteInfo && siteInfo.local && siteInfo.root) pub.root = siteInfo.root;
+      settingsOpen = false;
+      helpOpen = false;
+      if (siteOpen) setSite(false);
+    }
+    pub.open = on;
+    tb.invoke('overlay', on);
+    renderNav();
+    if (!on) return;
+    renderPublish();
+    loadPublish();
+  }
+
+  async function loadPublish() {
+    const a = await pubCall('available', 'publishAvailable');
+    pub.available = a.error ? { ok: false, error: a.error.message } : a.value;
+    renderPublish();
+    if (pub.available && pub.available.ok) await loadLeftovers();
+  }
+
+  async function loadLeftovers() {
+    const r = await pubCall('leftovers', 'publishLeftovers');
+    pub.leftovers = r.error ? { error: r.error.message } : r.value;
+    renderPublish();
+  }
+
+  /** 选链：读这个钱包在链上的电路。container 给了就在读完后选中这个容器的电路（残留记录的「继续发布」） */
+  async function chooseNet(key, container = null) {
+    if (pub.run || !pubNet(key)) return;
+    const seq = ++pub.seq;
+    Object.assign(pub, { netKey: key, targets: null, scan: null, pick: null, plan: null, result: null });
+    renderPublish();
+    // 没连钱包时页面提示先连接；连上后 tb.on('wallet') 会重新读
+    if (!wallet.ready || !wallet.account) return;
+    const r = await pubCall('targets', 'publishTargets', key);
+    if (seq !== pub.seq) return;
+    pub.targets = r.error ? { error: r.error } : r.value;
+    pub.scan = null;
+    renderPublish();
+    if (!container || r.error) return;
+    const c = (r.value.circuits || []).find((x) => String(x.container).toLowerCase() === container.toLowerCase());
+    if (c) chooseTarget(c);
+    else notice(tr('当前钱包持有的电路里没有这个容器：换成它的持有人的钱包再继续，或者直接退款'), 'error');
+  }
+  /** 选电路：选好就自动检查（inspect） */
+  function chooseTarget(c) {
+    if (pub.run) return;
+    pub.pick = { tokenId: Number(c.tokenId), cpu: Number(c.cpu), label: c.label, container: c.container };
+    pub.result = null;
+    inspectPick();
+  }
+
+  /** 按选中的链和电路检查一次；返回新的摘要（出错时为 null） */
+  async function inspectPick() {
+    if (!pub.pick || !pub.netKey || pub.run) return null;
+    const seq = ++pub.seq;
+    pub.plan = null;
+    const { tokenId, cpu } = pub.pick;
+    const r = await pubCall('inspect', 'publishInspect', { url: pub.url, netKey: pub.netKey, tokenId, cpu });
+    if (seq !== pub.seq) return null;
+    pub.plan = r.error ? { error: r.error } : r.value;
+    renderPublish();
+    return r.error ? null : r.value;
+  }
+
+  /** 按 id 发布（「开始发布」和「继续发布」）。done 之后 id 作废，paused 或出错时同一个 id 可以再 run */
+  async function startRun(id) {
+    const plan = pub.plan && pub.plan.id === id ? pub.plan : null;
+    const base = { id, netKey: pub.netKey, label: (plan && plan.label) || (pub.pick && pub.pick.label), url: plan && plan.url, container: (plan && plan.container) || (pub.pick && pub.pick.container), openFee: plan && !plan.opened ? plan.openFee : null };
+    pub.result = null;
+    pub.flash = null;
+    pub.run = { ...base, stage: 'start', started: false };
+    const r = await pubCall('run', 'publishRun', id);
+    const started = pub.run && pub.run.started;
+    pub.run = null;
+    if (r.error) pub.result = { ...base, error: r.error, started };
+    else if (r.value.stage === 'paused') pub.result = { ...base, paused: true };
+    else {
+      pub.result = { ...base, ...r.value, url: base.url };
+      pub.plan = null;
+    }
+    renderPublish();
+    loadLeftovers();
+  }
+
+  /** 「继续发布」：先用原来的 id；主进程里已经没有这次检查（重启过、检查太多被挤掉）就重新检查再发 */
+  async function continueRun(id) {
+    if (id) {
+      await startRun(id);
+      if (!(pub.result && pub.result.error && pub.result.error.code === 'NOT_READY')) return;
+      // 主进程里没有这次检查了：回到计划，按最新状态重新检查后接着发
+      pub.result = null;
+    }
+    const plan = await inspectPick();
+    if (plan && plan.stage === 'ready' && plan.id) await startRun(plan.id);
+  }
+
+  async function pausePublish() {
+    if (!pub.run) return;
+    const id = pub.run.id;
+    const r = await pubCall('pause', 'publishPause', id);
+    if (pub.run && pub.run.id === id && !r.error && r.value) pub.run.pausing = true;
+    if (r.error) notice(r.error.message, 'error');
+    renderPublish();
+  }
+
+  /** 退款 / 放弃零头：主进程先弹确认框，用户取消时什么也不做 */
+  async function refundLeft(netKey, container) {
+    const r = await pubCall('refund:' + container, 'publishRefund', { netKey, container });
+    if (r.cancelled) return;
+    if (r.error) pub.flash = { level: 'bad', text: r.error.message };
+    else if (r.value.dust) pub.flash = { level: 'warn', text: tr('临时钱包里只剩一点零头，不够付退款的手续费，没有退。可以在下面「放弃零头」') };
+    else pub.flash = { level: 'ok', text: tr('已退回 {amount} 到持有人地址', { amount: coin(r.value.refunded, netKey) }) };
+    if (!r.error && pub.result && pub.result.container === container) pub.result = null;
+    renderPublish();
+    loadLeftovers();
+  }
+
+  async function discardLeft(netKey, container) {
+    const r = await pubCall('discard:' + container, 'publishDiscard', { netKey, container });
+    if (r.cancelled) return;
+    pub.flash = r.error ? { level: 'bad', text: r.error.message } : { level: 'ok', text: tr('已放弃 {amount} 零头，删掉了这个临时钱包', { amount: coin(r.value.discarded, netKey) }) };
+    renderPublish();
+    loadLeftovers();
+  }
+  /** 残留记录的「继续发布」：选好链，读完电路后选中这个容器的电路并检查 */
+  function resumeLeft(rec) {
+    if (!wallet.ready || !wallet.account) { notice(tr('请先连接钱包'), 'error'); return; }
+    $('content').scrollTop = 0;
+    chooseNet(rec.netKey, rec.container);
+  }
+
+  const leftoverOf = (netKey, container) => ((pub.leftovers && pub.leftovers.records) || [])
+    .find((r) => r.netKey === netKey && container && r.container.toLowerCase() === String(container).toLowerCase()) || null;
+  /** 出错的这次发布有没有可能把钱留在临时钱包里：已经开始（收到过进度）或者残留列表里有这个容器 */
+  // 核验失败时已经退过款，只有退款没退干净（残留列表里还有）才再给入口
+  const canRefund = (res) => {
+    if (!res.container || (res.error && PRE_START.has(res.error.code))) return false;
+    const left = Boolean(leftoverOf(res.netKey, res.container));
+    if (res.error && res.error.code === 'VERIFY_FAILED') return left;
+    return Boolean(res.paused || res.started || left);
+  };
+
+  async function openSite(url) {
+    if (!/^tape:\/\/[0-9a-z-]+\/$/i.test(url || '')) return;
+    openPublish(false);
+    await tb.invoke('newTab');
+    tb.invoke('openUrl', url);
+  }
+
+  // 发布进度：只认当前这次 run 的 id
+  tb.on('publish', (e) => {
+    const r = pub.run;
+    if (!r || !e || e.id !== r.id) return;
+    r.started = true;
+    if (e.stage === 'wallet') {
+      r.wallet = e.kind;
+      r.stage = e.kind;
+      r.hash = null;
+    } else {
+      r.wallet = null;
+      if (e.stage !== r.stage) { r.done = null; r.total = null; r.path = null; r.index = null; }
+      r.stage = e.stage;
+      for (const k of ['done', 'total', 'path', 'index', 'hash']) if (e[k] !== undefined) r[k] = e[k];
+      if (e.stage === 'refund' && e.error) r.warn = tr('退款出错：{message}', { message: e.error });
+    }
+    renderPublish();
+  });
+  tb.on('publishScan', (p) => {
+    if (!p || p.netKey !== pub.netKey || pub.targets) return;
+    pub.scan = p;
+    renderPublish();
+  });
+  const note = (text, level) => mk('p', { className: 'pub-note' + (level ? ' ' + level : ''), textContent: text });
+  const button = (text, onClick, { busy = null, primary = false, link = false, disabled = false } = {}) => {
+    const b = mk('button', { type: 'button', textContent: text, className: link ? 'link' : primary ? 'primary' : '' });
+    b.disabled = disabled || Boolean(busy && pub.busy.has(busy));
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  /** 两列的说明：[[名称, 值, 类名]] */
+  const facts = (rows) => {
+    const dl = mk('dl', { className: 'pub-facts' });
+    for (const [k, v, cls] of rows) if (v !== null && v !== undefined) dl.append(mk('dt', { textContent: k }), mk('dd', { textContent: v, className: cls || '' }));
+    return dl;
+  };
+  const levelLabel = (level) => LEVELS[level] || LEVELS.info;
+  const checkList = (items) => {
+    const ul = mk('ul', { className: 'check-list' });
+    for (const it of items) ul.append(mk('li', { className: it.level }, mk('span', { className: 'lv', textContent: levelLabel(it.level) }), it.text));
+    return ul;
+  };
+
+  /** 整个发布页：每次状态变化都整页重画（内容不多），没有输入框，不怕丢焦点 */
+  function renderPublish() {
+    if (!pub.open) return;
+    $('pub-source').textContent = pub.root ? tr('发布本地文件夹：{root}', { root: pub.root }) : tr('发布当前本地预览的文件夹');
+    const av = pub.available;
+    const blocked = av && !av.ok;
+    $('pub-blocked').hidden = !blocked;
+    if (blocked) $('pub-blocked').textContent = av.error || AVAIL_TEXT[av.reason] || tr('暂时不能发布');
+    $('pub-body').hidden = !av || blocked;
+    if (!av || blocked) return;
+    renderPublishChain();
+    renderTargets();
+    renderPlan();
+    renderRun();
+    renderLeftovers();
+  }
+
+  function renderPublishChain() {
+    const box = $('pub-chain');
+    box.textContent = '';
+    if (pub.flash) box.append(mk('p', { className: 'pub-banner ' + pub.flash.level, textContent: pub.flash.text, role: 'status' }));
+    const row = mk('div', { className: 'pub-chains', role: 'group' });
+    row.setAttribute('aria-label', tr('选链'));
+    for (const n of PUB_NETS) {
+      const b = button(n.name, () => chooseNet(n.key), { disabled: Boolean(pub.run) });
+      b.setAttribute('aria-pressed', String(pub.netKey === n.key));
+      row.append(b);
+    }
+    box.append(row);
+    if (!wallet.ready || !wallet.account) {
+      box.append(note(wallet.connected ? tr('桥接页面已打开，请在系统浏览器里选择钱包并授权，然后回到这里。') : tr('发布要用电路持有人的钱包签名。请先连接钱包。'), 'warn'));
+      if (!wallet.connected) box.append(mk('div', { className: 'pub-actions' }, button(tr('连接钱包'), () => tb.invoke('openBridge'))));
+    } else if (!pub.netKey) {
+      box.append(note(tr('选择网站要发布到哪条链。钱包会在需要时请你切换到这条链。')));
+    }
+  }
+  /** 扫电路的进度：处理器列表 → 余额 → 逐个处理器找编号 → 读容器信息 */
+  function scanText(p) {
+    if (!p) return tr('正在读取钱包持有的电路…');
+    if (p.stage === 'balances') return tr('正在检查钱包在 {n} 个处理器上的电路…', { n: p.total });
+    if (p.stage === 'ids') return tr('正在查找处理器 {cpu} 上的电路编号（{done} / {total}）…', { cpu: p.cpu, done: p.done, total: p.total });
+    if (p.stage === 'circuits') return tr('正在读取 {n} 个电路的容器信息…', { n: p.total });
+    return tr('正在读取钱包持有的电路…');
+  }
+
+  function renderTargets() {
+    const sec = $('pub-targets-sec');
+    const box = $('pub-targets');
+    sec.hidden = !pub.netKey || !wallet.ready || !wallet.account;
+    box.textContent = '';
+    if (sec.hidden) return;
+    const t = pub.targets;
+    if (!t) { box.append(note(scanText(pub.scan))); return; }
+    if (t.error) {
+      box.append(note(t.error.message, 'bad'), mk('div', { className: 'pub-actions' }, button(tr('重新读取'), () => chooseNet(pub.netKey), { busy: 'targets' })));
+      return;
+    }
+    const net = pubNet(pub.netKey);
+    if (!t.circuits.length) box.append(note(tr('当前钱包在 {name} 上没有电路。电路要先在 TapeOut 官网铸造，持有后才能发布网站。', { name: net.name }), 'warn'));
+    const ul = mk('ul', { className: 'list' });
+    for (const c of t.circuits) {
+      const on = Boolean(pub.pick && pub.pick.tokenId === Number(c.tokenId) && pub.pick.cpu === Number(c.cpu));
+      const state = !c.opened ? tr('需要开通容器') : c.hasIndex ? tr('已开通 · 有首页（会更新）') : tr('已开通 · 还没有首页');
+      const b = mk('button', { type: 'button', className: 'pub-target' },
+        mk('span', { className: 't', textContent: c.label }),
+        mk('span', { className: 's', textContent: tr('#{tokenId}，处理器 {cpu}', { tokenId: c.tokenId, cpu: c.cpu }) }),
+        mk('span', { className: 's', textContent: state }));
+      b.setAttribute('aria-pressed', String(on));
+      b.disabled = Boolean(pub.run) || pub.busy.has('inspect');
+      b.addEventListener('click', () => chooseTarget(c));
+      ul.append(mk('li', { className: 'pub-row' }, b));
+    }
+    box.append(ul);
+    for (const s of t.skipped || []) box.append(note(tr('处理器 {cpu} 上的电路太多（最大编号 {maxId}），没有逐个检查；钱包在那里持有 {balance} 个电路，暂时不能从这里发布', { cpu: s.cpu, maxId: s.maxId, balance: s.balance }), 'warn'));
+  }
+  const CONFLICT_TEXT = {
+    changed: tr('链上已有同名文件，内容不一样。只有 index.html 可以替换，请给这个文件改个名字（比如加上版本号），并改掉引用它的地方'),
+    corrupt: tr('链上的同名文件分块异常，没法接着传。请给这个文件改个名字，并改掉引用它的地方'),
+  };
+
+  function renderPlan() {
+    const sec = $('pub-plan-sec');
+    const box = $('pub-plan');
+    sec.hidden = !pub.pick || Boolean(pub.run) || Boolean(pub.result);
+    box.textContent = '';
+    if (sec.hidden) return;
+    const p = pub.plan;
+    const again = () => mk('div', { className: 'pub-actions' }, button(tr('重新检查'), () => inspectPick(), { busy: 'inspect' }));
+    if (!p) { box.append(note(tr('正在检查 {label}：读取本地文件、对比链上已有的文件、估算 gas…', { label: pub.pick.label }))); return; }
+    if (p.error) { box.append(note(p.error.message, 'bad'), again()); return; }
+    if (p.stage === 'blocked') {
+      box.append(note(tr('预检查没有通过，改好下面的问题后再检查：'), 'bad'), checkList(p.errors), again());
+      return;
+    }
+    if (p.stage === 'conflicts') {
+      box.append(note(tr('有 {n} 个文件和链上的同名文件冲突，不能发布：', { n: p.conflicts.length }), 'bad'));
+      box.append(checkList(p.conflicts.map((c) => ({ level: 'error', text: tr('/{path}：{reason}', { path: c.path, reason: CONFLICT_TEXT[c.reason] || c.reason }) }))), again());
+      return;
+    }
+    const c = p.counts;
+    box.append(facts([
+      [tr('网站'), p.label],
+      [tr('文件'), tr('新上传 {create} 个，续传 {append} 个，复用 {reuse} 个，替换首页 {replace} 个', c)],
+      [tr('上传'), tr('{txs} 笔交易，{size}', { txs: p.transactions, size: size(p.uploadBytes) })],
+      [tr('开通费'), p.opened ? tr('容器已开通，不用再付') : coin(p.openFee, p.netKey)],
+      [tr('上传 gas（预估）'), tr('{amount}（单价 {gwei} gwei）', { amount: coin(p.uploadCost, p.netKey), gwei: formatUnits(p.gasPrice, 9) })],
+      [tr('合计（预估）'), coin(p.totalCost, p.netKey), 'total'],
+    ]));
+    if (p.indexChunks && p.indexChunks > 1) box.append(note(tr('首页有 {n} 块，要分 {n} 笔替换：更新期间网站会暂时打不开，传完就恢复。', { n: p.indexChunks }), 'warn'));
+    if (!p.transactions) box.append(note(tr('链上的文件已经和本地一样，没有要上传的内容。')));
+    const actions = mk('div', { className: 'pub-actions' },
+      button(tr('开始发布'), () => startRun(p.id), { busy: 'run', primary: true, disabled: !p.id || !p.transactions }),
+      button(tr('重新检查'), () => inspectPick(), { busy: 'inspect', link: true }));
+    box.append(actions, note(tr('接下来钱包会请你确认 2 到 3 笔交易：开通容器（如果需要）、授权临时钱包 6 小时、充值上传用的 gas。剩下的 gas 发布完自动退回。')));
+  }
+  /** 钱包要确认的这一步签的是什么 */
+  function walletStep(kind, run) {
+    if (kind === 'open') return run.openFee ? tr('开通容器并支付开通费 {fee}', { fee: coin(run.openFee, run.netKey) }) : tr('开通容器并支付开通费');
+    if (kind === 'grant') return tr('授权临时钱包上传 6 小时');
+    if (kind === 'fund') return tr('给临时钱包充值上传用的 gas');
+    return tr('一笔发布用的交易');
+  }
+  const WAIT_TEXT = { open: tr('正在等开通容器的交易确认…'), grant: tr('正在等授权的交易确认…'), fund: tr('正在等充值的交易确认…') };
+
+  function runStepText(r) {
+    if (r.stage === 'upload') return r.total ? tr('正在上传：第 {done} / {total} 笔，/{path}', { done: r.done, total: r.total, path: r.path || '' }) : tr('正在上传…');
+    if (r.stage === 'verify') return r.total ? tr('正在核验链上的文件：{done} / {total}', { done: r.done, total: r.total }) : tr('正在核验链上的文件…');
+    if (r.stage === 'refund') return tr('正在把剩下的 gas 退回持有人…');
+    if (WAIT_TEXT[r.stage]) return WAIT_TEXT[r.stage];
+    return tr('正在准备：检查上次留下的交易和链上的最新状态…');
+  }
+
+  function renderRun() {
+    const sec = $('pub-run-sec');
+    const box = $('pub-run');
+    sec.hidden = !pub.run && !pub.result;
+    box.textContent = '';
+    if (pub.result) { renderResult(box, pub.result); return; }
+    const r = pub.run;
+    if (!r) return;
+    box.append(facts([[tr('网站'), r.label]]));
+    if (r.wallet) box.append(mk('p', { className: 'pub-banner', role: 'alert', textContent: tr('请在浏览器的钱包扩展里确认：{step}', { step: walletStep(r.wallet, r) }) }));
+    else box.append(mk('p', { textContent: runStepText(r) }));
+    const bar = mk('progress', { className: 'pub-bar' });
+    bar.setAttribute('aria-label', tr('发布进度'));
+    // 没有总数的步骤显示不确定的进度条
+    if (!r.wallet && r.total) { bar.max = r.total; bar.value = r.done || 0; }
+    box.append(bar);
+    if (r.hash) box.append(note(tr('交易 {hash}', { hash: shortHex(r.hash) })));
+    if (r.warn) box.append(note(r.warn, 'bad'));
+    // 核验、退款开始以后一定做完，暂停不起作用
+    if (r.stage === 'verify' || r.stage === 'refund') return;
+    const actions = mk('div', { className: 'pub-actions' }, button(r.pausing ? tr('正在暂停…') : tr('暂停'), () => pausePublish(), { busy: 'pause', disabled: r.pausing }));
+    actions.append(mk('span', { className: 'pub-note', textContent: tr('暂停会在当前这笔交易确认后生效，可能要等几分钟') }));
+    box.append(actions);
+  }
+  /** 回到发布计划，按最新状态重新检查 */
+  const recheck = () => { pub.result = null; inspectPick(); };
+
+  /** 发布结束：成功、暂停或出错。暂停和出错时钱可能还在临时钱包里，给「继续发布」和「退款」（契约第 7 条） */
+  function renderResult(box, res) {
+    const actions = mk('div', { className: 'pub-actions' });
+    const resume = () => button(tr('继续发布'), () => continueRun(res.id), { busy: 'run', primary: true });
+    if (res.label) box.append(facts([[tr('网站'), res.label]]));
+    if (res.paused) {
+      box.append(mk('p', { className: 'pub-banner warn', role: 'status', textContent: tr('已暂停。没用完的 gas 还在临时钱包里，可以继续发布，也可以退款。') }));
+      actions.append(resume());
+    } else if (res.error) {
+      const code = res.error.code;
+      box.append(mk('p', { className: 'pub-banner bad', role: 'alert', textContent: res.error.message }));
+      if (code === 'LATER' || code === 'PENDING_TIMEOUT' || code === 'WALLET_LOST') {
+        if (code === 'WALLET_LOST') box.append(note(tr('钱包没有回应，交易可能已经发出。继续发布时会先到链上按最新状态检查，再决定从哪一步接着做。')));
+        else box.append(note(tr('交易还没确认或节点还没同步，等一会再继续发布。')));
+        actions.append(resume());
+      } else if (code === 'WALLET_PENDING') {
+        box.append(note(tr('钱包里还有一笔没确认的交易：请在钱包扩展里等它确认（或取消它），然后再继续发布。')));
+        actions.append(resume());
+      } else if (code === 'STATE_CHANGED') {
+        actions.append(button(tr('重新检查'), recheck, { busy: 'inspect', primary: true }));
+      } else if (code === 'USER_REJECTED') {
+        actions.append(button(tr('重新开始'), recheck, { busy: 'inspect', primary: true }));
+      } else {
+        actions.append(button(tr('重新检查'), recheck, { busy: 'inspect' }));
+      }
+    } else {
+      box.append(mk('p', { className: 'pub-banner ' + (res.verified ? 'ok' : 'warn'), role: 'status', textContent: res.verified ? tr('发布完成，链上的文件已经核验过') : tr('发布完成') }));
+      box.append(facts([
+        [tr('上传'), tr('{n} 笔交易', { n: res.uploaded })],
+        [tr('复用'), tr('{n} 个文件和链上已有的一样，没有重传', { n: res.reused })],
+        [tr('花费'), tr('{amount}（临时钱包付的 gas，不含开通费）', { amount: coin(res.spent, res.netKey) })],
+        [tr('退回'), coin(res.refunded, res.netKey)],
+      ]));
+      if (!res.verified) box.append(note(res.reason === 'safe' ? tr('还没核验完（等安全区块超时），可以稍后重新打开网站检查') : tr('还没核验完，可以稍后重新打开网站检查'), 'warn'));
+      if (res.dust) box.append(note(tr('临时钱包里剩下的零头不够付退款的手续费，留在了临时钱包里，可以在下面「放弃零头」'), 'warn'));
+      if (res.url) actions.append(button(tr('打开网站'), () => openSite(res.url), { primary: true }));
+      actions.append(button(tr('重新检查'), recheck, { busy: 'inspect', link: true }));
+    }
+    if ((res.paused || res.error) && canRefund(res)) actions.append(button(tr('退款'), () => refundLeft(res.netKey, res.container), { busy: 'refund:' + res.container }));
+    box.append(actions);
+  }
+  /** 页面底部：上次没发完或没退干净的临时钱包（契约第 4 条） */
+  function renderLeftovers() {
+    const box = $('pub-leftovers');
+    box.textContent = '';
+    const l = pub.leftovers;
+    const reload = () => button(tr('刷新'), () => loadLeftovers(), { busy: 'leftovers', link: true });
+    if (!l) { box.append(note(tr('读取中…'))); return; }
+    if (l.error) { box.append(note(l.error, 'bad'), reload()); return; }
+    if (l.unavailable) { box.append(note(AVAIL_TEXT['no-encryption'], 'bad')); return; }
+    const recs = l.records || [];
+    if (!recs.length && !(l.broken || []).length && !(l.errors || []).length) box.append(note(tr('没有。每次发布都会新建一个临时钱包付上传的 gas，发完自动把剩下的退回持有人。')));
+    const ul = mk('ul', { className: 'list' });
+    for (const rec of recs) {
+      const net = pubNet(rec.netKey);
+      const flags = [];
+      if (rec.pending) flags.push(tr('临时钱包有一笔交易在等确认'));
+      if (rec.ownerPending) flags.push(tr('持有人有一笔交易在等确认'));
+      const head = mk('div', { className: 'head' },
+        mk('span', { className: 't', textContent: shortAddr(rec.container), title: rec.container }),
+        mk('span', { className: 's', textContent: net ? net.name : rec.netKey }),
+        mk('span', { textContent: coin(rec.balance, rec.netKey) }),
+        mk('span', { className: 's', textContent: tr('持有人 {owner}', { owner: shortAddr(rec.owner) }), title: rec.owner }));
+      const li = mk('li', { className: 'pub-left' }, head);
+      head.firstChild.setAttribute('aria-label', tr('容器 {container}', { container: rec.container }));
+      for (const f of flags) li.append(note(f));
+      if (rec.decryptable === false) {
+        li.append(note(tr('这个临时钱包无法解密（系统钥匙串可能已重置），里面的余额找不回来了'), 'bad'));
+      } else {
+        const busy = pub.busy.has('refund:' + rec.container) || pub.busy.has('discard:' + rec.container) || Boolean(pub.run);
+        li.append(mk('div', { className: 'pub-actions' },
+          button(tr('继续发布'), () => resumeLeft(rec), { disabled: busy || pub.busy.has('targets') }),
+          button(tr('退款'), () => refundLeft(rec.netKey, rec.container), { disabled: busy }),
+          button(tr('放弃零头'), () => discardLeft(rec.netKey, rec.container), { disabled: busy, link: true })));
+      }
+      ul.append(li);
+    }
+    if (recs.length) box.append(ul);
+    if (recs.length) box.append(note(tr('「放弃零头」只用于余额不够付退款手续费的临时钱包，放弃前会再问一次。')));
+    for (const b of l.broken || []) box.append(note(tr('{name} 上有一个临时钱包记录文件已损坏（{file}），里面的余额可能找不回来', { name: (pubNet(b.netKey) || {}).name || b.netKey, file: b.file }), 'warn'));
+    for (const e of l.errors || []) box.append(note(tr('{name} 上的临时钱包读取失败：{message}', { name: (pubNet(e.netKey) || {}).name || e.netKey, message: tr(e.message) }), 'warn'));
+    box.append(reload());
   }
 
   // 内容区位置交给主进程摆放网页
@@ -965,6 +1489,7 @@
   }
   $('open-help').addEventListener('click', () => setHelp(true));
   $('help-close').addEventListener('click', () => setHelp(false));
+  $('publish-close').addEventListener('click', () => openPublish(false));
   for (const b of document.querySelectorAll('#dir-view button')) {
     b.addEventListener('click', () => { dirView = b.dataset.view; localStorage.setItem('dirView', dirView); renderDirectory(); });
   }
@@ -989,6 +1514,11 @@
     renderWallet();
     // 连上或断开钱包时，网站信息面板里的打赏一行要跟着变
     if (siteOpen && was !== Boolean(wallet.ready)) renderSite();
+    // 发布页：钱包刚连上时读选好的链上的电路；断开时回到连接提示
+    if (pub.open && was !== Boolean(wallet.ready)) {
+      if (wallet.ready && pub.netKey && !pub.run) chooseNet(pub.netKey);
+      else renderPublish();
+    }
   });
   tb.on('bem', (v) => {
     bemView = v;

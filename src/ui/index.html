@@ -146,6 +146,31 @@
       <p class="muted">打开电路网站后，点地址栏左边的「链上」按钮，查看持有人、文件的 SHA-256、上链时间和多节点校验结果。</p>
     </section>
 
+    <section id="publish-page" class="page" hidden>
+      <button id="publish-close" class="link" type="button">← 返回</button>
+      <h1>发布到容器</h1>
+      <p id="pub-source" class="muted"></p>
+      <p id="pub-blocked" class="pub-banner bad" role="alert" hidden></p>
+      <div id="pub-body" hidden>
+        <h2>选链</h2>
+        <div id="pub-chain"></div>
+        <section id="pub-targets-sec" hidden>
+          <h2>选电路</h2>
+          <div id="pub-targets"></div>
+        </section>
+        <section id="pub-plan-sec" hidden>
+          <h2>发布计划</h2>
+          <div id="pub-plan"></div>
+        </section>
+        <section id="pub-run-sec" hidden>
+          <h2>发布进度</h2>
+          <div id="pub-run" aria-live="polite"></div>
+        </section>
+        <h2>没发完或没退干净的临时钱包</h2>
+        <div id="pub-leftovers"></div>
+      </div>
+    </section>
+
     <section id="settings-page" class="page" hidden>
       <h1>设置</h1>
 
