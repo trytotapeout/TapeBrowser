@@ -45,7 +45,7 @@ export function homeNetwork(origin) {
 }
 
 /** wallet_addEthereumChain 的参数（钱包里还没有这条链时用） */
-const addChainParams = (n) => ({
+export const addChainParams = (n) => ({
   chainId: n.chainIdHex,
   chainName: n.name,
   nativeCurrency: { name: n.currency, symbol: n.currency, decimals: 18 },

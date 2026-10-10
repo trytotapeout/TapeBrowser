@@ -2,11 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createOwnerSend } from '../src/main/owner-send.js';
 import * as E from '../src/main/publish-errors.js';
+import { addChainParams } from '../src/main/provider-host.js';
 
 const FROM = '0x' + 'ab'.repeat(20);
 const TO = '0x' + 'cd'.repeat(20);
 const HASH = '0x' + '12'.repeat(32);
-const net = { name: 'Base', chainId: 8453, chainIdHex: '0x2105' };
+const net = {
+  name: 'Base', chainId: 8453, chainIdHex: '0x2105', currency: 'ETH',
+  rpcs: ['https://mainnet.base.org'], explorer: 'https://basescan.org',
+};
 const ORIGIN = 'tape://publish';
 
 /** 假 bridge：state 可改，request 记录调用；handlers[method] 决定返回或抛错 */
@@ -94,10 +98,11 @@ test('切链时桥接断开 → WALLET_NOT_CONNECTED（还没发交易），不�
   assert.ok(!b.calls.some((c) => c.method === 'eth_sendTransaction'));
 });
 
-test('切链的其他错误原样抛出', async () => {
-  const err = { code: 4902, message: 'Unrecognized chain' };
+test('切链的其他错误包成 WALLET_ERROR', async () => {
+  const err = { code: -32603, message: 'Internal error' };
   const b = fakeBridge({ chainId: '0x1' }, { wallet_switchEthereumChain: () => { throw err; } });
-  await assert.rejects(make(b)(tx(), 'open'), (e) => e === err);
+  await assert.rejects(make(b)(tx(), 'open'), (e) => e.code === E.WALLET_ERROR && e.cause === err);
+  assert.ok(!b.calls.some((c) => c.method === 'eth_sendTransaction'));
   assert.ok(!b.calls.some((c) => c.method === 'eth_sendTransaction'));
 });
 
@@ -113,11 +118,11 @@ test('没有 onStep 也能发', async () => {
   assert.equal(await createOwnerSend({ bridge: fakeBridge(), net, origin: ORIGIN })(tx(), 'open'), HASH);
 });
 
-test('bigint 和数字转 0x 十六进制，字符串原样，不加 gas / nonce', async () => {
+test('bigint 和数字转 0x 十六进制，字符串原样，带上 chainId，不加 gas / nonce', async () => {
   const b = fakeBridge();
   await make(b)({ ...tx(), value: 255n, extra: 16 }, 'open');
   const send = b.calls.find((c) => c.method === 'eth_sendTransaction');
-  assert.deepEqual(send.params, [{ from: FROM, to: TO, value: '0xff', data: '0xdeadbeef', extra: '0x10' }]);
+  assert.deepEqual(send.params, [{ from: FROM, to: TO, value: '0xff', data: '0xdeadbeef', extra: '0x10', chainId: '0x2105' }]);
   assert.equal(send.origin, ORIGIN);
 });
 
@@ -156,10 +161,72 @@ test('4900 → WALLET_LOST', async () => {
   await assert.rejects(make(b)(tx(), 'open'), (e) => e.code === E.WALLET_LOST && e.message === LOST);
 });
 
-test('其他错误原样抛出', async () => {
-  const err = { code: -32000, message: 'insufficient funds' };
+test('钱包的其他错误（-32603）包成 WALLET_ERROR，带 cause 和 walletCode', async () => {
+  const err = { code: -32603, message: 'Internal JSON-RPC error' };
+  const b = fakeBridge({}, { eth_sendTransaction: () => { throw err; } });
+  await assert.rejects(make(b)(tx(), 'open'), (e) => e instanceof Error && e.code === E.WALLET_ERROR
+    && e.message === 'Internal JSON-RPC error' && e.cause === err && e.walletCode === -32603);
+});
+
+test('4100（账户没授权）→ WALLET_ACCOUNT', async () => {
+  const b = fakeBridge({}, { eth_sendTransaction: () => { throw { code: 4100, message: 'Unauthorized' }; } });
+  await assert.rejects(make(b)(tx(), 'open'), (e) => e.code === E.WALLET_ACCOUNT);
+});
+
+test('已经带字符串 code 的 Error 原样抛出', async () => {
+  const err = Object.assign(new Error('boom'), { code: 'SOMETHING' });
   const b = fakeBridge({}, { eth_sendTransaction: () => { throw err; } });
   await assert.rejects(make(b)(tx(), 'open'), (e) => e === err);
+});
+
+test('交易参数里带 chainId：确认框开着时切了链，钱包会拒签', async () => {
+  const b = fakeBridge();
+  await make(b)(tx(), 'fund');
+  assert.equal(b.calls.at(-1).params[0].chainId, net.chainIdHex);
+});
+
+test('4902（钱包里没有这条链）→ 添加链 → 照常发', async () => {
+  const b = fakeBridge({ chainId: '0x1' }, {
+    wallet_switchEthereumChain: () => { throw { code: 4902, message: 'Unrecognized chain' }; },
+    wallet_addEthereumChain: (params, br) => { br.state = { ...br.state, chainId: net.chainIdHex }; return null; },
+  });
+  assert.equal(await make(b)(tx(), 'open'), HASH);
+  assert.deepEqual(b.calls[1], { method: 'wallet_addEthereumChain', params: [addChainParams(net)], origin: ORIGIN });
+  assert.equal(b.calls[2].method, 'eth_sendTransaction');
+});
+
+test('4902 → 用户拒绝添加链 → WALLET_CHAIN', async () => {
+  const b = fakeBridge({ chainId: '0x1' }, {
+    wallet_switchEthereumChain: () => { throw { code: 4902, message: 'Unrecognized chain' }; },
+    wallet_addEthereumChain: () => { throw { code: 4001, message: 'rejected' }; },
+  });
+  await assert.rejects(make(b)(tx(), 'open'), (e) => e.code === E.WALLET_CHAIN && e.message === '钱包没有切换到 Base');
+  assert.ok(!b.calls.some((c) => c.method === 'eth_sendTransaction'));
+});
+
+test('切链超时（4001 + timeout）→ WALLET_CHAIN', async () => {
+  const b = fakeBridge({ chainId: '0x1' }, {
+    wallet_switchEthereumChain: () => { throw { code: 4001, message: 'timeout', timeout: true }; },
+  });
+  await assert.rejects(make(b)(tx(), 'open'), (e) => e.code === E.WALLET_CHAIN);
+});
+
+test('切链后桥接断开（ready 变假）→ WALLET_NOT_CONNECTED，不发交易', async () => {
+  const b = fakeBridge({ chainId: '0x1' }, {
+    wallet_switchEthereumChain: (params, br) => {
+      br.state = { ...br.state, chainId: net.chainIdHex, ready: false };
+      return null;
+    },
+  });
+  await assert.rejects(make(b)(tx(), 'open'), (e) => e.code === E.WALLET_NOT_CONNECTED);
+  assert.ok(!b.calls.some((c) => c.method === 'eth_sendTransaction'));
+});
+
+test('onStep 期间断开 → 发之前再查 ready，WALLET_NOT_CONNECTED', async () => {
+  const b = fakeBridge();
+  const onStep = () => { b.state = { ...b.state, ready: false }; };
+  await assert.rejects(make(b, { onStep })(tx(), 'open'), (e) => e.code === E.WALLET_NOT_CONNECTED);
+  assert.ok(!b.calls.some((c) => c.method === 'eth_sendTransaction'));
 });
 
 test('切链期间换了账户 → WALLET_ACCOUNT，不发交易', async () => {
