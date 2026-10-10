@@ -23,7 +23,7 @@ function sameToken(a, b) {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-export function createBridgeServer({ token, port = 0, staticDir }) {
+export function createBridgeServer({ token, port = 0, staticDir, requestTimeout = REQUEST_TIMEOUT }) {
   const ev = new EventEmitter();
   let server;
   let wss;
@@ -128,7 +128,7 @@ export function createBridgeServer({ token, port = 0, staticDir }) {
     if (!socket || !state.ready) return Promise.reject({ code: 4900, message: '钱包未连接' });
     const id = ++seq;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending.delete(id); reject({ code: 4001, message: '钱包请求超时' }); }, REQUEST_TIMEOUT);
+      const timer = setTimeout(() => { pending.delete(id); reject({ code: 4001, message: '钱包请求超时', timeout: true }); }, requestTimeout);
       pending.set(id, { resolve, reject, timer });
       socket.send(JSON.stringify({ type: 'request', id, method, params, origin }));
     });

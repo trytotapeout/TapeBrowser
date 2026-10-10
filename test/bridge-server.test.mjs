@@ -8,8 +8,8 @@ const staticDir = fileURLToPath(new URL('../src/bridge/', import.meta.url));
 const TOKEN = 'a'.repeat(48);
 const ACC = '0x571d447f4f24688ec35ccf07f1d6993655f6af15';
 
-async function withServer(fn) {
-  const b = createBridgeServer({ token: TOKEN, port: 0, staticDir });
+async function withServer(fn, opts = {}) {
+  const b = createBridgeServer({ token: TOKEN, port: 0, staticDir, ...opts });
   const port = await b.start();
   try { await fn(b, port); } finally { await b.stop(); }
 }
@@ -111,5 +111,49 @@ test('页面关闭后状态复位', async () => {
     await st;
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(b.state.connected, false);
+  });
+});
+
+async function readyPage(b, port) {
+  const ws = await connect(port);
+  const st = nextState(b);
+  ws.send(JSON.stringify({ type: 'state', ready: true, accounts: [ACC], chainId: '0x38' }));
+  await st;
+  return ws;
+}
+
+test('请求超时：code 4001 并带 timeout 标记', async () => {
+  await withServer(async (b, port) => {
+    const ws = await readyPage(b, port);
+    const e = await b.request('eth_sendTransaction', [{}], 'x').then(() => null, (err) => err);
+    assert.deepEqual(e, { code: 4001, message: '钱包请求超时', timeout: true });
+    ws.close();
+  }, { requestTimeout: 30 });
+});
+
+test('钱包返回的 4001 不带 timeout 标记', async () => {
+  await withServer(async (b, port) => {
+    const ws = await readyPage(b, port);
+    const msg = nextMessage(ws);
+    const p = b.request('eth_sendTransaction', [{}], 'x').then(() => null, (err) => err);
+    const req = await msg;
+    ws.send(JSON.stringify({ type: 'response', id: req.id, error: { code: 4001, message: 'User rejected' } }));
+    const e = await p;
+    assert.equal(e.code, 4001);
+    assert.equal('timeout' in e, false);
+    ws.close();
+  });
+});
+
+test('页面关闭时未完成请求以 4900 失败', async () => {
+  await withServer(async (b, port) => {
+    const ws = await readyPage(b, port);
+    const msg = nextMessage(ws);
+    const p = b.request('eth_accounts', [], 'x').then(() => null, (err) => err);
+    await msg;
+    ws.close();
+    const e = await p;
+    assert.equal(e.code, 4900);
+    assert.equal('timeout' in e, false);
   });
 });
