@@ -65,7 +65,8 @@ body.mac #tabstrip { padding-left: 80px; }
 @media (prefers-color-scheme: dark) {
   #newtab-page, #help-page { --bg: #1a1918; --surface: #232220; --line: #33312e; --line-strong: #44413c; --fg: #ecebe8; --muted: #9a968e; --hover: #2b2a27; --selected: #ecebe8; --on-selected: #1a1918; }
 }
-#newtab-page .hero { padding: 32px 0 4px; }
+#newtab-page .hero { padding: 32px 0 4px; display: flex; gap: 24px; align-items: flex-start; }
+#newtab-page .hero-text { flex: 1; min-width: 0; }
 #newtab-page .hero h1 { font-size: 24px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
 #newtab-page .hero p { max-width: 760px; margin: 0; font-size: 13px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -261,3 +262,28 @@ progress.pub-bar::-webkit-progress-value { background: var(--accent); border-rad
 .list li.pub-left { display: block; }
 .pub-left .head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
 .pub-left .actions { margin-top: 4px; }
+
+/* 广告位：内容来自广告电路容器（ads.js）。首页标题右侧是横幅，网站信息面板右侧是竖条 */
+.si-body { display: flex; gap: 20px; align-items: flex-start; }
+.si-body #si-list { flex: 1; min-width: 0; }
+.ad { flex: none; display: block; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface, var(--bg)); color: var(--fg); font: inherit; text-align: left; cursor: pointer; overflow: hidden; opacity: 0; transition: opacity .25s; }
+.ad.shown { opacity: 1; }
+.ad:hover { border-color: var(--line-strong, var(--muted)); }
+.ad:focus-visible { outline: 2px solid #2f6feb; outline-offset: 2px; }
+.ad button { all: unset; display: flex; width: 100%; height: 100%; cursor: pointer; box-sizing: border-box; }
+.ad img { display: block; object-fit: cover; background: var(--hover, var(--tab)); }
+.ad .ad-text { padding: 8px 12px; min-width: 0; display: flex; flex-direction: column; gap: 2px; justify-content: center; }
+.ad .ad-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ad .ad-desc { color: var(--muted); font-size: 12px; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ad .ad-tag { color: var(--muted); font-size: 11px; }
+.ad.placeholder { border-style: dashed; background: transparent; }
+/* 首页横幅：图片 4:1（建议 1200×300），文字在图片下方 */
+#ad-home { width: 480px; max-width: 45%; margin-top: 2px; }
+#ad-home button { flex-direction: column; }
+#ad-home img { width: 100%; aspect-ratio: 4 / 1; }
+/* 信息面板竖条：图片 4:3（建议 800×600） */
+#ad-panel { width: 300px; position: sticky; top: 0; margin-top: 6px; }
+#ad-panel button { flex-direction: column; }
+#ad-panel img { width: 100%; aspect-ratio: 4 / 3; }
+#ad-panel .ad-desc { -webkit-line-clamp: 4; }
+@media (max-width: 900px) { #ad-home, #ad-panel { display: none; } }

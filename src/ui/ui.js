@@ -124,7 +124,9 @@
     $('reload').title = t && t.loading ? tr('停止') : tr('重新加载');
     if (!editing) $('address').value = t && t.url ? t.url : '';
     document.title = t ? t.title + ' - TapeBrowser' : 'TapeBrowser';
-    $('newtab-page').hidden = settingsOpen || helpOpen || pub.open || Boolean(t && t.url);
+    const homeHidden = settingsOpen || helpOpen || pub.open || Boolean(t && t.url);
+    if (!homeHidden && $('newtab-page').hidden) loadAds();
+    $('newtab-page').hidden = homeHidden;
     if (pendingOwner && t && !t.url) {
       $('dir-search').value = pendingOwner;
       $('dir-net').value = '';
@@ -559,9 +561,73 @@
       renderSite();
       refreshSite();
       loadAssets();
+      loadAds();
     }
   }
 
+
+  // 广告位（主进程 ads.js 的 view）：{home, panel}，每个位置是 {kind: 'ad' | 'placeholder', title, desc, link, image} 或 null
+  let adView = { home: null, panel: null };
+  // 每个位置当前显示的内容（JSON），没变就不重画，免得图片闪一下
+  const adShown = {};
+
+  /** 画一个广告位：图片读不到时只显示文字，没有内容就隐藏 */
+  function renderAd(slot) {
+    const el = $('ad-' + slot);
+    const ad = adView[slot];
+    const key = JSON.stringify(ad);
+    if (adShown[slot] === key) return;
+    adShown[slot] = key;
+    el.textContent = '';
+    el.classList.remove('shown', 'placeholder');
+    if (!ad) { el.hidden = true; return; }
+    el.classList.toggle('placeholder', ad.kind === 'placeholder');
+    const b = document.createElement(ad.link ? 'button' : 'div');
+    if (ad.link) {
+      b.type = 'button';
+      b.title = ad.link;
+      b.addEventListener('click', () => tb.invoke('openAd', slot));
+    }
+    const text = document.createElement('div');
+    text.className = 'ad-text';
+    const title = document.createElement('span');
+    title.className = 'ad-title';
+    title.textContent = ad.title;
+    text.append(title);
+    if (ad.desc) {
+      const desc = document.createElement('span');
+      desc.className = 'ad-desc';
+      desc.textContent = ad.desc;
+      text.append(desc);
+    }
+    if (ad.kind === 'ad') {
+      const tag = document.createElement('span');
+      tag.className = 'ad-tag';
+      tag.textContent = tr('广告');
+      text.append(tag);
+    }
+    b.append(text);
+    el.append(b);
+    el.hidden = false;
+    const show = () => { if (adShown[slot] === key) el.classList.add('shown'); };
+    if (!ad.image) { requestAnimationFrame(show); return; }
+    // 图片到了再淡入；读不到就只显示文字
+    tb.invoke('adImage', slot).then((src) => {
+      if (adShown[slot] !== key) return;
+      if (src) {
+        const img = document.createElement('img');
+        img.alt = '';
+        img.addEventListener('load', show, { once: true });
+        img.addEventListener('error', () => { img.remove(); show(); }, { once: true });
+        img.src = src;
+        b.prepend(img);
+      } else show();
+    }).catch(show);
+  }
+
+  function renderAds() { renderAd('home'); renderAd('panel'); }
+  /** 回到首页、打开网站信息面板时调用：主进程 5 分钟内不重复读链 */
+  function loadAds() { tb.invoke('ads').then((v) => { if (v) { adView = v; renderAds(); } }).catch(() => {}); }
 
   /** 书签和最近访问列表 */
   function renderLibrary() {
@@ -1607,6 +1673,7 @@
     }
   });
   tb.on('library', (l) => { library = l || { history: [], bookmarks: [] }; renderLibrary(); renderNav(); });
+  tb.on('ads', (v) => { adView = v || { home: null, panel: null }; renderAds(); });
   tb.on('directory', (sites) => { dir.sites = sites || []; renderDirectory(); });
   tb.on('directoryStatus', (st) => { dir.status = st || dir.status; renderDirectory(); });
   tb.invoke('directory').then((d) => { dir = d; renderDirectory(); }).catch(() => {});

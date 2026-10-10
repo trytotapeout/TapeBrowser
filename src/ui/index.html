@@ -31,7 +31,10 @@
     <div id="notice" role="status" hidden></div>
     <section id="siteinfo" aria-label="网站信息" hidden>
       <div class="si-head"><strong id="si-label"></strong><span id="si-status"></span><button id="si-close" class="icon" type="button" aria-label="关闭网站信息">×</button></div>
-      <dl id="si-list"></dl>
+      <div class="si-body">
+        <dl id="si-list"></dl>
+        <aside id="ad-panel" class="ad" aria-label="广告" hidden></aside>
+      </div>
     </section>
     <form id="findbar" role="search" hidden>
       <input id="find-input" type="text" spellcheck="false" autocomplete="off" placeholder="在页面中查找" aria-label="在页面中查找">
@@ -45,8 +48,11 @@
   <main id="content">
     <section id="newtab-page" class="page" hidden>
       <div class="hero">
-        <h1>TapeBrowser</h1>
-        <p class="muted">链上的 DeWEB 应用，直接从链上读取并校验。在地址栏输入电路编号、钱包地址或网址。 <button id="open-help" class="link" type="button">使用帮助</button></p>
+        <div class="hero-text">
+          <h1>TapeBrowser</h1>
+          <p class="muted">链上的 DeWEB 应用，直接从链上读取并校验。在地址栏输入电路编号、钱包地址或网址。 <button id="open-help" class="link" type="button">使用帮助</button></p>
+        </div>
+        <aside id="ad-home" class="ad" aria-label="广告" hidden></aside>
       </div>
       <div id="quickstart" class="quickstart" hidden>
         <span>第一次使用？试试这几个：</span>

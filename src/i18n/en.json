@@ -671,5 +671,9 @@
  "跳过这个版本": "Skip This Version",
  "已是最新版本 {current}": "You're on the latest version ({current})",
  "检查更新失败": "Couldn't check for updates",
- "检查 TapeBrowser 更新": "TapeBrowser Updates"
+ "检查 TapeBrowser 更新": "TapeBrowser Updates",
+ "广告": "Ad",
+ "打开": "Open",
+ "打开广告链接？": "Open ad link?",
+ "这是一个链外网址，内容不在链上，也没有经过校验：\n{link}": "This is an off-chain address. Its content is not on chain and has not been verified:\n{link}"
 }

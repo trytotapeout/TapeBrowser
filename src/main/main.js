@@ -27,6 +27,7 @@ import { formatBem } from './bem.js';
 import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
 import { createPublishService } from './publish-service.js';
 import { checkLatest, autoCheck } from './updates.js';
+import { createAds, REFRESH_EVERY as ADS_REFRESH_EVERY } from './ads.js';
 import { translateMessage, matchMessage, fail, NO_OPERATOR, NO_ENCRYPTION, NOT_LOCAL, BUSY } from './publish-errors.js';
 import { createRequire } from 'node:module';
 const i18n = createRequire(import.meta.url)('../i18n/i18n.cjs');
@@ -73,6 +74,8 @@ function tokenInfo(net, token) {
 }
 // 钱包在各条链上的 BEM 余额，工具栏钱包按钮旁显示
 const bem = createBemBalances({ chains, networks: NETWORKS, onChange: (v) => send('bem', v) });
+// 广告位：读广告电路容器里的 index.html，结果有变化就推给界面
+const ads = createAds({ sites, file: join(app.getPath('userData'), 'ads.json'), onChange: (v) => send('ads', v) });
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
@@ -258,6 +261,26 @@ function registerIpc() {
     return { ok: true, hash };
   });
   ui('refreshBem', () => bem.refresh());
+  // 广告位：先给缓存里的结果；回到首页、打开网站信息面板时顺便刷新（5 分钟内不重读）
+  ui('ads', () => { ads.refresh().catch(() => {}); return ads.view(); });
+  // 点广告：链接从主进程的结果里取，不用界面传来的；https 先确认一次，在新标签页打开
+  ui('openAd', async (slot) => {
+    const link = ads.view()[String(slot)]?.link;
+    if (!link || !ALLOWED.test(link)) return;
+    if (/^https:/i.test(link)) {
+      const r = await dialog.showMessageBox(win, {
+        type: 'question', buttons: [tr('打开'), tr('取消')], defaultId: 0, cancelId: 1,
+        message: tr('打开广告链接？'),
+        detail: tr('这是一个链外网址，内容不在链上，也没有经过校验：\n{link}', { link }),
+      });
+      if (r.response !== 0) return;
+    }
+    tabs.open(link);
+  });
+  ui('adImage', async (slot) => {
+    const img = await ads.image(String(slot));
+    return img ? `data:${img.type};base64,${Buffer.from(img.bytes).toString('base64')}` : null;
+  });
   // 钱包和当前网站不在同一条链上时，点钱包按钮请钱包切过去
   ui('switchChain', async () => {
     const origin = originOf(tabs.active()?.url || '');
@@ -967,6 +990,9 @@ app.whenReady().then(async () => {
   library.syncDirectory(directory.list());
   setTimeout(() => refreshDirectory(), 5000).unref?.();
   setInterval(() => refreshDirectory(), QUICK_CHECK_EVERY).unref?.();
+  // 广告：启动后读一次，之后每 30 分钟一次
+  setTimeout(() => { ads.refresh({ force: true }).catch(() => {}); }, 3000).unref?.();
+  setInterval(() => { ads.refresh({ force: true }).catch(() => {}); }, ADS_REFRESH_EVERY).unref?.();
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
