@@ -3,7 +3,7 @@
 import { app, BrowserWindow, protocol, session as electronSession, ipcMain, dialog, shell, net, Menu, nativeTheme, clipboard, safeStorage } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { watch } from 'node:fs';
+import { watch, readdirSync } from 'node:fs';
 import { createSettings } from './settings.js';
 import { createRpcPool } from './rpc.js';
 import { createChain } from './chain.js';
@@ -26,7 +26,7 @@ import { prepareTip, parseBem } from './tip.js';
 import { formatBem } from './bem.js';
 import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
 import { createPublishService } from './publish-service.js';
-import { translateMessage, fail, NO_OPERATOR, NO_ENCRYPTION } from './publish-errors.js';
+import { translateMessage, matchMessage, fail, NO_OPERATOR, NO_ENCRYPTION, NOT_LOCAL, BUSY } from './publish-errors.js';
 import { createRequire } from 'node:module';
 const i18n = createRequire(import.meta.url)('../i18n/i18n.cjs');
 
@@ -387,14 +387,23 @@ function registerIpc() {
 
   // 发布到容器：全部返回 { ok: true, value } 或 { error: { code, message } }，不 throw 给渲染进程。
   // 参数一律逐个挑出来再交给发布服务（不展开渲染进程传来的对象），服务里还会再核对一遍
+  // fn 返回 CANCELLED 表示用户在确认框里取消了：返回 { ok: false, cancelled: true }，不包进 value
   const pub = (name, fn) => ui(name, async (...args) => {
     try {
       if (!publish) throw new Error(tr('发布服务还没准备好'));
-      return { ok: true, value: await fn(...args) };
+      const value = await fn(...args);
+      return value === CANCELLED ? { ok: false, cancelled: true } : { ok: true, value };
     } catch (e) {
       return { error: publishError(e) };
     }
   });
+  // 退款 / 放弃零头：确认框开着或调用还没结束时再点，直接拒绝，不叠第二个确认框
+  let confirming = false;
+  const once = (fn) => async (...args) => {
+    if (confirming) throw fail(BUSY, tr('正在处理另一笔退款，请等它结束'));
+    confirming = true;
+    try { return await fn(...args); } finally { confirming = false; }
+  };
   const arg = (a) => (a && typeof a === 'object' && !Array.isArray(a) ? a : {});
   pub('publishAvailable', () => publish.available());
   pub('publishTargets', (netKey) => publish.targets({ netKey }));
@@ -402,12 +411,12 @@ function registerIpc() {
   pub('publishInspect', (args) => {
     const { url, netKey, tokenId, cpu } = arg(args);
     const root = localSites.rootOf(typeof url === 'string' ? url : tabs?.active()?.url);
-    if (!root) throw new Error(tr('请先在本地预览里打开要发布的文件夹'));
+    if (!root) throw fail(NOT_LOCAL, '这个文件夹没有在本地预览里打开过');
     return publish.inspect({ root, netKey, tokenId, cpu });
   });
   pub('publishRun', (id) => publish.run({ id }));
   pub('publishPause', (id) => publish.pause({ id }));
-  pub('publishRefund', async (args) => {
+  pub('publishRefund', once(async (args) => {
     const { netKey, container } = arg(args);
     const rec = await leftoverOf(netKey, container);
     const net = networkByKey(netKey);
@@ -421,10 +430,10 @@ function registerIpc() {
         address: rec.address, amount: formatUnits(rec.balance), currency: net.currency, owner: rec.owner,
       }),
     });
-    if (r.response !== 0) return { ok: false, cancelled: true };
+    if (r.response !== 0) return CANCELLED;
     return publish.refund({ netKey, container });
-  });
-  pub('publishDiscard', async (args) => {
+  }));
+  pub('publishDiscard', once(async (args) => {
     const { netKey, container } = arg(args);
     const rec = await leftoverOf(netKey, container);
     const net = networkByKey(netKey);
@@ -438,16 +447,54 @@ function registerIpc() {
         address: rec.address, amount: formatUnits(rec.balance), currency: net.currency, owner: rec.owner,
       }),
     });
-    if (r.response !== 1) return { ok: false, cancelled: true };
+    if (r.response !== 1) return CANCELLED;
     return publish.discardDust({ netKey, container });
-  });
+  }));
   pub('publishLeftovers', () => publish.leftovers());
 }
 
-/** 发布出错 → 给渲染进程的 { code, message }：带 code 的按 PUBLISH_MESSAGES 翻译，其余的套一层「发布出错」 */
+const CANCELLED = Symbol('cancelled');
+
+/**
+ * 发布出错 → 给渲染进程的 { code, message }：带 code 的按 PUBLISH_MESSAGES 翻译；
+ * 不带 code 的能对上 PUBLISH_MESSAGES 也照样翻译，对不上（节点故障之类）再套一层「发布出错」
+ */
 function publishError(e) {
-  if (e?.code && typeof e.code === 'string') return { code: e.code, message: translateMessage(e.message, (...a) => tr(...a)) };
-  return { code: null, message: tr('发布出错：{0}', { 0: String(e?.message || e) }) };
+  const raw = String(e?.message || e);
+  const code = e?.code && typeof e.code === 'string' ? e.code : null;
+  const message = code || matchMessage(raw) ? translateMessage(raw, (...a) => tr(...a)) : tr('发布出错：{0}', { 0: raw });
+  return { code, message };
+}
+
+/**
+ * 启动时的残留提示（契约第 4 条）：钥匙串不可用、私钥解不开、记录文件损坏、还有余额或在途交易分开说。
+ * 外壳界面只有一个提示位，后来的会盖掉先来的：合成一条，有一项是错误就按错误显示
+ */
+function noticeLeftovers(l) {
+  const parts = [];
+  let level = 'info';
+  if (l?.unavailable) {
+    // 从没发布过（目录里没有文件）就不提：不能发布的提示留给发布页
+    if (hasPublishFiles()) { parts.push(tr('这台电脑无法安全保存临时钱包，暂时不能发布')); level = 'error'; }
+  } else if (l) {
+    for (const e of l.errors ?? []) console.error('publish leftovers:', e.netKey, e.code, e.message);
+    const lost = l.records.filter((r) => r.decryptable === false).length;
+    const rest = l.records.length - lost;
+    if (lost) { parts.push(tr('有 {n} 个临时钱包无法解密（系统钥匙串可能已重置），里面的余额找不回来了', { n: lost })); level = 'error'; }
+    if (l.broken?.length) { parts.push(tr('有 {n} 个临时钱包记录文件已损坏，里面的余额可能找不回来', { n: l.broken.length })); level = 'error'; }
+    if (rest) parts.push(tr('有 {n} 个临时钱包里还有余额或在途交易，可以在发布页里继续发布或退款', { n: rest }));
+  }
+  if (!parts.length) return;
+  // 外壳界面还没加载完时 notice 会丢：等它加载完再发
+  const show = () => notify(parts.join(' '), level);
+  if (uiLoaded) show(); else win?.webContents.once('did-finish-load', show);
+}
+
+/** userData/publish 下有没有任何文件（临时钱包记录） */
+function hasPublishFiles() {
+  try {
+    return readdirSync(join(app.getPath('userData'), 'publish'), { recursive: true, withFileTypes: true }).some((d) => d.isFile());
+  } catch { return false; }
 }
 
 /** 退款、放弃零头前确认用的残留记录：按链和容器在 leftovers() 里找，找不到就拒绝（不凭渲染进程传来的地址弹窗） */
@@ -868,13 +915,7 @@ app.whenReady().then(async () => {
   if (argUrl) pendingExternal.push(argUrl);
   createWindow();
   // 上次没发完或没退干净的临时钱包：提示一次，发布页里再列出来（契约第 4 条）
-  publish.leftovers().then((l) => {
-    const n = l?.records?.length ?? 0;
-    if (!n) return;
-    // 外壳界面还没加载完时 notice 会丢：等它加载完再发
-    const show = () => notify(tr('有 {n} 个临时钱包里还有余额或在途交易，可以在发布页里继续发布或退款', { n }), 'info');
-    if (uiLoaded) show(); else win?.webContents.once('did-finish-load', show);
-  }).catch((e) => console.error('publish leftovers:', e));
+  publish.leftovers().then(noticeLeftovers).catch((e) => console.error('publish leftovers:', e));
 
   app.on('activate', () => { if (!win) createWindow(); });
 

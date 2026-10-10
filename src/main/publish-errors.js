@@ -1,5 +1,5 @@
 // 发布流程（publisher / operator / operator-store）里给界面看的错误码。message 是给用户看的中文，界面按 code 区分怎么处理。
-// 没有 code 的错误是节点故障、参数校验之类，界面照原样显示 message。
+// 没有 code 的错误是节点故障之类，界面照原样显示 message。
 
 export const LATER = 'LATER';                     // 交易还没确认、节点还没同步之类：稍后可以继续
 export const PENDING_TIMEOUT = 'PENDING_TIMEOUT'; // 临时钱包的交易一直没打包（operator.settle 超时），也是稍后可以继续
@@ -28,6 +28,8 @@ export const WALLET_CHAIN = 'WALLET_CHAIN';       // 钱包不在要发布的链
 export const USER_REJECTED = 'USER_REJECTED';     // 用户在钱包里拒绝了交易
 export const WALLET_LOST = 'WALLET_LOST';         // 发交易时钱包没回应（超时、桥接断开），交易可能已经发出
 export const WALLET_ERROR = 'WALLET_ERROR';       // 钱包返回的其他错误，原始错误在 cause，钱包的错误码在 walletCode
+export const BAD_ARGS = 'BAD_ARGS';               // 渲染进程传来的参数不对
+export const NOT_LOCAL = 'NOT_LOCAL';             // 文件夹没有在本地预览里打开过
 export const NO_ENCRYPTION = 'NO_ENCRYPTION';     // 这台电脑无法安全保存临时钱包（safeStorage 不可用或是 basic_text），不能发布
 // 只有 operator-store.create 抛出的 OPERATOR_OWNER_MISMATCH 带 old（旧记录，不含私钥），调用方据此先退款给旧持有人
 export const OPERATOR_OWNER_MISMATCH = 'OPERATOR_OWNER_MISMATCH'; // 容器已有另一个持有人的临时钱包，带 old
@@ -52,6 +54,8 @@ export const PUBLISH_MESSAGES = [
   '本地文件异常：{path}',
   '还没有检查通过，不能发布',
   '正在发布另一个网站',
+  '参数不对：{name}',
+  '这个文件夹没有在本地预览里打开过',
   // operator.js
   '临时钱包不存在',
   '临时钱包的持有人不一致',
@@ -115,16 +119,22 @@ const TEMPLATES = PUBLISH_MESSAGES.filter((m) => /\{\w+\}/.test(m)).map((m) => {
   return { key: m, names, re };
 });
 
+/** message 对上 PUBLISH_MESSAGES 里的哪一条：返回 { key, vars }，都对不上返回 null */
+export function matchMessage(message) {
+  const m = String(message ?? '');
+  if (PUBLISH_MESSAGES.includes(m)) return { key: m, vars: null };
+  for (const t of TEMPLATES) {
+    const hit = t.re.exec(m);
+    if (hit) return { key: t.key, vars: Object.fromEntries(t.names.map((n, i) => [n, hit[i + 1]])) };
+  }
+  return null;
+}
+
 /**
  * 把错误的 message 翻译成界面语言：完全一样的直接查字典，带变量的按 PUBLISH_MESSAGES 里的模板拆出变量再填回去。
  * 都对不上（钱包原样返回的错误之类）原样交给 tr，没有翻译就显示原文
  */
 export function translateMessage(message, tr) {
-  const m = String(message ?? '');
-  if (PUBLISH_MESSAGES.includes(m)) return tr(m);
-  for (const t of TEMPLATES) {
-    const hit = t.re.exec(m);
-    if (hit) return tr(t.key, Object.fromEntries(t.names.map((n, i) => [n, hit[i + 1]])));
-  }
-  return tr(m);
+  const hit = matchMessage(message);
+  return hit ? tr(hit.key, hit.vars ?? undefined) : tr(String(message ?? ''));
 }

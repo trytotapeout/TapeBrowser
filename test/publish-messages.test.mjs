@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { PUBLISH_MESSAGES, translateMessage } from '../src/main/publish-errors.js';
+import { PUBLISH_MESSAGES, translateMessage, matchMessage } from '../src/main/publish-errors.js';
 
 const FILES = [
   'src/main/publisher.js', 'src/main/operator.js', 'src/main/operator-store.js',
@@ -59,6 +59,12 @@ function thrownMessages() {
       assert.ok(consts.has(expr), `${f}: fail(…, ${expr}) 不是已知的常量`);
       found.add(consts.get(expr));
     }
+    // 不经过 fail、直接挂 code 的写法：Object.assign(new Error('…'), { code
+    for (const m of src.matchAll(/Object\.assign\(\s*new Error\(\s*(['`])/g)) {
+      const at = m.index + m[0].length - 1;
+      const [text, end] = literal(src, at);
+      if (/^\s*\)\s*,\s*\{\s*code\b/.test(src.slice(end))) found.add(text);
+    }
     // waitReceipt(hash, { message: '…' })：超时时以 LATER 抛出
     for (const m of src.matchAll(/waitReceipt\([^)]*message: '([^']*)'/g)) found.add(m[1]);
   }
@@ -84,6 +90,9 @@ test('translateMessage：整句查字典，带变量的拆出来填回译文，�
   assert.equal(translateMessage('上传 a/b.js 第 3 块模拟失败：execution reverted', tr), 'Simulating chunk 3 of a/b.js failed: execution reverted');
   assert.equal(translateMessage('钱包没有切换到 BNB Chain', tr), 'The wallet did not switch to BNB Chain');
   assert.equal(translateMessage('User denied (4001)', tr), 'User denied (4001)');
+  assert.deepEqual(matchMessage('参数不对：tokenId'), { key: '参数不对：{name}', vars: { name: 'tokenId' } });
+  assert.deepEqual(matchMessage('退款失败'), { key: '退款失败', vars: null });
+  assert.equal(matchMessage('fetch failed'), null);
   // 变量里的 {x} 不会再被替换
   assert.equal(translateMessage('钱包没有切换到 {chain}', tr), 'The wallet did not switch to {chain}');
 });

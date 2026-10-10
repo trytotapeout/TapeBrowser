@@ -12,7 +12,7 @@
 //   available / targets / inspect / run / pause / refund / discardDust / leftovers
 // 参数全部来自渲染进程，当成不可信的：每个方法先核对参数，再确认 secure 可用。
 // inspect 的结果只留在这里（sessions），渲染进程只拿脱敏摘要和 id；返回值、事件里的 bigint 一律转十进制字符串。
-// 错误原样抛出（带 code），由 main.js 的 IPC 层转成 { code, message }；参数不对的错误不带 code。
+// 错误原样抛出（带 code），由 main.js 的 IPC 层转成 { code, message }；参数不对是 BAD_ARGS，文件夹不是本地预览是 NOT_LOCAL。
 
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -30,8 +30,8 @@ const ADDR = /^0x[0-9a-fA-F]{40}$/;
 const MAX_SESSIONS = 5;
 const INDEX = 'index.html';
 
-/** 参数校验失败：不带 code，界面照原样显示 */
-const badArg = (name) => new Error(`参数不对：${name}`);
+/** 参数校验失败：BAD_ARGS，正常操作不会出现（渲染进程传错了） */
+const badArg = (name) => fail(E.BAD_ARGS, `参数不对：${name}`);
 const uint = (v, name) => {
   if (!Number.isSafeInteger(v) || v < 0) throw badArg(name);
   return v;
@@ -139,7 +139,7 @@ export function createPublishService({
   /** root 必须和 localSites 登记过的真实路径完全一样：不接受子文件夹、..、末尾斜杠之类的变体 */
   function rootOf(root) {
     if (typeof root !== 'string' || !localSites.roots().some(([, r]) => r === root)) {
-      throw new Error('这个文件夹没有在本地预览里打开过');
+      throw fail(E.NOT_LOCAL, '这个文件夹没有在本地预览里打开过');
     }
     return root;
   }

@@ -120,7 +120,7 @@ test('inspect 只接受登记过的 root：没登记的、带 .. 的、登记过
   const h = await harness();
   try {
     for (const root of [h.root + '/..', h.root + '/sub/..', h.root + '/./', join(h.root, 'sub'), join(h.root, '..'), h.root + '/', '/etc', '', 42, null, [h.root]]) {
-      await assert.rejects(h.svc.inspect({ root, netKey: 'bnb', tokenId: 7, cpu: 7 }), /文件夹/, String(root));
+      await assert.rejects(h.svc.inspect({ root, netKey: 'bnb', tokenId: 7, cpu: 7 }), (e) => e.code === E.NOT_LOCAL && /文件夹/.test(e.message), String(root));
     }
     assert.equal(h.chains.bnb.calls.length, 0);
   } finally { h.done(); }
@@ -131,7 +131,7 @@ test('参数校验：netKey 不是发布链、tokenId / cpu 不是非负安全�
   try {
     for (const netKey of ['base', 'BNB', '__proto__', undefined, 56]) await assert.rejects(h.ins({ netKey }), code(E.CHAIN_UNSUPPORTED));
     for (const tokenId of [-1, 1.5, '7', 2 ** 53, NaN, 7n]) await assert.rejects(h.ins({ tokenId }), /参数/);
-    for (const cpu of [-1, '7', 0.5]) await assert.rejects(h.ins({ cpu }), /参数/);
+    for (const cpu of [-1, '7', 0.5]) await assert.rejects(h.ins({ cpu }), (e) => e.code === E.BAD_ARGS && /参数/.test(e.message));
     // 处理器不存在
     await assert.rejects(h.ins({ cpu: 3 }), code(E.CIRCUIT_MISSING));
     await assert.rejects(h.ins({ cpu: 99 }), code(E.CIRCUIT_MISSING));

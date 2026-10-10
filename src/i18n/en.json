@@ -491,7 +491,6 @@
  "运行时用 eval / new Function 执行字符串代码：模拟器、模板引擎常这样用；如果字符串来自网络，实际运行的代码就不是链上这一份": "Runs code from strings with eval / new Function. Simulators and template engines do this; if the string comes from the network, what runs isn't the code on chain",
  "代码会请你授权或转账，同时写死了 {n} 个普通钱包地址（不是合约）：{list}。签名时核对授权对象和收款方：如果是这些普通钱包，钱会直接到某个人手里": "The code asks for approvals or transfers and hard-codes {n} regular wallet addresses (not contracts): {list}. When signing, check the spender and recipient: if it's one of these wallets, the funds go straight to a person",
  "发布服务还没准备好": "The publish service isn't ready yet",
- "请先在本地预览里打开要发布的文件夹": "Open the folder you want to publish in Local Preview first",
  "退款": "Refund",
  "把临时钱包里的余额退回持有人？": "Return the temporary wallet's balance to the holder?",
  "临时钱包 {address} 里现在有 {amount} {currency}，扣掉转账手续费后全部退回持有人地址 {owner}。\n退款由临时钱包自己签名，不需要在钱包里确认。": "Temporary wallet {address} holds {amount} {currency}. After the transfer fee, all of it goes back to the holder address {owner}.\nThe temporary wallet signs the refund itself, so there's nothing to confirm in your wallet.",
@@ -554,5 +553,10 @@
  "钱包当前账户不是这个电路的持有人": "The wallet's current account isn't this circuit's holder",
  "钱包没有回应，交易可能已经发出；稍后继续时会先检查": "The wallet didn't respond, and the transaction may have been sent. It will be checked first when you resume",
  "钱包没有切换到 {chain}": "The wallet didn't switch to {chain}",
- "你在钱包里拒绝了这笔交易": "You rejected this transaction in your wallet"
+ "你在钱包里拒绝了这笔交易": "You rejected this transaction in your wallet",
+ "参数不对：{name}": "Invalid argument: {name}",
+ "这个文件夹没有在本地预览里打开过": "This folder hasn't been opened in Local Preview",
+ "正在处理另一笔退款，请等它结束": "Another refund is in progress. Wait for it to finish",
+ "有 {n} 个临时钱包无法解密（系统钥匙串可能已重置），里面的余额找不回来了": "{n} temporary wallet(s) can't be decrypted (the system keychain may have been reset), and their balance can't be recovered",
+ "有 {n} 个临时钱包记录文件已损坏，里面的余额可能找不回来": "{n} temporary wallet record file(s) are corrupted, and their balance may not be recoverable"
 }
