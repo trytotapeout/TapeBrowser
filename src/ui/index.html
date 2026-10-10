@@ -148,7 +148,7 @@
 
     <section id="publish-page" class="page" hidden>
       <button id="publish-close" class="link" type="button">← 返回</button>
-      <h1>发布到容器</h1>
+      <h1 id="pub-title" tabindex="-1">发布到容器</h1>
       <p id="pub-source" class="muted"></p>
       <p id="pub-blocked" class="pub-banner bad" role="alert" hidden></p>
       <div id="pub-body" hidden>
@@ -164,7 +164,9 @@
         </section>
         <section id="pub-run-sec" hidden>
           <h2>发布进度</h2>
-          <div id="pub-run" aria-live="polite"></div>
+          <p id="pub-wallet" class="pub-banner" role="alert" hidden></p>
+          <p id="pub-step" aria-live="polite" hidden></p>
+          <div id="pub-run"></div>
         </section>
         <h2>没发完或没退干净的临时钱包</h2>
         <div id="pub-leftovers"></div>

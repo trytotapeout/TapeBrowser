@@ -229,6 +229,7 @@ button.link { border: 0; background: transparent; color: var(--accent); cursor: 
 
 /* 发布页：沿用设置页、帮助页的样式 */
 #publish-close { margin-bottom: 8px; }
+#pub-title:focus { outline: none; }
 #publish-page button:disabled { opacity: .5; cursor: default; }
 .pub-chains, .pub-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; }
 .pub-chains button, .pub-actions button:not(.link) { border: 1px solid var(--line); border-radius: 6px; background: var(--tab); padding: 4px 12px; cursor: pointer; }

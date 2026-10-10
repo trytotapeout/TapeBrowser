@@ -450,7 +450,11 @@ function registerIpc() {
     if (r.response !== 1) return CANCELLED;
     return publish.discardDust({ netKey, container });
   }));
-  pub('publishLeftovers', () => publish.leftovers());
+  // 每条链读取出错的 message 也按错误码翻译，和其他发布错误一样（界面直接显示）
+  pub('publishLeftovers', async () => {
+    const l = await publish.leftovers();
+    return l.errors ? { ...l, errors: l.errors.map((e) => ({ ...e, message: publishError(e).message })) } : l;
+  });
 }
 
 const CANCELLED = Symbol('cancelled');

@@ -930,26 +930,41 @@
     flash: null,      // 页面顶部的一条提示 { level, text }（退款、放弃零头的结果之类）
     busy: new Set(),  // 正在等结果的调用，相关按钮禁用
     seq: 0,           // 选链、选电路的序号：过时的结果直接丢掉
+    leftSeq: 0,       // 读残留列表的序号
   };
   const AVAIL_TEXT = {
     'no-encryption': tr('这台电脑的系统钥匙串不可用，无法安全保存发布用的临时钱包，所以不能发布。'),
     'basic-text': tr('这台电脑没有可用的系统密码库（只能明文保存），无法安全保存发布用的临时钱包，所以不能发布。'),
   };
 
-  /** 十进制字符串（wei）→ 数额：去掉末尾的 0，小数最多 6 位有效数字 */
-  function formatUnits(raw, decimals = 18) {
+  /**
+   * 十进制字符串（wei）→ 数额：去掉末尾的 0，小数最多 6 位有效数字。
+   * round：'up' 向上取（花费，宁可多报）、'down' 向下取（退回、余额，宁可少报）、'exact' 全部位数（放在 title 里）
+   */
+  function formatUnits(raw, decimals = 18, round = 'down') {
     let v;
     try { v = BigInt(raw); } catch { return '—'; }
     const neg = v < 0n;
     if (neg) v = -v;
     const base = 10n ** BigInt(decimals);
-    const whole = v / base;
-    let frac = (v % base).toString().padStart(decimals, '0');
-    const lead = frac.search(/[1-9]/);
-    frac = lead < 0 ? '' : frac.slice(0, whole ? 6 : lead + 6).replace(/0+$/, '');
-    return (neg ? '-' : '') + whole.toString() + (frac ? '.' + frac : '');
+    // 保留几位小数：整数部分不为 0 时 6 位，否则从第一个非 0 位起 6 位
+    let keep = decimals;
+    if (round !== 'exact') {
+      const lead = (v % base).toString().padStart(decimals, '0').search(/[1-9]/);
+      keep = Math.min(decimals, v >= base || lead < 0 ? 6 : lead + 6);
+    }
+    const unit = 10n ** BigInt(decimals - keep);
+    let q = v / unit;
+    if (round === 'up' && v % unit) q += 1n;
+    const scale = 10n ** BigInt(keep);
+    const frac = keep ? (q % scale).toString().padStart(keep, '0').replace(/0+$/, '') : '';
+    return (neg ? '-' : '') + (q / scale).toString() + (frac ? '.' + frac : '');
   }
-  const coin = (raw, netKey) => `${formatUnits(raw)} ${(pubNet(netKey) || {}).currency || ''}`.trim();
+  const currencyOf = (netKey) => (pubNet(netKey) || {}).currency || '';
+  /** 数额加币种；花费用 'up'，退回和余额用 'down' */
+  const coin = (raw, netKey, round = 'down') => `${formatUnits(raw, 18, round)} ${currencyOf(netKey)}`.trim();
+  /** 全部位数，鼠标移上去看 */
+  const exact = (raw, netKey) => `${formatUnits(raw, 18, 'exact')} ${currencyOf(netKey)}`.trim();
   /** 建一个元素：props 直接赋值，kids 是元素或文字（文字一律当文本节点，不解析 HTML） */
   const mk = (tag, props, ...kids) => {
     const el = Object.assign(document.createElement(tag), props || {});
@@ -1000,7 +1015,17 @@
     renderNav();
     if (!on) return;
     renderPublish();
+    $('pub-title').focus();
+    if (!pub.root && !pub.run) loadRoot(pub.url);
     loadPublish();
+  }
+
+  /** 网站信息还没读到时，单独读一次本地文件夹的路径（计划里要写明发布的是哪个文件夹） */
+  async function loadRoot(url) {
+    try {
+      const info = await tb.invoke('siteInfo');
+      if (pub.url === url && !pub.root && info && info.local && info.root) { pub.root = info.root; renderPublish(); }
+    } catch { /* 显示网址代替 */ }
   }
 
   async function loadPublish() {
@@ -1011,7 +1036,9 @@
   }
 
   async function loadLeftovers() {
+    const seq = ++pub.leftSeq;
     const r = await pubCall('leftovers', 'publishLeftovers');
+    if (seq !== pub.leftSeq) return;
     pub.leftovers = r.error ? { error: r.error.message } : r.value;
     renderPublish();
   }
@@ -1124,13 +1151,15 @@
 
   const leftoverOf = (netKey, container) => ((pub.leftovers && pub.leftovers.records) || [])
     .find((r) => r.netKey === netKey && container && r.container.toLowerCase() === String(container).toLowerCase()) || null;
-  /** 出错的这次发布有没有可能把钱留在临时钱包里：已经开始（收到过进度）或者残留列表里有这个容器 */
-  // 核验失败时已经退过款，只有退款没退干净（残留列表里还有）才再给入口
+  /**
+   * 暂停或出错的这次发布要不要给「退款」：残留列表里有这个容器就一定给（不管什么错误码，钱可能还在临时钱包里）；
+   * 不在列表里时，发布前就被拒绝的错误和核验失败（已经退过款）不给，其余的只要开始过就给
+   */
   const canRefund = (res) => {
-    if (!res.container || (res.error && PRE_START.has(res.error.code))) return false;
-    const left = Boolean(leftoverOf(res.netKey, res.container));
-    if (res.error && res.error.code === 'VERIFY_FAILED') return left;
-    return Boolean(res.paused || res.started || left);
+    if (!res.container) return false;
+    if (leftoverOf(res.netKey, res.container)) return true;
+    if (res.error && (PRE_START.has(res.error.code) || res.error.code === 'VERIFY_FAILED')) return false;
+    return Boolean(res.paused || res.started);
   };
 
   async function openSite(url) {
@@ -1170,10 +1199,10 @@
     b.addEventListener('click', onClick);
     return b;
   };
-  /** 两列的说明：[[名称, 值, 类名]] */
+  /** 两列的说明：[[名称, 值, 类名, title]]，title 放数额的全部位数 */
   const facts = (rows) => {
     const dl = mk('dl', { className: 'pub-facts' });
-    for (const [k, v, cls] of rows) if (v !== null && v !== undefined) dl.append(mk('dt', { textContent: k }), mk('dd', { textContent: v, className: cls || '' }));
+    for (const [k, v, cls, title] of rows) if (v !== null && v !== undefined) dl.append(mk('dt', { textContent: k }), mk('dd', { textContent: v, className: cls || '', title: title || '' }));
     return dl;
   };
   const levelLabel = (level) => LEVELS[level] || LEVELS.info;
@@ -1283,24 +1312,27 @@
       return;
     }
     const c = p.counts;
+    // 写明发布的是哪个文件夹、发到哪个网站：从残留记录继续时不会悄悄发成别的网站
+    box.append(mk('p', { className: 'pub-banner', textContent: tr('将把当前文件夹 {root} 发布到 {label}', { root: pub.root || pub.url, label: p.label }) }));
     box.append(facts([
       [tr('网站'), p.label],
       [tr('文件'), tr('新上传 {create} 个，续传 {append} 个，复用 {reuse} 个，替换首页 {replace} 个', c)],
       [tr('上传'), tr('{txs} 笔交易，{size}', { txs: p.transactions, size: size(p.uploadBytes) })],
-      [tr('开通费'), p.opened ? tr('容器已开通，不用再付') : coin(p.openFee, p.netKey)],
-      [tr('上传 gas（预估）'), tr('{amount}（单价 {gwei} gwei）', { amount: coin(p.uploadCost, p.netKey), gwei: formatUnits(p.gasPrice, 9) })],
-      [tr('合计（预估）'), coin(p.totalCost, p.netKey), 'total'],
+      [tr('开通费'), p.opened ? tr('容器已开通，不用再付') : coin(p.openFee, p.netKey, 'up'), '', p.opened ? '' : exact(p.openFee, p.netKey)],
+      [tr('上传 gas（预估）'), tr('{amount}（单价 {gwei} gwei）', { amount: coin(p.uploadCost, p.netKey, 'up'), gwei: formatUnits(p.gasPrice, 9, 'up') }), '', exact(p.uploadCost, p.netKey)],
+      [tr('合计（预估）'), coin(p.totalCost, p.netKey, 'up'), 'total', exact(p.totalCost, p.netKey)],
     ]));
+    box.append(note(tr('不含你钱包自己发这几笔交易的手续费；Gas 单价上涨时充值会多一些，可能要多确认一次补充值，没用完的会退回')));
     if (p.indexChunks && p.indexChunks > 1) box.append(note(tr('首页有 {n} 块，要分 {n} 笔替换：更新期间网站会暂时打不开，传完就恢复。', { n: p.indexChunks }), 'warn'));
     if (!p.transactions) box.append(note(tr('链上的文件已经和本地一样，没有要上传的内容。')));
     const actions = mk('div', { className: 'pub-actions' },
       button(tr('开始发布'), () => startRun(p.id), { busy: 'run', primary: true, disabled: !p.id || !p.transactions }),
       button(tr('重新检查'), () => inspectPick(), { busy: 'inspect', link: true }));
-    box.append(actions, note(tr('接下来钱包会请你确认 2 到 3 笔交易：开通容器（如果需要）、授权临时钱包 6 小时、充值上传用的 gas。剩下的 gas 发布完自动退回。')));
+    box.append(actions, note(tr('接下来钱包通常会请你确认 2 到 3 笔交易：开通容器（如果需要）、授权临时钱包 6 小时、充值上传用的 gas。剩下的 gas 发布完自动退回。')));
   }
   /** 钱包要确认的这一步签的是什么 */
   function walletStep(kind, run) {
-    if (kind === 'open') return run.openFee ? tr('开通容器并支付开通费 {fee}', { fee: coin(run.openFee, run.netKey) }) : tr('开通容器并支付开通费');
+    if (kind === 'open') return run.openFee ? tr('开通容器并支付开通费 {fee}', { fee: coin(run.openFee, run.netKey, 'up') }) : tr('开通容器并支付开通费');
     if (kind === 'grant') return tr('授权临时钱包上传 6 小时');
     if (kind === 'fund') return tr('给临时钱包充值上传用的 gas');
     return tr('一笔发布用的交易');
@@ -1315,17 +1347,25 @@
     return tr('正在准备：检查上次留下的交易和链上的最新状态…');
   }
 
+  /** 钱包确认的提示（role=alert）和步骤一行（aria-live）是固定的元素，只在内容变了时改，读屏不会每次重画都重读 */
+  function setRunLines(walletText, stepText) {
+    const w = $('pub-wallet');
+    if (w.textContent !== walletText) w.textContent = walletText;
+    w.hidden = !walletText;
+    const s = $('pub-step');
+    if (s.textContent !== stepText) s.textContent = stepText;
+    s.hidden = !stepText;
+  }
+
   function renderRun() {
     const sec = $('pub-run-sec');
     const box = $('pub-run');
     sec.hidden = !pub.run && !pub.result;
     box.textContent = '';
-    if (pub.result) { renderResult(box, pub.result); return; }
     const r = pub.run;
-    if (!r) return;
+    if (!r) { setRunLines('', ''); if (pub.result) renderResult(box, pub.result); return; }
+    setRunLines(r.wallet ? tr('请在浏览器的钱包扩展里确认：{step}', { step: walletStep(r.wallet, r) }) : '', r.wallet ? '' : runStepText(r));
     box.append(facts([[tr('网站'), r.label]]));
-    if (r.wallet) box.append(mk('p', { className: 'pub-banner', role: 'alert', textContent: tr('请在浏览器的钱包扩展里确认：{step}', { step: walletStep(r.wallet, r) }) }));
-    else box.append(mk('p', { textContent: runStepText(r) }));
     const bar = mk('progress', { className: 'pub-bar' });
     bar.setAttribute('aria-label', tr('发布进度'));
     // 没有总数的步骤显示不确定的进度条
@@ -1372,8 +1412,8 @@
       box.append(facts([
         [tr('上传'), tr('{n} 笔交易', { n: res.uploaded })],
         [tr('复用'), tr('{n} 个文件和链上已有的一样，没有重传', { n: res.reused })],
-        [tr('花费'), tr('{amount}（临时钱包付的 gas，不含开通费）', { amount: coin(res.spent, res.netKey) })],
-        [tr('退回'), coin(res.refunded, res.netKey)],
+        [tr('花费'), tr('{amount}（临时钱包付的 gas，不含开通费）', { amount: coin(res.spent, res.netKey, 'up') }), '', exact(res.spent, res.netKey)],
+        [tr('退回'), coin(res.refunded, res.netKey), '', exact(res.refunded, res.netKey)],
       ]));
       if (!res.verified) box.append(note(res.reason === 'safe' ? tr('还没核验完（等安全区块超时），可以稍后重新打开网站检查') : tr('还没核验完，可以稍后重新打开网站检查'), 'warn'));
       if (res.dust) box.append(note(tr('临时钱包里剩下的零头不够付退款的手续费，留在了临时钱包里，可以在下面「放弃零头」'), 'warn'));
@@ -1403,7 +1443,7 @@
       const head = mk('div', { className: 'head' },
         mk('span', { className: 't', textContent: shortAddr(rec.container), title: rec.container }),
         mk('span', { className: 's', textContent: net ? net.name : rec.netKey }),
-        mk('span', { textContent: coin(rec.balance, rec.netKey) }),
+        mk('span', { textContent: coin(rec.balance, rec.netKey), title: exact(rec.balance, rec.netKey) }),
         mk('span', { className: 's', textContent: tr('持有人 {owner}', { owner: shortAddr(rec.owner) }), title: rec.owner }));
       const li = mk('li', { className: 'pub-left' }, head);
       head.firstChild.setAttribute('aria-label', tr('容器 {container}', { container: rec.container }));
@@ -1422,7 +1462,7 @@
     if (recs.length) box.append(ul);
     if (recs.length) box.append(note(tr('「放弃零头」只用于余额不够付退款手续费的临时钱包，放弃前会再问一次。')));
     for (const b of l.broken || []) box.append(note(tr('{name} 上有一个临时钱包记录文件已损坏（{file}），里面的余额可能找不回来', { name: (pubNet(b.netKey) || {}).name || b.netKey, file: b.file }), 'warn'));
-    for (const e of l.errors || []) box.append(note(tr('{name} 上的临时钱包读取失败：{message}', { name: (pubNet(e.netKey) || {}).name || e.netKey, message: tr(e.message) }), 'warn'));
+    for (const e of l.errors || []) box.append(note(tr('{name} 上的临时钱包读取失败：{message}', { name: (pubNet(e.netKey) || {}).name || e.netKey, message: e.message }), 'warn'));
     box.append(reload());
   }
 

@@ -607,7 +607,7 @@
  "首页有 {n} 块，要分 {n} 笔替换：更新期间网站会暂时打不开，传完就恢复。": "The home page has {n} chunks and is replaced in {n} transactions. The site will be unavailable during the update and come back when it finishes.",
  "链上的文件已经和本地一样，没有要上传的内容。": "The files on chain already match your local files. Nothing to upload.",
  "开始发布": "Start publishing",
- "接下来钱包会请你确认 2 到 3 笔交易：开通容器（如果需要）、授权临时钱包 6 小时、充值上传用的 gas。剩下的 gas 发布完自动退回。": "Your wallet will then ask you to confirm 2 to 3 transactions: opening the container (if needed), authorizing a temporary wallet for 6 hours, and funding it with gas for the upload. Unused gas is refunded automatically when publishing finishes.",
+ "接下来钱包通常会请你确认 2 到 3 笔交易：开通容器（如果需要）、授权临时钱包 6 小时、充值上传用的 gas。剩下的 gas 发布完自动退回。": "Your wallet will then usually ask you to confirm 2 to 3 transactions: opening the container (if needed), authorizing a temporary wallet for 6 hours, and funding it with gas for the upload. Unused gas is refunded automatically when publishing finishes.",
  "开通容器并支付开通费 {fee}": "open the container and pay the {fee} opening fee",
  "开通容器并支付开通费": "open the container and pay the opening fee",
  "授权临时钱包上传 6 小时": "authorize the temporary wallet to upload for 6 hours",
@@ -659,5 +659,7 @@
  "发布到容器": "Publish to container",
  "选电路": "Choose a circuit",
  "发布计划": "Publishing plan",
- "没发完或没退干净的临时钱包": "Unfinished or unrefunded temporary wallets"
+ "没发完或没退干净的临时钱包": "Unfinished or unrefunded temporary wallets",
+ "不含你钱包自己发这几笔交易的手续费；Gas 单价上涨时充值会多一些，可能要多确认一次补充值，没用完的会退回": "This doesn't include the fees for the transactions your own wallet sends. If the gas price rises, funding will be a bit higher and you may need to confirm one more top-up. Anything unused is refunded",
+ "将把当前文件夹 {root} 发布到 {label}": "The current folder {root} will be published to {label}"
 }
