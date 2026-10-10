@@ -489,3 +489,21 @@ test('canDecrypt：能解密并且地址对得上返回 true；解不开、地�
     assert.equal(store.canDecrypt(CHAIN, '0x' + '7'.repeat(40)), false);
   } finally { done(); }
 });
+
+test('touchOwner：记下持有人最近一次发交易的时间，只能往大改，落盘后重新打开还在；旧记录读出来是 null', () => {
+  const { dir, store, make, done } = setup();
+  try {
+    store.create({ chainId: CHAIN, container: C, owner: OWNER });
+    assert.equal(store.get(CHAIN, C).ownerTouchedAt, null);
+    store.touchOwner(CHAIN, C, 5000);
+    store.touchOwner(CHAIN, C, 4000);
+    assert.equal(make().get(CHAIN, C).ownerTouchedAt, 5000);
+    assert.ok(make().list().some((r) => r.ownerTouchedAt === 5000));
+    for (const bad of [-1, 1.5, '6000', null]) assert.throws(() => store.touchOwner(CHAIN, C, bad));
+    assert.throws(() => store.touchOwner(CHAIN, '0x' + '7'.repeat(40), 1), (e) => e.code === 'NO_OPERATOR');
+    // 文件里的值不对就当坏记录
+    const file = join(dir, readdirSync(dir)[0]);
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), ownerTouchedAt: 'x' }));
+    assert.deepEqual(store.list(), []);
+  } finally { done(); }
+});

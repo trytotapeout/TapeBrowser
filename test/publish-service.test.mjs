@@ -72,7 +72,7 @@ async function harness({ secureOk = true, backend = 'keychain', ready = true, ac
   const onEvent = (name, data) => { events.push([name, data]); h.on?.(name, data); };
   const svc = createPublishService({ chains, sites, localSites, precheck, bridge, secure, dir, now, sleep, onEvent });
   return Object.assign(h, {
-    svc, chains, bridge, root, site, dir, events, scans, localSites, clock, now,
+    svc, chains, bridge, root, site, dir, events, scans, localSites, clock, now, secure,
     /** 这条链的 operator-store（和服务读同一个目录、同一个时钟） */
     storeOf: (key, o = {}) => createOperatorStore({ dir: join(dir, key), encrypt, decrypt, now, ...o }),
     ins: (extra = {}) => svc.inspect({ root, netKey: 'bnb', tokenId: 7, cpu: 7, ...extra }),
@@ -432,7 +432,8 @@ test('充值时 WALLET_LOST、节点还看不到这笔交易（nonce 已经对�
   const h = await harness();
   try {
     await lostFund(h, { visible: false });
-    h.clock.t += HOUR - 1000;
+    // 宽限期从发充值之前记下的 ownerTouchedAt 算（WALLET_LOST 后等交易池还会拨时钟）
+    h.clock.t = h.storeOf('bnb').get(BSC.chainId, CONTAINER).ownerTouchedAt + HOUR - 1;
     const r = await h.svc.leftovers();
     assert.deepEqual(r.records.map((x) => [x.container, x.balance, x.cleanup]), [[CONTAINER, '0', 'recent']]);
     assert.ok(h.storeOf('bnb').get(BSC.chainId, CONTAINER));
@@ -523,5 +524,38 @@ test('同一时间只能有一个 inspect：第二个 BUSY，第一个结束后�
     assert.equal((await first).stage, 'ready');
     h.cpusGate = null;
     assert.equal((await h.ins()).stage, 'ready');
+  } finally { h.done(); }
+});
+
+test('暂停很久以后接着发布、充值时 WALLET_LOST：宽限期从这次持有人交易算，记录保留；再过 1 小时、nonce 对上、余额 0 才删', async () => {
+  const h = await harness();
+  try {
+    // 很早以前建好的记录（授权已经做过一次也没关系，这里只看充值）
+    h.storeOf('bnb').create({ chainId: BSC.chainId, container: CONTAINER, owner: OWNER });
+    h.clock.t += 3 * 24 * HOUR;
+    await lostFund(h, { visible: false });
+    const touched = h.storeOf('bnb').get(BSC.chainId, CONTAINER).ownerTouchedAt;
+    assert.ok(touched >= h.clock.t - HOUR);
+    const r = await h.svc.leftovers();
+    assert.deepEqual(r.records.map((x) => [x.container, x.cleanup]), [[CONTAINER, 'recent']]);
+    h.clock.t = touched + HOUR;
+    assert.deepEqual((await h.svc.leftovers()).records, []);
+    assert.equal(h.storeOf('bnb').get(BSC.chainId, CONTAINER), null);
+  } finally { h.done(); }
+});
+
+test('leftovers：只对列出来的记录调 canDecrypt，每条一次', async () => {
+  const h = await harness();
+  try {
+    const store = h.storeOf('bnb');
+    store.create({ chainId: BSC.chainId, container: ADDR2, owner: OWNER });
+    const rich = store.create({ chainId: BSC.chainId, container: ADDR3, owner: OWNER });
+    h.chains.bnb.balances.set(lower(rich.address), 3n);
+    h.clock.t += HOUR;
+    let decrypts = 0;
+    h.secure.decrypt = (buf) => { decrypts++; return decrypt(buf); };
+    const r = await h.svc.leftovers();
+    assert.deepEqual(r.records.map((x) => x.container), [ADDR3]);
+    assert.equal(decrypts, 1);
   } finally { h.done(); }
 });

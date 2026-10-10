@@ -1301,3 +1301,57 @@ test('cleanupIfEmpty：容器正在 run / refund 时返回 busy，不删；没�
     assert.deepEqual(seen, { removed: false, reason: 'busy' });
   } finally { s.done(); }
 });
+
+test('持有人交易发出之前就记下 ownerTouchedAt：钱包抛错、崩溃也已经落盘', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    const inspected = await s.p.inspect({ target });
+    const seen = [];
+    s.chain.hooks.ownerSend = async (tx) => { seen.push(s.store.get(BSC.chainId, CONTAINER).ownerTouchedAt); return s.chain.walletSend(tx); };
+    await s.p.run(inspected);
+    assert.equal(seen.length, 2);
+    assert.ok(seen.every((t) => Number.isSafeInteger(t) && t >= T0));
+  } finally { s.done(); }
+});
+
+test('cleanupIfEmpty：宽限期从 createdAt 和 ownerTouchedAt 里较晚的那个算', async () => {
+  const s = setup();
+  try {
+    oldWallet(s, OWNER, 0n);
+    s.clock.t += 2 * HOUR;
+    s.store.touchOwner(BSC.chainId, CONTAINER, s.clock.t);
+    s.clock.t += HOUR - 1;
+    assert.deepEqual(await cleanup(s), { removed: false, reason: 'recent' });
+    s.clock.t += 1;
+    assert.deepEqual(await cleanup(s), { removed: true, reason: null });
+  } finally { s.done(); }
+});
+
+test('钱包发持有人交易报 WALLET_LOST：等到节点交易池里看得到它再抛出，下次 run 的 nonce 检查一定拦得住', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    const inspected = await s.p.inspect({ target });
+    s.chain.hooks.ownerSend = async (tx) => {
+      // 钱包广播了，节点过一会儿才看到：第一次 sleep 时才进交易池
+      s.chain.holdOwner = true;
+      s.chain.hooks.onSleep = () => { delete s.chain.hooks.onSleep; s.chain.walletSend(tx); };
+      throw Object.assign(new Error('钱包没有回应'), { code: 'WALLET_LOST' });
+    };
+    await assert.rejects(s.p.run(inspected), (e) => e.code === 'WALLET_LOST');
+    assert.ok(s.chain.owner.pending > s.chain.owner.latest);
+    assert.ok(s.clock.sleeps >= 1);
+    delete s.chain.hooks.ownerSend;
+    await assert.rejects(s.p.run(await s.p.inspect({ target })), (e) => e.code === 'WALLET_PENDING');
+  } finally { s.done(); }
+});
+
+test('用户在钱包里拒绝：不等交易池，直接抛出', async () => {
+  const s = setup({ files: threeFiles() });
+  try {
+    const inspected = await s.p.inspect({ target });
+    s.chain.hooks.ownerSend = async () => { throw Object.assign(new Error('拒绝'), { code: 'USER_REJECTED' }); };
+    const before = s.clock.sleeps;
+    await assert.rejects(s.p.run(inspected), (e) => e.code === 'USER_REJECTED');
+    assert.equal(s.clock.sleeps, before);
+  } finally { s.done(); }
+});

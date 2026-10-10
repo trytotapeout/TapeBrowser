@@ -99,7 +99,7 @@ const TX_NONCE_POLLS = 5;
 const TX_NONCE_POLL_MS = 3000;
 const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
 
-// 启动时自动清理空记录的宽限期：建好不到这么久的记录不删。持有人的充值可能已经广播、钱包却没把哈希交回来（WALLET_LOST），
+// 启动时自动清理空记录的宽限期：建好或持有人上次要发交易（ownerTouchedAt）不到这么久的记录不删。持有人的充值可能已经广播、钱包却没把哈希交回来（WALLET_LOST），
 // 这时没有 ownerPending，节点也可能还看不到这笔交易，删掉记录以后到账就取不出来了
 const CLEANUP_GRACE_MS = 3600000;
 
@@ -351,7 +351,16 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
     ctx.checkAbort();
     const { latest, pending } = await chain.nonceOf(ctx.owner);
     if (pending > latest) throw fail(E.WALLET_PENDING, '钱包里还有一笔未确认的交易，请等它确认后再继续');
-    const sent = await ownerSend(tx, kind);
+    // 发之前记下时间：钱包广播了却没交回哈希（WALLET_LOST）或中途崩溃，启动时的清理也会给这笔留出宽限期
+    store.touchOwner(net.chainId, ctx.container, now());
+    let sent;
+    try {
+      sent = await ownerSend(tx, kind);
+    } catch (e) {
+      // 钱包可能已经广播了：和下面拿不到哈希一样，等交易池里看得到它再抛，下次 run 的 nonce 检查才一定拦得住
+      if (e?.code === E.WALLET_LOST) await awaitOwnerQueued(ctx, latest);
+      throw e;
+    }
     if (typeof sent !== 'string' || !TX_HASH.test(sent)) {
       // 没有哈希就记不了在途记录，下次 run 只能靠上面的 nonce 检查拦住重复的交易。
       // 钱包可能已经广播了，等节点交易池里看得到它（pending > latest）再报错，下次 run 才一定被拦下
@@ -821,7 +830,8 @@ export function createPublisher({ chain, net, ownerSend, store, readFiles, prech
       const rec = store.get(chainId, container);
       if (!rec) return { removed: false, reason: 'missing' };
       if (rec.pending || rec.ownerPending) return { removed: false, reason: 'pending' };
-      if (now() - rec.createdAt < CLEANUP_GRACE_MS) return { removed: false, reason: 'recent' };
+      const touched = Math.max(rec.createdAt, rec.ownerTouchedAt ?? 0);
+      if (now() - touched < CLEANUP_GRACE_MS) return { removed: false, reason: 'recent' };
       const pinned = BigInt(await chain.pinBlock());
       const block = rec.minBlock != null && rec.minBlock > pinned ? rec.minBlock : pinned;
       const balance = await chain.nativeBalance(rec.address, hexBlock(block));

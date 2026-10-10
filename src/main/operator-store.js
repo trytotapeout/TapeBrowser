@@ -25,6 +25,8 @@
 //   minBlock   这个容器最近一笔已确认交易（开通、授权、充值、上传）的区块号（十进制字符串，没有时为 null），只能往大改：
 //              下次发布的读取不早于它，落后的节点不会让已开通的容器看起来没开通
 //   createdAt  创建时间（毫秒）
+//   ownerTouchedAt  持有人最近一次要发交易的时间（毫秒，发之前记），只能往大改；旧记录没有，按 null 处理。
+//              启动时自动清理空记录的宽限期从它和 createdAt 里较晚的那个算（publisher.cleanupIfEmpty）
 // get / list / create 返回的记录不含 key，并且 lastNonce、minBlock 是 bigint | null、pending.nonce / pending.gasPrice 是 bigint。
 // 这个文件关系到临时钱包里的钱，写盘要落实：先删掉残留的 .tmp，新建 .tmp（0600）写入并 fsync，
 // 再 rename，最后尽量 fsync 目录。每次读都直接读文件，不缓存。
@@ -100,6 +102,7 @@ const ownerPendingOk = (p) => p == null || (typeof p === 'object' && OWNER_KINDS
 /** 落盘记录 → 返回给调用方的形式（去掉 key，nonce 转 bigint） */
 function publicView(rec) {
   const { key: _key, ...r } = rec;
+  r.ownerTouchedAt = rec.ownerTouchedAt ?? null;
   r.lastNonce = rec.lastNonce == null ? null : BigInt(rec.lastNonce);
   r.minBlock = rec.minBlock == null ? null : BigInt(rec.minBlock);
   r.pending = null;
@@ -127,7 +130,8 @@ function looksValid(rec) {
       && (rec.pending.value == null || /^[0-9]+$/.test(rec.pending.value))
       && (rec.pending.prior == null || (Array.isArray(rec.pending.prior)
         && rec.pending.prior.every((x) => typeof x?.hash === 'string' && /^[0-9]+$/.test(x.value))))))
-    && ownerPendingOk(rec.ownerPending);
+    && ownerPendingOk(rec.ownerPending)
+    && (rec.ownerTouchedAt == null || (Number.isSafeInteger(rec.ownerTouchedAt) && rec.ownerTouchedAt >= 0));
 }
 
 export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
@@ -304,6 +308,15 @@ export function createOperatorStore({ dir, encrypt, decrypt, now = Date.now }) {
     },
 
     /** 只能往大改：比现有值小或相等时不写盘 */
+    /** 持有人要发交易了：记下时间（毫秒），只能往大改，比现有值小或相等时不写盘 */
+    touchOwner(chainId, container, at) {
+      if (!Number.isSafeInteger(at) || at < 0) throw new Error('临时钱包：时间不正确');
+      update(chainId, container, (rec) => {
+        if (rec.ownerTouchedAt != null && at <= rec.ownerTouchedAt) return false;
+        rec.ownerTouchedAt = at;
+      });
+    },
+
     setMinBlock(chainId, container, block) {
       if (typeof block !== 'bigint' || block < 0n) throw new Error('临时钱包：区块号不正确');
       update(chainId, container, (rec) => {
