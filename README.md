@@ -60,6 +60,7 @@ TapeKit 网站分布在三条链上，命名规则和官方网关一致（tapeki
 - 也可以点「立即刷新」手动完整扫描
 - 分类：游戏、金融、工具、社交与内容、生态、其他。默认在本机按标题、`<meta>` 描述和页面特征（canvas 动画加键盘操作、钱包调用代币合约等）推测，卡片上标「推测」，鼠标移上去能看到依据；站长在网站根目录放 `deweb.json`（`{"category": "game"}`，可选 `game`、`finance`、`tool`、`social`、`infra`、`other`）就以它为准
 - 卡片图片：网站根目录的 `logo.png` / `logo.jpg`（正方形，推荐 256×256，最大 512×512，居中显示）和 `cover.png` / `cover.jpg`（16:10，推荐 640×400，铺满图片区，有封面时不显示 logo）。每张不超过 50 KB，超过的不显示。查首页时顺带查这几个文件的信息，显示卡片时才读取并校验 SHA-256；没有图片时显示标题首字
+- Shared by TapeCode：开发者在 TapeCode 的 TapeTape 里分享过的网站，卡片上标「Shared by TapeCode」。数据来自 tapecode.ai 的公开接口（每小时读一次，不用登录），不是链上信息，只说明有人分享过，不代表网站是 TapeCode 做的；读不到时沿用上次的结果，缓存在本机 `tapecode.json`
 
 | 快捷键 | 功能 |
 | --- | --- |
