@@ -6,7 +6,7 @@ import { createProviderHost } from '../src/main/provider-host.js';
 const ACC = '0x571d447f4f24688ec35ccf07f1d6993655f6af15';
 const SITE = 'tape://4454-0';
 
-function setup({ confirmOk = true, remember = false, switchError = null, walletChain = '0x38' } = {}) {
+function setup({ confirmOk = true, remember = false, switchError = null, walletChain = '0x38', silentSwitch = false } = {}) {
   const ev = new EventEmitter();
   const calls = [];
   let state = { connected: false, ready: false, wallet: null, accounts: [], chainId: null };
@@ -19,12 +19,13 @@ function setup({ confirmOk = true, remember = false, switchError = null, walletC
       if (method === 'eth_requestAccounts') return [ACC];
       if (method === 'wallet_switchEthereumChain') {
         if (switchError) throw switchError;
-        state = { ...state, chainId: params[0].chainId };
+        if (!silentSwitch) state = { ...state, chainId: params[0].chainId };
         return null;
       }
       if (method === 'wallet_addEthereumChain') { state = { ...state, chainId: params[0].chainId }; return null; }
       return 'wallet:' + method;
     },
+    noteChain(chainId) { set({ chainId }); },
   };
   const set = (next) => { const prev = state; state = { ...state, ...next }; ev.emit('state', state, prev); };
   const perms = new Map();
@@ -183,6 +184,14 @@ test('switchChain：点红色钱包按钮时请钱包切到网站所在的链', 
   assert.equal(await t.host.switchChain(SITE), 'already');
   // 普通网站没有所在的链
   assert.equal(await t.host.switchChain('https://example.com'), 'none');
+});
+
+test('switchChain：钱包切链成功但没上报新链时也记下目标链，钱包按钮不再一直显示红色', async () => {
+  const t = setup({ silentSwitch: true });
+  t.set({ connected: true, ready: true, accounts: [ACC], chainId: '0x38' });
+  assert.equal(await t.host.switchChain(XSITE), 'switched');
+  assert.equal(t.host.initial(XSITE).chainId, '0xc4');
+  assert.ok(t.emits.some(([, e]) => e === 'chainChanged'));
 });
 
 test('switchChain：钱包里没有这条链就先添加；用户拒绝时抛出 4001', async () => {

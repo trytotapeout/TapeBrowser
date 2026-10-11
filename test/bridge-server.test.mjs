@@ -157,3 +157,17 @@ test('页面关闭时未完成请求以 4900 失败', async () => {
     assert.equal('timeout' in e, false);
   });
 });
+
+test('noteChain：钱包确认切链后直接记下新链；没连钱包时不改', async () => {
+  await withServer(async (b, port) => {
+    b.noteChain('0xc4');
+    assert.equal(b.state.chainId, null);
+    const ws = await connect(port);
+    const st = nextState(b);
+    ws.send(JSON.stringify({ type: 'state', ready: true, wallet: 'MetaMask', accounts: [ACC], chainId: '0x38' }));
+    await st;
+    b.noteChain('0xc4');
+    assert.equal(b.state.chainId, '0xc4');
+    ws.close();
+  });
+});

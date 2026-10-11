@@ -198,8 +198,11 @@ export function createProviderHost({ bridge, rpc, rpcs, settings, openBridge, co
       if (bridge.state.chainId === home.chainIdHex) return 'already';
       try {
         await bridge.request('wallet_switchEthereumChain', [{ chainId: home.chainIdHex }], origin);
+        // 钱包确认切过去了就直接记下新链：不发 chainChanged 的钱包、旧版桥接页面都会一直报旧链
+        bridge.noteChain?.(home.chainIdHex);
       } catch (e) {
         if (Number(e?.code) !== 4902) throw e;
+        // 添加链后钱包不一定跟着切过去，链以桥接页面重新读到的为准
         await bridge.request('wallet_addEthereumChain', [addChainParams(home)], origin);
       }
       return 'switched';

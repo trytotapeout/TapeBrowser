@@ -148,7 +148,13 @@
       const result = await current.provider.request({ method: msg.method, params: msg.params });
       if (msg.method === 'eth_requestAccounts') { accounts = result || []; report(); }
       // 有的钱包切链成功后不发 chainChanged（或者很晚才发），自己再读一次当前的链，免得 TapeBrowser 一直以为链不对
-      if (msg.method === 'wallet_switchEthereumChain' || msg.method === 'wallet_addEthereumChain') await refreshChain();
+      if (msg.method === 'wallet_switchEthereumChain' || msg.method === 'wallet_addEthereumChain') {
+        // 切链成功就说明钱包已经在目标链上（EIP-3326）；有的钱包紧接着读 eth_chainId 还是旧链，先按目标链记下
+        const want = msg.method === 'wallet_switchEthereumChain' && msg.params && msg.params[0] && msg.params[0].chainId;
+        if (typeof want === 'string' && /^0x[0-9a-fA-F]+$/.test(want) && want.toLowerCase() !== chainId) {
+          chainId = want.toLowerCase(); log('网络变化：' + chainId); report();
+        } else await refreshChain();
+      }
       send({ type: 'response', id: msg.id, result: result === undefined ? null : result });
     } catch (e) {
       log(who + msg.method + ' 失败：' + safeError(e).message);

@@ -141,6 +141,11 @@ export function createBridgeServer({ token, port = 0, staticDir, requestTimeout 
     setState({ ready: false, wallet: null, accounts: [], chainId: null });
   }
 
+  /** 钱包确认切链成功后直接记下新链（不等桥接页面上报：旧版桥接页面或不发 chainChanged 的钱包会一直报旧链） */
+  function noteChain(chainId) {
+    if (state.ready && /^0x[0-9a-f]+$/.test(chainId) && state.chainId !== chainId) setState({ chainId });
+  }
+
   /** 等待桥接页面选好钱包；超时 reject */
   function waitReady(timeoutMs) {
     if (state.ready) return Promise.resolve(state);
@@ -184,6 +189,7 @@ export function createBridgeServer({ token, port = 0, staticDir, requestTimeout 
     stop,
     request,
     disconnect,
+    noteChain,
     waitReady,
     on: (name, fn) => ev.on(name, fn),
     get state() { return state; },
