@@ -795,6 +795,14 @@
     }
   }, { rootMargin: '300px' });
 
+  /** 在 TapeCode 的 TapeTape 里分享过的网站：只说明有人分享过，不代表网站是 TapeCode 做的 */
+  function tapecodeTag() {
+    return Object.assign(document.createElement('span'), {
+      className: 'tapecode', textContent: 'Shared by TapeCode',
+      title: tr('开发者在 TapeCode 的 TapeTape 里分享过这个网站（数据来自 tapecode.ai，不是链上信息）'),
+    });
+  }
+
   /** 目录里的一个网站：卡片或一行；date 是显示的上链时间（秒） */
   function dirItem(it, date) {
     return dirView === 'cards' ? dirCard(it, date) : dirRow(it, date);
@@ -836,6 +844,7 @@
       Object.assign(document.createElement('div'), { className: 't' + (it.title ? '' : ' untitled'), textContent: it.title || tr('（没有标题）') }),
       meta,
     );
+    if (it.tapecode) body.append(tapecodeTag());
     // 图片区对读屏隐藏，分类再放一份只给读屏的文字
     thumb.append(catTag(it));
     body.prepend(Object.assign(document.createElement('span'), { className: 'sr-only', textContent: CATS[it.category || 'other'] + tr('：') }));
@@ -855,6 +864,7 @@
       Object.assign(document.createElement('span'), { className: 'u', textContent: it.label }),
       Object.assign(document.createElement('span'), { className: 'd', textContent: day(date) }),
     );
+    if (it.tapecode) a.querySelector('.net').after(tapecodeTag());
     openOnClick(a, it.url);
     li.append(a);
     return li;

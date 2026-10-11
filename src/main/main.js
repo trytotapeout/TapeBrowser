@@ -28,6 +28,7 @@ import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './
 import { createPublishService } from './publish-service.js';
 import { checkLatest, autoCheck } from './updates.js';
 import { createRemoteConfig, REFRESH_EVERY as CONFIG_REFRESH_EVERY } from './remote-config.js';
+import { createTapeCode, REFRESH_EVERY as TAPECODE_REFRESH_EVERY } from './tapecode.js';
 import { parseAds, adsView, adImage } from './ads.js';
 import { parseBlock, blockReason } from './block.js';
 import { translateMessage, matchMessage, fail, NO_OPERATOR, NO_ENCRYPTION, NOT_LOCAL, BUSY } from './publish-errors.js';
@@ -83,8 +84,14 @@ const remote = createRemoteConfig({
   onChange: () => { send('ads', adsView(remote.section('ads'))); send('directory', directoryList()); },
 });
 const isBlocked = (s) => blockReason(remote.section('block'), s.tokenId, s.cpu, s.area) !== null;
-/** 给界面的网站目录：去掉屏蔽的网站 */
-const directoryList = () => directory.list().filter((s) => !isBlocked(s));
+// TapeCode 的 TapeTape 里分享过的网站（中心化接口），目录卡片上标「Shared by TapeCode」
+const tapecode = createTapeCode({
+  file: join(app.getPath('userData'), 'tapecode.json'), fetchImpl: (url, init) => net.fetch(url, init),
+  onChange: () => send('directory', directoryList()),
+});
+/** 给界面的网站目录：去掉屏蔽的网站，标上 TapeCode 分享 */
+const directoryList = () => directory.list().filter((s) => !isBlocked(s))
+  .map((s) => (tapecode.shared(s.tokenId, s.cpu, s.area) ? { ...s, tapecode: true } : s));
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
@@ -1004,6 +1011,9 @@ app.whenReady().then(async () => {
   // 浏览器配置：启动后读一次，之后每 30 分钟一次
   setTimeout(() => { remote.refresh({ force: true }).catch(() => {}); }, 3000).unref?.();
   setInterval(() => { remote.refresh({ force: true }).catch(() => {}); }, CONFIG_REFRESH_EVERY).unref?.();
+  // TapeCode 分享列表：启动后读一次（上次读取不到一小时就不读），之后每小时一次
+  setTimeout(() => tapecode.refresh(), 4000).unref?.();
+  setInterval(() => tapecode.refresh({ force: true }), TAPECODE_REFRESH_EVERY).unref?.();
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
