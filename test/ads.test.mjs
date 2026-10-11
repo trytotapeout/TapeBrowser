@@ -1,33 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { parseAdsHtml, cleanLink, cleanImage, expired, createAds, AD_CONTAINER, MAX_STALE, REFRESH_ON_VIEW } from '../src/main/ads.js';
+import { parseAds, cleanLink, cleanImage, expired, adsView, adImage, MAX_STALE } from '../src/main/ads.js';
 
-const page = (obj) => `<!doctype html><html><head><script type="application/json" id="tape-ads">${typeof obj === 'string' ? obj : JSON.stringify(obj)}</script></head><body><div data-slot="home"></div></body></html>`;
 const AD = { title: '某应用', desc: '介绍', image: 'ads/home.png', link: 'tape://4454-0/' };
+const T0 = new Date(2026, 9, 10, 12).getTime();
+const cached = (raw, readAt = T0) => ({ data: parseAds(raw), readAt });
 
-test('parseAdsHtml：ok / none / bad', () => {
-  const r = parseAdsHtml(page({ version: 1, slots: { home: AD, panel: null } }));
-  assert.equal(r.status, 'ok');
-  assert.deepEqual(r.data.slots.home, { ...AD, until: null });
-  assert.equal(r.data.slots.panel, null);
-  assert.equal(r.data.placeholder, null);
-  assert.equal(parseAdsHtml('<html><body>换成别的首页</body></html>').status, 'none');
-  assert.equal(parseAdsHtml(page('{坏的')).status, 'bad');
-  assert.equal(parseAdsHtml(page({ version: 2, slots: {} })).status, 'bad');
-});
-
-test('单个广告位不合格只隐藏这一个', () => {
-  const r = parseAdsHtml(page({ version: 1, slots: { home: { ...AD, link: 'javascript:alert(1)' }, panel: AD } }));
-  assert.equal(r.data.slots.home, null);
-  assert.ok(r.data.slots.panel);
+test('parseAds：两个位置各自校验', () => {
+  const d = parseAds({ version: 1, slots: { home: AD, panel: null } });
+  assert.deepEqual(d.slots.home, { ...AD, until: null });
+  assert.equal(d.slots.panel, null);
+  assert.equal(d.placeholder, null);
+  const r = parseAds({ slots: { home: { ...AD, link: 'javascript:alert(1)' }, panel: AD } });
+  assert.equal(r.slots.home, null);
+  assert.ok(r.slots.panel);
   for (const bad of [{ ...AD, title: '' }, { ...AD, title: 'x'.repeat(41) }, { ...AD, image: '../x.png' }, { ...AD, until: '明天' }, { ...AD, desc: 3 }]) {
-    assert.equal(parseAdsHtml(page({ version: 1, slots: { home: bad } })).data.slots.home, null, JSON.stringify(bad));
+    assert.equal(parseAds({ slots: { home: bad } }).slots.home, null, JSON.stringify(bad));
   }
   // 没有图片也可以
-  assert.equal(parseAdsHtml(page({ version: 1, slots: { home: { title: 't', link: 'https://a.example' } } })).data.slots.home.image, null);
+  assert.equal(parseAds({ slots: { home: { title: 't', link: 'https://a.example' } } }).slots.home.image, null);
 });
 
 test('cleanLink / cleanImage / expired', () => {
@@ -42,91 +33,24 @@ test('cleanLink / cleanImage / expired', () => {
   assert.equal(expired({ until: null }, day), false);
 });
 
-/** 假的 sites：files 是 {path: string|bytes}；fail 为 true 时读链抛错 */
-function fakeSites(state) {
-  return {
-    site: async () => { if (state.fail) throw new Error('rpc down'); return { exists: true, opened: true, container: state.container ?? AD_CONTAINER }; },
-    readFile: async (_c, path) => {
-      if (state.fail) throw new Error('rpc down');
-      const v = state.files[path];
-      if (v === undefined) return null;
-      return { bytes: typeof v === 'string' ? new TextEncoder().encode(v) : v, info: {}, source: 'chain' };
-    },
-  };
-}
-
-function setup(state, t0 = 1_800_000_000_000) {
-  const dir = mkdtempSync(join(tmpdir(), 'ads-'));
-  const clock = { t: t0 };
-  const changes = [];
-  const make = () => createAds({ sites: fakeSites(state), file: join(dir, 'ads.json'), now: () => clock.t, onChange: (v) => changes.push(v) });
-  return { dir, clock, changes, make, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
-}
-
-test('读到广告 → 显示；撤掉广告 → 立即消失；读取失败 → 保留上次的', async () => {
-  const state = { files: { 'index.html': page({ version: 1, slots: { home: AD } }) } };
-  const s = setup(state);
-  const ads = s.make();
-  assert.deepEqual(ads.view(), { home: null, panel: null });
-  assert.equal(await ads.refresh(), 'ok');
-  assert.equal(ads.view().home.kind, 'ad');
-  assert.equal(ads.view().home.image, true);
-  assert.equal(ads.view().panel, null);
-  assert.equal(s.changes.length, 1);
-
-  // 失败：保留
-  state.fail = true;
-  assert.equal(await ads.refresh({ force: true }), 'fail');
-  assert.equal(ads.view().home.title, '某应用');
-  // 重启后从缓存恢复
-  assert.equal(s.make().view().home.title, '某应用');
-  // 失败太久就不再显示
-  s.clock.t += MAX_STALE + 1;
-  assert.equal(ads.view().home, null);
-  s.clock.t -= MAX_STALE + 1;
-
-  // JSON 坏了也算失败
-  state.fail = false;
-  state.files['index.html'] = page('{坏');
-  assert.equal(await ads.refresh({ force: true }), 'fail');
-  assert.ok(ads.view().home);
-
-  // 明确没有广告：首页里没有节点
-  state.files['index.html'] = '<html></html>';
-  assert.equal(await ads.refresh({ force: true }), 'none');
-  assert.deepEqual(ads.view(), { home: null, panel: null });
-  assert.equal(JSON.parse(readFileSync(join(s.dir, 'ads.json'), 'utf8')).data, null);
-  s.cleanup();
+test('adsView：广告、招租、过期、太久没读到', () => {
+  assert.deepEqual(adsView(null, T0), { home: null, panel: null });
+  assert.deepEqual(adsView({ data: null, readAt: T0 }, T0), { home: null, panel: null });
+  const c = cached({ slots: { home: { ...AD, until: '2026-10-10' } }, placeholder: { title: '广告位招租', desc: '', link: 'tape://1-1196/' } });
+  assert.equal(adsView(c, T0).home.kind, 'ad');
+  assert.equal(adsView(c, T0).home.image, true);
+  assert.deepEqual(adsView(c, T0).panel, { kind: 'placeholder', title: '广告位招租', desc: '', link: 'tape://1-1196/' });
+  assert.equal(adsView(c, new Date(2026, 9, 11, 1).getTime()).home.kind, 'placeholder');
+  assert.deepEqual(adsView(c, T0 + MAX_STALE + 1), { home: null, panel: null });
 });
 
-test('没有广告时显示招租文字；广告过期后也显示招租', async () => {
-  const state = { files: { 'index.html': page({ version: 1, slots: { home: { ...AD, until: '2026-10-10' } }, placeholder: { title: '广告位招租', desc: '', link: 'tape://1-1196/' } }) } };
-  const s = setup(state, new Date(2026, 9, 10, 12).getTime());
-  const ads = s.make();
-  await ads.refresh();
-  assert.equal(ads.view().home.kind, 'ad');
-  assert.deepEqual(ads.view().panel, { kind: 'placeholder', title: '广告位招租', desc: '', link: 'tape://1-1196/' });
-  s.clock.t = new Date(2026, 9, 11, 1).getTime();
-  assert.equal(ads.view().home.kind, 'placeholder');
-  s.cleanup();
-});
-
-test('刷新节流、容器地址变了不信任、图片读取', async () => {
+test('adImage：只读当前显示的广告图片，太大不要', async () => {
   const png = new Uint8Array([137, 80, 78, 71]);
-  const state = { files: { 'index.html': page({ version: 1, slots: { home: AD } }), 'ads/home.png': png } };
-  const s = setup(state);
-  const ads = s.make();
-  await ads.refresh();
-  assert.equal(await ads.refresh(), null, '5 分钟内不重读');
-  s.clock.t += REFRESH_ON_VIEW + 1;
-  assert.equal(await ads.refresh(), 'ok');
-  assert.deepEqual(await ads.image('home'), { bytes: png, type: 'image/png' });
-  assert.equal(await ads.image('panel'), null);
-  assert.equal(await ads.image('__proto__'), null);
-
-  state.container = '0x0000000000000000000000000000000000000001';
-  assert.equal(await ads.refresh({ force: true }), 'fail');
-  assert.equal(await ads.image('home'), null);
-  assert.ok(ads.view().home, '旧广告保留');
-  s.cleanup();
+  const c = cached({ slots: { home: AD, panel: { ...AD, image: 'ads/p.png', until: '2026-10-01' } } });
+  const read = async (path) => (path === 'ads/home.png' ? { bytes: png } : path === 'ads/p.png' ? { bytes: png } : null);
+  assert.deepEqual(await adImage(c, 'home', read, T0), { bytes: png, type: 'image/png' });
+  assert.equal(await adImage(c, 'panel', read, T0), null, '过期了');
+  assert.equal(await adImage(c, 'other', read, T0), null);
+  assert.equal(await adImage(c, 'home', async () => ({ bytes: new Uint8Array(600 * 1024) }), T0), null);
+  assert.equal(await adImage(c, 'home', async () => { throw new Error('x'); }, T0), null);
 });

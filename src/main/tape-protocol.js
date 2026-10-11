@@ -28,7 +28,8 @@ h1{font-size:20px;margin:0 0 8px}p{color:#666;margin:0;word-break:break-all}@med
 
 // onServe(origin, path, sha256)：每返回一个文件调用一次（页面审计用，见 page-audit.js）
 // local：本地预览（local-site.js），tape://local-<id>/ 从本机文件夹读，其余规则和链上网站完全一样
-export function createTapeHandler(sites, { onServe = () => {}, local = null } = {}) {
+// blocked(tokenId, cpu, area)：网站被屏蔽时返回原因（字符串，可以为空），否则返回 null（见 block.js）
+export function createTapeHandler(sites, { onServe = () => {}, local = null, blocked = () => null } = {}) {
   /** 按网址找到读文件的函数：read(path) → {bytes, info, source} | null；找不到网站时返回错误页 */
   async function resolve(url) {
     const id = parseLocalHost(url.hostname);
@@ -40,6 +41,10 @@ export function createTapeHandler(sites, { onServe = () => {}, local = null } = 
     const site = parseHost(url.hostname);
     if (!site) return { error: errorPage(400, '无法识别的电路地址', url.hostname) };
     const label = siteLabel(site.tokenId, site.cpu, site.area);
+    const reason = blocked(site.tokenId, site.cpu, site.area);
+    // 没写原因时不说是屏蔽，只提示打开出错
+    if (reason) return { error: errorPage(403, `${label} 已被屏蔽`, `TapeBrowser 屏蔽了这个网站：${reason}`) };
+    if (reason !== null) return { error: errorPage(403, `无法打开 ${label}`, '打开这个网站发生了错误。') };
     const info = await sites.site(site.tokenId, site.cpu, site.area);
     if (!info.exists) return { error: errorPage(404, `${label} 不存在`, '这个电路还没有铸造，或处理器编号不存在。') };
     if (!info.opened || !info.container) return { error: errorPage(404, `${label} 没有开通容器`, '电路持有人还没有开通容器，没有可浏览的网站。') };

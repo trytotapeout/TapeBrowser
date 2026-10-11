@@ -27,7 +27,9 @@ import { formatBem } from './bem.js';
 import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
 import { createPublishService } from './publish-service.js';
 import { checkLatest, autoCheck } from './updates.js';
-import { createAds, REFRESH_EVERY as ADS_REFRESH_EVERY } from './ads.js';
+import { createRemoteConfig, REFRESH_EVERY as CONFIG_REFRESH_EVERY } from './remote-config.js';
+import { parseAds, adsView, adImage } from './ads.js';
+import { parseBlock, blockReason } from './block.js';
 import { translateMessage, matchMessage, fail, NO_OPERATOR, NO_ENCRYPTION, NOT_LOCAL, BUSY } from './publish-errors.js';
 import { createRequire } from 'node:module';
 const i18n = createRequire(import.meta.url)('../i18n/i18n.cjs');
@@ -56,7 +58,7 @@ const sites = createSites(chains, contentStore);
 const localSites = createLocalSites();
 const directory = createDirectory({
   chains, sites, file: join(app.getPath('userData'), 'directory.json'),
-  onChange: () => { library.syncDirectory(directory.list()); send('directory', directory.list()); },
+  onChange: () => { library.syncDirectory(directory.list()); send('directory', directoryList()); },
   onProgress: () => send('directoryStatus', directory.status()),
 });
 /** 后台刷新目录：到期才扫（完整扫描每周一次，增量检查每小时一次） */
@@ -74,8 +76,15 @@ function tokenInfo(net, token) {
 }
 // 钱包在各条链上的 BEM 余额，工具栏钱包按钮旁显示
 const bem = createBemBalances({ chains, networks: NETWORKS, onChange: (v) => send('bem', v) });
-// 广告位：读广告电路容器里的 index.html，结果有变化就推给界面
-const ads = createAds({ sites, file: join(app.getPath('userData'), 'ads.json'), onChange: (v) => send('ads', v) });
+// 浏览器配置（广告位、屏蔽的网站）：读配置电路容器里的 index.html，内容变了就推给界面
+const remote = createRemoteConfig({
+  sites, file: join(app.getPath('userData'), 'remote-config.json'),
+  sections: { ads: { id: 'tape-ads', parse: parseAds }, block: { id: 'tape-block', parse: parseBlock } },
+  onChange: () => { send('ads', adsView(remote.section('ads'))); send('directory', directoryList()); },
+});
+const isBlocked = (s) => blockReason(remote.section('block'), s.tokenId, s.cpu, s.area) !== null;
+/** 给界面的网站目录：去掉屏蔽的网站 */
+const directoryList = () => directory.list().filter((s) => !isBlocked(s));
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
@@ -262,10 +271,10 @@ function registerIpc() {
   });
   ui('refreshBem', () => bem.refresh());
   // 广告位：先给缓存里的结果；回到首页、打开网站信息面板时顺便刷新（5 分钟内不重读）
-  ui('ads', () => { ads.refresh().catch(() => {}); return ads.view(); });
+  ui('ads', () => { remote.refresh().catch(() => {}); return adsView(remote.section('ads')); });
   // 点广告：链接从主进程的结果里取，不用界面传来的；https 先确认一次，在新标签页打开
   ui('openAd', async (slot) => {
-    const link = ads.view()[String(slot)]?.link;
+    const link = adsView(remote.section('ads'))[String(slot)]?.link;
     if (!link || !ALLOWED.test(link)) return;
     if (/^https:/i.test(link)) {
       const r = await dialog.showMessageBox(win, {
@@ -278,7 +287,7 @@ function registerIpc() {
     tabs.open(link);
   });
   ui('adImage', async (slot) => {
-    const img = await ads.image(String(slot));
+    const img = await adImage(remote.section('ads'), String(slot), remote.readFile);
     return img ? `data:${img.type};base64,${Buffer.from(img.bytes).toString('base64')}` : null;
   });
   // 钱包和当前网站不在同一条链上时，点钱包按钮请钱包切过去
@@ -376,7 +385,7 @@ function registerIpc() {
   });
   ui('copy', (text) => { clipboard.writeText(String(text).slice(0, 1000)); return true; });
   ui('cacheUsage', () => contentStore.usage());
-  ui('directory', () => ({ sites: directory.list(), status: directory.status() }));
+  ui('directory', () => ({ sites: directoryList(), status: directory.status() }));
   ui('scanDirectory', () => { refreshDirectory(true); return directory.status(); });
   // DeWEB 应用卡片上的 logo / cover：外壳界面不走 tape:// 协议，读出来（校验过 sha256）转成 data: 网址
   ui('siteImage', async (url, kind) => {
@@ -662,6 +671,7 @@ async function submit(text) {
       notify(tr('正在查找 {digits} 的所有电路组合…', { digits: q.digits }));
       try {
         const r = await sites.enumerateDigits(q.digits);
+        r.sites = r.sites.filter((s) => !isBlocked(s));
         const failed = failedText(r.failed);
         if (!r.sites.length) {
           notify((r.candidates.length ? tr('没有找到有首页的网站（检查了 {0}）', { 0: r.candidates.join(tr('、')) }) : tr('{digits} 没有合法的电路组合', { digits: q.digits })) + failed, 'error');
@@ -697,6 +707,7 @@ async function scanWallet(address) {
       else if (p.stage === 'ids') notify(tr('{on}处理器 {cpu}：已扫描 {done} / {total} 个编号', { on, cpu: p.cpu, done: p.done, total: p.total }));
       else if (p.stage === 'index') notify(tr('{on}找到 {total} 枚电路，正在检查网站首页…', { on, total: p.total }));
     });
+    r.sites = r.sites.filter((s) => !isBlocked(s));
     if (r.sites.length) openSites(r.sites);
     const skipped = r.skipped.length ? tr('；{0}', { 0: r.skipped.map((s) => tr('{network} 处理器 {cpu} 编号太多未扫描', { network: s.network, cpu: s.cpu })).join(tr('，')) }) : '';
     const tail = skipped + failedText(r.failed);
@@ -932,7 +943,7 @@ app.whenReady().then(async () => {
   if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(SRC, '../build/icon.png'));
 
   tabSession = electronSession.fromPartition(PARTITION);
-  tabSession.protocol.handle('tape', createTapeHandler(sites, { local: localSites, onServe: (origin, path, sha) => audit.file(origin, path, sha) }));
+  tabSession.protocol.handle('tape', createTapeHandler(sites, { local: localSites, blocked: (tokenId, cpu, area) => blockReason(remote.section('block'), tokenId, cpu, area), onServe: (origin, path, sha) => audit.file(origin, path, sha) }));
   // 电路网站发出的非链上请求（外部脚本、接口、WebSocket 等）记下来，网站信息面板和签名确认里提示
   tabSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (details, cb) => {
     try {
@@ -990,9 +1001,9 @@ app.whenReady().then(async () => {
   library.syncDirectory(directory.list());
   setTimeout(() => refreshDirectory(), 5000).unref?.();
   setInterval(() => refreshDirectory(), QUICK_CHECK_EVERY).unref?.();
-  // 广告：启动后读一次，之后每 30 分钟一次
-  setTimeout(() => { ads.refresh({ force: true }).catch(() => {}); }, 3000).unref?.();
-  setInterval(() => { ads.refresh({ force: true }).catch(() => {}); }, ADS_REFRESH_EVERY).unref?.();
+  // 浏览器配置：启动后读一次，之后每 30 分钟一次
+  setTimeout(() => { remote.refresh({ force: true }).catch(() => {}); }, 3000).unref?.();
+  setInterval(() => { remote.refresh({ force: true }).catch(() => {}); }, CONFIG_REFRESH_EVERY).unref?.();
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
