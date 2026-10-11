@@ -657,7 +657,6 @@
  "{name} 上有一个临时钱包记录文件已损坏（{file}），里面的余额可能找不回来": "A temporary wallet record file on {name} is corrupted ({file}), and its balance may not be recoverable",
  "{name} 上的临时钱包读取失败：{message}": "Couldn't read the temporary wallets on {name}: {message}",
  "发布到容器": "Publish to container",
- "实验功能：还没有在真实网络上完整测试过。开通费和 Gas 是真实花费，建议先用一个小网站在 X Layer 上试一次。": "Experimental: not yet fully tested on a live network. The open fee and gas are real costs, so try it once with a small site on X Layer first.",
  "选电路": "Choose a circuit",
  "发布计划": "Publishing plan",
  "没发完或没退干净的临时钱包": "Unfinished or unrefunded temporary wallets",
