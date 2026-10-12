@@ -7,6 +7,21 @@
   <meta name="description" content="TapeBrowser 是基于 TapeKit DeWEB 的跨平台应用浏览器，但不仅仅是浏览器。直接从链上读取并校验 DeWEB 应用，支持 BNB Chain、X Layer 和 Base，桥接浏览器钱包扩展，不导入私钥。">
   <link rel="icon" href="icon.png">
   <link rel="stylesheet" href="style.css">
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-LMQJ627ED4"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-LMQJ627ED4');
+  </script>
+  <script>
+    // 统计安装包下载：点击 Releases 里的安装包链接时发 download 事件，带上文件名
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest('a[href*="/releases/download/"]');
+      if (a) gtag('event', 'download', { file_name: a.href.split('/').pop() });
+    });
+  </script>
 </head>
 <body>
   <a class="skip" href="#main">跳到正文</a>
