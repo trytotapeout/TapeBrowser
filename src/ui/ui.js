@@ -1569,6 +1569,7 @@
   $('back').addEventListener('click', () => tb.invoke('back'));
   $('forward').addEventListener('click', () => tb.invoke('forward'));
   $('reload').addEventListener('click', () => tb.invoke(active() && active().loading ? 'stop' : 'reload'));
+  $('open-local').addEventListener('click', () => tb.invoke('openLocal'));
   $('settings-btn').addEventListener('click', () => setSettings(!settingsOpen));
   // 点 BEM 按钮刷新价格和余额
   $('bem').addEventListener('click', () => tb.invoke('refreshBem'));

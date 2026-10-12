@@ -382,6 +382,7 @@
  "社交与内容、": "social & content, ",
  "生态、": "ecosystem, ",
  "打开本地文件夹预览": "Preview a Local Folder",
+ "打开本地文件夹预览 (⌘O)": "Preview a local folder (⌘O)",
  "预览": "Preview",
  "打不开这个文件夹：": "Can't open this folder: ",
  "本地预览：{root}。文件改动后会自动刷新；点地址栏左边的「本地」查看发布预检查": "Local preview: {root}. The page reloads when files change. Click \"Local\" left of the address bar to see the pre-publish check",

@@ -31,6 +31,7 @@ body.mac #tabstrip { padding-left: 80px; }
 .icon { -webkit-app-region: no-drag; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; font-size: 18px; line-height: 1; cursor: pointer; flex: none; }
 .icon:hover:not(:disabled) { background: var(--line); }
 .icon:disabled { opacity: .35; cursor: default; }
+.icon svg { display: block; margin: auto; }
 #newtab { margin: 0 0 2px 4px; }
 
 #navbar { display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 8px; background: var(--tab-active); }
