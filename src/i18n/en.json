@@ -675,5 +675,7 @@
  "打开": "Open",
  "打开广告链接？": "Open ad link?",
  "这是一个链外网址，内容不在链上，也没有经过校验：\n{link}": "This is an off-chain address. Its content is not on chain and has not been verified:\n{link}",
- "开发者在 TapeCode 的 TapeTape 里分享过这个网站（数据来自 tapecode.ai，不是链上信息）": "A developer shared this site on TapeTape in TapeCode (data from tapecode.ai, not from the chain)"
+ "开发者在 TapeCode 的 TapeTape 里分享过这个网站（数据来自 tapecode.ai，不是链上信息）": "A developer shared this site on TapeTape in TapeCode (data from tapecode.ai, not from the chain)",
+ "将用系统默认浏览器打开这个链外网址，内容不在链上，也没有经过校验：\n{link}": "This off-chain address will open in your default browser. Its content is not on chain and has not been verified:\n{link}",
+ "{link}（在系统默认浏览器打开）": "{link} (opens in your default browser)"
 }

@@ -8,7 +8,7 @@ const cached = (raw, readAt = T0) => ({ data: parseAds(raw), readAt });
 
 test('parseAds：两个位置各自校验', () => {
   const d = parseAds({ version: 1, slots: { home: AD, panel: null } });
-  assert.deepEqual(d.slots.home, { ...AD, until: null });
+  assert.deepEqual(d.slots.home, { ...AD, open: 'tab', until: null });
   assert.equal(d.slots.panel, null);
   assert.equal(d.placeholder, null);
   const r = parseAds({ slots: { home: { ...AD, link: 'javascript:alert(1)' }, panel: AD } });
@@ -39,7 +39,7 @@ test('adsView：广告、招租、过期、太久没读到', () => {
   const c = cached({ slots: { home: { ...AD, until: '2026-10-10' } }, placeholder: { title: '广告位招租', desc: '', link: 'tape://1-1196/' } });
   assert.equal(adsView(c, T0).home.kind, 'ad');
   assert.equal(adsView(c, T0).home.image, true);
-  assert.deepEqual(adsView(c, T0).panel, { kind: 'placeholder', title: '广告位招租', desc: '', link: 'tape://1-1196/' });
+  assert.deepEqual(adsView(c, T0).panel, { kind: 'placeholder', title: '广告位招租', desc: '', link: 'tape://1-1196/', open: 'tab' });
   assert.equal(adsView(c, new Date(2026, 9, 11, 1).getTime()).home.kind, 'placeholder');
   assert.deepEqual(adsView(c, T0 + MAX_STALE + 1), { home: null, panel: null });
 });
@@ -53,4 +53,21 @@ test('adImage：只读当前显示的广告图片，太大不要', async () => {
   assert.equal(await adImage(c, 'other', read, T0), null);
   assert.equal(await adImage(c, 'home', async () => ({ bytes: new Uint8Array(600 * 1024) }), T0), null);
   assert.equal(await adImage(c, 'home', async () => { throw new Error('x'); }, T0), null);
+});
+
+test('open：默认在标签页打开，external 只能配 https', () => {
+  assert.equal(parseAds({ slots: { home: AD } }).slots.home.open, 'tab');
+  const https = { ...AD, link: 'https://tapeout.link/' };
+  assert.equal(parseAds({ slots: { home: { ...https, open: 'tab' } } }).slots.home.open, 'tab');
+  assert.equal(parseAds({ slots: { home: { ...https, open: 'external' } } }).slots.home.open, 'external');
+  // tape:// 在系统浏览器里打不开；写错的值整个位置不显示
+  assert.equal(parseAds({ slots: { home: { ...AD, open: 'external' } } }).slots.home, null);
+  assert.equal(parseAds({ slots: { home: { ...https, open: 'browser' } } }).slots.home, null);
+  const c = cached({ slots: { home: { ...https, open: 'external' } }, placeholder: { title: '招租', link: 'https://a.example', open: 'external' } });
+  assert.equal(adsView(c, T0).home.open, 'external');
+  assert.equal(adsView(c, T0).panel.open, 'external');
+  assert.equal(parseAds({ placeholder: { title: '招租' } }).placeholder.open, 'tab');
+  // 旧版缓存里没有 open：按 tab 处理
+  assert.equal(adsView({ data: { slots: { home: { ...AD, until: null } }, placeholder: { title: 't', desc: '', link: null } }, readAt: T0 }, T0).home.open, 'tab');
+  assert.equal(adsView({ data: { slots: {}, placeholder: { title: 't', desc: '', link: null } }, readAt: T0 }, T0).panel.open, 'tab');
 });

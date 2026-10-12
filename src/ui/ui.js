@@ -585,7 +585,8 @@
     const b = document.createElement(ad.link ? 'button' : 'div');
     if (ad.link) {
       b.type = 'button';
-      b.title = ad.link;
+      // 用系统浏览器打开的，鼠标移上去时说明一下
+      b.title = ad.open === 'external' ? tr('{link}（在系统默认浏览器打开）', { link: ad.link }) : ad.link;
       b.addEventListener('click', () => tb.invoke('openAd', slot));
     }
     const text = document.createElement('div');

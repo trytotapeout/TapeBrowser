@@ -279,19 +279,25 @@ function registerIpc() {
   ui('refreshBem', () => bem.refresh());
   // 广告位：先给缓存里的结果；回到首页、打开网站信息面板时顺便刷新（5 分钟内不重读）
   ui('ads', () => { remote.refresh().catch(() => {}); return adsView(remote.section('ads')); });
-  // 点广告：链接从主进程的结果里取，不用界面传来的；https 先确认一次，在新标签页打开
+  // 点广告：链接和打开方式从主进程的结果里取，不用界面传来的。
+  // https 先确认一次；open 是 external 时用系统默认浏览器打开，否则在新标签页打开
   ui('openAd', async (slot) => {
-    const link = adsView(remote.section('ads'))[String(slot)]?.link;
+    const ad = adsView(remote.section('ads'))[String(slot)];
+    const link = ad?.link;
     if (!link || !ALLOWED.test(link)) return;
+    const external = ad.open === 'external' && /^https:/i.test(link);
     if (/^https:/i.test(link)) {
       const r = await dialog.showMessageBox(win, {
         type: 'question', buttons: [tr('打开'), tr('取消')], defaultId: 0, cancelId: 1,
         message: tr('打开广告链接？'),
-        detail: tr('这是一个链外网址，内容不在链上，也没有经过校验：\n{link}', { link }),
+        detail: external
+          ? tr('将用系统默认浏览器打开这个链外网址，内容不在链上，也没有经过校验：\n{link}', { link })
+          : tr('这是一个链外网址，内容不在链上，也没有经过校验：\n{link}', { link }),
       });
       if (r.response !== 0) return;
     }
-    tabs.open(link);
+    if (external) shell.openExternal(link);
+    else tabs.open(link);
   });
   ui('adImage', async (slot) => {
     const img = await adImage(remote.section('ads'), String(slot), remote.readFile);

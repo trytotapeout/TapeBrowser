@@ -3,8 +3,9 @@
 //   <script type="application/json" id="tape-ads">
 //   { "version": 1,
 //     "slots": { "home": {...}, "panel": {...} },        home 首页横幅，panel 网站信息面板右侧
-//     "placeholder": { "title", "desc", "link" } }       没有广告时显示的招租文字（可选）
-//   每个广告：{ title, desc, image（容器里的相对路径）, link（tape:// 或 https://）, until（可选，YYYY-MM-DD，当天结束后不再显示） }
+//     "placeholder": { "title", "desc", "link", "open" } }   没有广告时显示的招租文字（可选）
+//   每个广告：{ title, desc, image（容器里的相对路径）, link（tape:// 或 https://）, open, until（可选，YYYY-MM-DD，当天结束后不再显示） }
+//   open：tab（默认）在 TapeBrowser 的新标签页打开；external 用系统默认浏览器打开，只能配 https 链接
 //
 // 某个位置写 null、不写或字段不合格：这个位置没有广告，其他位置不受影响。
 // 读链一直失败时，上次的广告最多再用 MAX_STALE。
@@ -37,6 +38,12 @@ export function cleanLink(v) {
   } catch { return null; }
 }
 
+/** 打开方式：不写是 tab；external 只能配 https（系统浏览器打不开 tape://）；其他值不合格返回 null */
+export function cleanOpen(v, link) {
+  if (v === undefined || v === null || v === '' || v === 'tab') return 'tab';
+  return v === 'external' && /^https:/i.test(link || '') ? 'external' : null;
+}
+
 /** 容器里的相对路径：不能有 ..、协议、开头的 /，扩展名必须是图片 */
 export function cleanImage(v) {
   const s = text(v, LIMITS.image);
@@ -52,7 +59,8 @@ function cleanSlot(v) {
   const title = text(v.title, LIMITS.title);
   const link = cleanLink(v.link);
   const desc = optText(v.desc, LIMITS.desc);
-  if (!title || !link || desc === null) return null;
+  const open = cleanOpen(v.open, link);
+  if (!title || !link || desc === null || !open) return null;
   let image = null;
   if (v.image !== undefined && v.image !== null && v.image !== '') {
     image = cleanImage(v.image);
@@ -63,7 +71,7 @@ function cleanSlot(v) {
     if (typeof v.until !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v.until) || Number.isNaN(Date.parse(v.until))) return null;
     until = v.until;
   }
-  return { title, desc, link, image, until };
+  return { title, desc, link, open, image, until };
 }
 
 function cleanPlaceholder(v) {
@@ -74,7 +82,9 @@ function cleanPlaceholder(v) {
   // 招租文字可以没有链接
   const link = v.link ? cleanLink(v.link) : null;
   if (v.link && !link) return null;
-  return { title, desc, link };
+  const open = link ? cleanOpen(v.open, link) : 'tab';
+  if (!open) return null;
+  return { title, desc, link, open };
 }
 
 /** until 当天（本地时间）结束后过期 */
@@ -86,8 +96,8 @@ export function expired(slot, now = Date.now()) {
 
 /**
  * 给界面的结果：{ home, panel }，每个位置是
- *   { kind: 'ad', title, desc, link, image }   image 为 true 时界面再调 adImage 取图
- *   { kind: 'placeholder', title, desc, link } 运营方明确没放广告，但配了招租文字
+ *   { kind: 'ad', title, desc, link, open, image }   image 为 true 时界面再调 adImage 取图
+ *   { kind: 'placeholder', title, desc, link, open } 运营方明确没放广告，但配了招租文字
  *   null                                        不显示
  * cached：remote-config 的 section('ads')
  */
@@ -97,8 +107,8 @@ export function adsView(cached, now = Date.now()) {
   if (!data || now - cached.readAt > MAX_STALE) return out;
   for (const k of SLOTS) {
     const s = data.slots?.[k];
-    if (s && !expired(s, now)) out[k] = { kind: 'ad', title: s.title, desc: s.desc, link: s.link, image: Boolean(s.image) };
-    else if (data.placeholder) out[k] = { kind: 'placeholder', ...data.placeholder };
+    if (s && !expired(s, now)) out[k] = { kind: 'ad', title: s.title, desc: s.desc, link: s.link, open: s.open || 'tab', image: Boolean(s.image) };
+    else if (data.placeholder) out[k] = { kind: 'placeholder', open: 'tab', ...data.placeholder };
   }
   return out;
 }
