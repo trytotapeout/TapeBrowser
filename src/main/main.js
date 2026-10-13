@@ -247,7 +247,7 @@ function registerIpc() {
   });
   ui('ready', () => { tabs.push(); send('wallet', walletView()); send('bem', bem.view()); pushLibrary(); });
   // 打赏：用当前钱包把 BEM 直接转进当前网站的容器
-  ui('tip', async (text) => {
+  ui('tip', async (text, opts) => {
     const t = tabs.active();
     const m = /^tape:\/\/([^/?#]+)/i.exec(t?.url || '');
     const target = m && parseHost(m[1]);
@@ -262,13 +262,22 @@ function registerIpc() {
     // 余额读失败就交给 prepareTip 里的模拟去发现
     const balance = net.bem ? await chains[net.key].tokenBalance(net.bem, account).catch(() => null) : null;
     const prepared = await prepareTip({ rpc: rpcs[net.key], net, site: info, account, amount, balance, tr: (...a) => tr(...a) });
-    const r = await dialog.showMessageBox(win, {
+    const detail = tr('从你的钱包 {account} 转出 {amount} BEM，转进 {site} 的容器 {container}。\n只需支付 {name} 的网络 gas。\n\n打赏会公开记录在链上，转出后无法撤回。', { account, amount: formatBem(amount), site: label, container: info.container, name: net.name });
+    // quick：刷新按钮后面的快捷打赏，先说明一下再去钱包
+    const r = await dialog.showMessageBox(win, opts?.quick ? {
+      type: 'question',
+      buttons: [tr('确认'), tr('取消')],
+      defaultId: 0,
+      cancelId: 1,
+      message: tr('欢迎使用快捷打赏功能'),
+      detail: tr('金额 {amount} BEM，打赏给 {site}。点确认后会弹出钱包确认。', { amount: formatBem(amount), site: label }) + '\n\n' + detail,
+    } : {
       type: 'question',
       buttons: [tr('去钱包确认'), tr('取消')],
       defaultId: 0,
       cancelId: 1,
       message: tr('打赏 {amount} BEM 给 {site}', { amount: formatBem(amount), site: label }),
-      detail: tr('从你的钱包 {account} 转出 {amount} BEM，转进 {site} 的容器 {container}。\n只需支付 {name} 的网络 gas。\n\n打赏会公开记录在链上，转出后无法撤回。', { account, amount: formatBem(amount), site: label, container: info.container, name: net.name }),
+      detail,
     });
     if (r.response !== 0) return { ok: false };
     const hash = await bridge.request('eth_sendTransaction', [prepared.tx], originOf(t.url));

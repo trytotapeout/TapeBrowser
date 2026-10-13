@@ -189,7 +189,7 @@
       renderSite();
       return;
     }
-    if (!tape) { siteInfo = null; verify = null; siteKey = ''; if (siteOpen) setSite(false); return; }
+    if (!tape) { siteInfo = null; verify = null; siteKey = ''; $('tip-btn').hidden = true; if (siteOpen) setSite(false); return; }
     const key = `${t.id}|${t.url}|${t.loading}`;
     if (key === siteKey || t.loading) return;
     siteKey = key;
@@ -230,6 +230,8 @@
     b.className = (st.cls === 'ok' ? '' : st.cls) + (local ? ' local' : '');
     b.textContent = local ? tr('本地') : st.cls === 'ok' ? tr('链上') : st.text;
     b.title = (local ? tr('本地预览：') : web ? tr('不在链上：') : tr('网站信息：')) + st.text;
+    // 开通了容器的链上网站才能打赏
+    $('tip-btn').hidden = !(siteInfo && !local && !web && siteInfo.container && siteInfo.opened);
     if (!siteOpen) return;
     if (local) { renderLocal(siteInfo, st); return; }
     if (web) { renderWeb(siteInfo, st); return; }
@@ -1603,6 +1605,13 @@
     if (!url) return;
     pendingPublish = originOfUrl(url);
     publishWhenReady();
+  });
+  // 刷新按钮后面的打赏：固定打赏 0.01 BEM，先弹快捷打赏的说明框，确认后再去钱包
+  $('tip-btn').addEventListener('click', async () => {
+    const b = $('tip-btn');
+    b.disabled = true;
+    try { await tb.invoke('tip', '0.01', { quick: true }); } catch (e) { notice(errText(e), 'error'); }
+    b.disabled = false;
   });
   $('settings-btn').addEventListener('click', () => setSettings(!settingsOpen));
   // 点 BEM 按钮刷新价格和余额
