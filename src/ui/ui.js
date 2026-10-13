@@ -55,6 +55,10 @@
   let helpOpen = false;
   // 分类筛选：'' 是全部
   let dirCat = '';
+  // 「我的」：持有人是当前连接的钱包的网站。各链地址相同，所以不分链比对
+  const MINE = 'mine';
+  const myAccount = () => (wallet.ready && wallet.account ? wallet.account.toLowerCase() : '');
+  const isMine = (s) => Boolean(myAccount()) && (s.owner || '').toLowerCase() === myAccount();
   // 分类的显示名，顺序就是筛选按钮的顺序
   const CATS = { game: tr('游戏'), finance: tr('金融'), tool: tr('工具'), social: tr('社交与内容'), infra: tr('生态'), other: tr('其他') };
   // DeWEB 应用、新上线的显示方式：cards | list，记在本机
@@ -715,7 +719,8 @@
     const netFilter = $('dir-net').value;
     let items = netFilter ? dir.sites.filter((s) => (s.network || 'bnb') === netFilter) : dir.sites;
     renderCats(items);
-    if (dirCat) items = items.filter((s) => (s.category || 'other') === dirCat);
+    if (dirCat === MINE) items = items.filter(isMine);
+    else if (dirCat) items = items.filter((s) => (s.category || 'other') === dirCat);
     if (q) {
       items = items.filter((s) => (s.title || '').toLowerCase().includes(q)
         || s.label.toLowerCase().includes(q)
@@ -742,7 +747,8 @@
     const box = $('dir-cats');
     const count = {};
     for (const s of items) count[s.category || 'other'] = (count[s.category || 'other'] || 0) + 1;
-    if (dirCat && !count[dirCat]) dirCat = '';
+    if (myAccount()) count[MINE] = items.filter(isMine).length;
+    if (dirCat === MINE ? !myAccount() : dirCat && !count[dirCat]) dirCat = '';
     box.textContent = '';
     const chip = (key, label, n) => {
       const b = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' });
@@ -752,6 +758,8 @@
       box.append(b);
     };
     chip('', tr('全部'), items.length);
+    // 钱包连上就显示，0 个也显示，让人知道这个钱包在目录里没有网站
+    if (myAccount()) chip(MINE, tr('我的'), count[MINE]);
     for (const [key, label] of Object.entries(CATS)) if (count[key]) chip(key, label, count[key]);
   }
 
@@ -1628,8 +1636,11 @@
   });
   tb.on('wallet', (w) => {
     const was = Boolean(wallet.ready);
+    const prevAccount = myAccount();
     wallet = w || {};
     renderWallet();
+    // 连上、断开或换了账户时，目录里的「我的」要跟着变
+    if (prevAccount !== myAccount()) renderDirectory();
     // 连上或断开钱包时，网站信息面板里的打赏一行要跟着变
     if (siteOpen && was !== Boolean(wallet.ready)) renderSite();
     // 发布页：钱包刚连上时读选好的链上的电路；断开时回到连接提示

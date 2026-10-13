@@ -364,6 +364,7 @@
  "链上的 DeWEB 应用，直接从链上读取并校验。在地址栏输入电路编号、钱包地址或网址。": "DeWEB apps that live on-chain, read and verified straight from the chain. Type a circuit number, wallet address or URL in the address bar.",
  "分类": "Categories",
  "全部": "All",
+ "我的": "Mine",
  "游戏": "Games",
  "金融": "Finance",
  "工具": "Tools",
