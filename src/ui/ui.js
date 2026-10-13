@@ -327,7 +327,7 @@
     row(tr('卡片预览')).append(localCard(c.card));
     safetyRow(dl);
     // 发布到容器：打开全屏发布页
-    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('发布到容器…') });
+    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('上传发布应用') });
     go.addEventListener('click', () => openPublish(true));
     row(tr('发布')).append(go);
   }
@@ -1081,6 +1081,15 @@
     return r;
   }
 
+  // 首页「上传发布应用」选好的文件夹：等它的本地预览成了当前标签再打开发布页
+  let pendingPublish = '';
+  function publishWhenReady() {
+    const t = active();
+    if (!pendingPublish || !t || originOfUrl(t.url) !== pendingPublish) return;
+    pendingPublish = '';
+    openPublish(true);
+  }
+
   /** 打开 / 关闭发布页。只能从本地预览打开；换了文件夹时从选链开始（正在发布时保留进度） */
   function openPublish(on) {
     if (on) {
@@ -1578,6 +1587,23 @@
   $('forward').addEventListener('click', () => tb.invoke('forward'));
   $('reload').addEventListener('click', () => tb.invoke(active() && active().loading ? 'stop' : 'reload'));
   $('open-local').addEventListener('click', () => tb.invoke('openLocal'));
+  // 首页的两个入口：打开文件夹预览；上传发布 = 选文件夹打开本地预览后，直接进发布页
+  $('home-open-local').addEventListener('click', () => tb.invoke('openLocal'));
+  $('home-publish').addEventListener('click', async () => {
+    const url = await tb.invoke('openLocal');
+    if (!url) return;
+    pendingPublish = originOfUrl(url);
+    publishWhenReady();
+  });
+  // 地址栏左边的发布按钮：当前是本地预览就直接进发布页，否则和首页「上传发布应用」一样先选文件夹
+  $('publish-btn').addEventListener('click', async () => {
+    const t = active();
+    if (pub.run || (t && isLocal(t.url))) { openPublish(true); return; }
+    const url = await tb.invoke('openLocal');
+    if (!url) return;
+    pendingPublish = originOfUrl(url);
+    publishWhenReady();
+  });
   $('settings-btn').addEventListener('click', () => setSettings(!settingsOpen));
   // 点 BEM 按钮刷新价格和余额
   $('bem').addEventListener('click', () => tb.invoke('refreshBem'));
@@ -1629,6 +1655,7 @@
     state = s;
     renderTabs();
     renderNav();
+    publishWhenReady();
     // 钱包按钮的「链不对」提醒取决于当前标签
     renderWallet();
     // 主进程切换标签时会结束旧标签的查找，在新标签上重新查找

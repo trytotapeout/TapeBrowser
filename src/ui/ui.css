@@ -53,23 +53,28 @@ body.mac #tabstrip { padding-left: 80px; }
 
 #content { flex: 1; position: relative; overflow: auto; }
 .page { max-width: 680px; margin: 48px auto; padding: 0 24px; font-size: 14px; }
-/* 新标签页和帮助页铺满窗口宽度 */
-#newtab-page, #help-page { max-width: none; margin: 0; padding: 0 40px 40px; }
-#help-page { padding-top: 32px; }
+/* 新标签页、帮助页和发布页铺满窗口宽度 */
+#newtab-page, #help-page, #publish-page { max-width: none; margin: 0; padding: 0 40px 40px; }
+#help-page, #publish-page { padding-top: 32px; }
 /* 新标签页和帮助页：参照 TapeOut 官网的朴素风格。暖白底、白色卡片、细边框，深色字，
    不用渐变和阴影；选中状态用深色底，强调色只用于链接 */
-#newtab-page, #help-page {
+#newtab-page, #help-page, #publish-page {
   --bg: #faf9f7; --surface: #fff; --line: #e8e6e1; --line-strong: #d9d6cf; --fg: #1c1b19; --muted: #8a877f;
   --hover: #f3f1ec; --selected: #1c1b19; --on-selected: #fff;
   background: var(--bg); color: var(--fg); min-height: 100%;
 }
 @media (prefers-color-scheme: dark) {
-  #newtab-page, #help-page { --bg: #1a1918; --surface: #232220; --line: #33312e; --line-strong: #44413c; --fg: #ecebe8; --muted: #9a968e; --hover: #2b2a27; --selected: #ecebe8; --on-selected: #1a1918; }
+  #newtab-page, #help-page, #publish-page { --bg: #1a1918; --surface: #232220; --line: #33312e; --line-strong: #44413c; --fg: #ecebe8; --muted: #9a968e; --hover: #2b2a27; --selected: #ecebe8; --on-selected: #1a1918; }
 }
 #newtab-page .hero { padding: 32px 0 4px; display: flex; gap: 24px; align-items: flex-start; }
 #newtab-page .hero-text { flex: 1; min-width: 0; }
 #newtab-page .hero h1 { font-size: 24px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
 #newtab-page .hero p { max-width: 760px; margin: 0; font-size: 13px; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.hero-actions button { border: 1px solid var(--line); border-radius: 6px; background: var(--tab); color: var(--fg); padding: 6px 14px; font-size: 13px; cursor: pointer; }
+.hero-actions button:hover { border-color: var(--accent); }
+.hero-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.hero-actions button.primary:hover { filter: brightness(1.08); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .page h1 { font-size: 22px; margin: 0 0 8px; }
 .page h2 { font-size: 15px; margin: 28px 0 8px; }

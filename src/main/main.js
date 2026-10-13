@@ -570,6 +570,7 @@ async function openLocalFolder(dir = null) {
   watchLocal(site);
   if (tabs.activeIsBlank()) tabs.navigate(tabs.active().id, site.url); else tabs.open(site.url);
   notify(tr('本地预览：{root}。文件改动后会自动刷新；点地址栏左边的「本地」查看发布预检查', { root: site.root }), 'ok');
+  return site.url;
 }
 
 function watchLocal({ root, url }) {
