@@ -330,7 +330,19 @@
       }
       checks.append(ul);
     }
-    row(tr('卡片预览')).append(localCard(c.card));
+    const preview = row(tr('卡片预览'));
+    preview.append(localCard(c.card));
+    // 没放图片：用当前页面截图生成 cover.jpg，写进文件夹，和其他文件一起上传
+    if (!c.card.logo && !c.card.cover) {
+      const make = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('用当前页面截图生成 cover.jpg') });
+      make.addEventListener('click', async () => {
+        make.disabled = true;
+        const r = await tb.invoke('makeLocalCover').catch((e) => ({ error: { message: String(e?.message || e) } }));
+        if (r?.ok) notice(tr('已生成 {path}（{size}），会随网站一起上传', { path: r.value.path, size: Math.ceil(r.value.size / 1024) + ' KB' }), 'ok');
+        else { notice(r?.error?.message || tr('截图失败，请等页面加载完再试'), 'error'); make.disabled = false; }
+      });
+      preview.append(make);
+    }
     safetyRow(dl);
     // 发布到容器：打开全屏发布页
     const go = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('上传发布应用') });
@@ -793,11 +805,13 @@
   function loadThumb(thumb) {
     const { url, kind, sha } = thumb.dataset;
     const key = `${url}|${kind}|${sha}`;
-    if (!images.has(key)) images.set(key, tb.invoke('siteImage', url, kind).catch(() => null));
+    // snapshot 是本机截的首页截图，按封面铺满显示
+    if (!images.has(key)) images.set(key, (kind === 'snapshot' ? tb.invoke('siteSnapshot', url) : tb.invoke('siteImage', url, kind)).catch(() => null));
+    const cls = kind === 'snapshot' ? 'cover' : kind;
     images.get(key).then((src) => {
-      if (!src || !thumb.isConnected) return;
-      const img = Object.assign(document.createElement('img'), { src, alt: '', className: kind });
-      img.addEventListener('load', () => thumb.classList.add('has-' + kind));
+      if (!src || !thumb.isConnected || thumb.querySelector('img')) return;
+      const img = Object.assign(document.createElement('img'), { src, alt: '', className: cls });
+      img.addEventListener('load', () => thumb.classList.add('has-' + cls));
       img.addEventListener('error', () => img.remove());
       thumb.append(img);
     });
@@ -840,14 +854,12 @@
     const first = it.title ? Array.from(it.title.trim())[0] || '#' : '#' + it.tokenId;
     thumb.append(Object.assign(document.createElement('span'), { className: 'initial', textContent: first.toUpperCase() }));
     thumb.setAttribute('aria-hidden', 'true');
-    // 站长放了 cover（铺满）或 logo（居中）就显示，滚动到附近才读取；读不到保留占位
-    const pic = it.cover ? ['cover', it.cover] : it.logo ? ['logo', it.logo] : null;
-    if (pic) {
-      thumb.dataset.url = it.url;
-      thumb.dataset.kind = pic[0];
-      thumb.dataset.sha = pic[1].sha256;
-      thumbObserver.observe(thumb);
-    }
+    // 站长放了 cover（铺满）或 logo（居中）就显示；都没有就用本机截过的首页截图。滚动到附近才读取；读不到保留占位
+    const pic = it.cover ? ['cover', it.cover] : it.logo ? ['logo', it.logo] : ['snapshot', { sha256: it.sha256 }];
+    thumb.dataset.url = it.url;
+    thumb.dataset.kind = pic[0];
+    thumb.dataset.sha = pic[1].sha256;
+    thumbObserver.observe(thumb);
     const body = Object.assign(document.createElement('div'), { className: 'body' });
     const meta = Object.assign(document.createElement('div'), { className: 'meta' });
     meta.append(
@@ -1737,6 +1749,11 @@
   });
   tb.on('library', (l) => { library = l || { history: [], bookmarks: [] }; renderLibrary(); renderNav(); });
   tb.on('ads', (v) => { adView = v || { home: null, panel: null }; renderAds(); });
+  // 刚截好某个网站的首页截图：清掉「没有截图」的缓存，正在显示的卡片补上
+  tb.on('snapshot', (url) => {
+    for (const k of images.keys()) if (k.startsWith(url + '|snapshot|')) images.delete(k);
+    for (const th of document.querySelectorAll('.thumb[data-kind="snapshot"]')) if (th.dataset.url === url) loadThumb(th);
+  });
   tb.on('directory', (sites) => { dir.sites = sites || []; renderDirectory(); });
   tb.on('directoryStatus', (st) => { dir.status = st || dir.status; renderDirectory(); });
   tb.invoke('directory').then((d) => { dir = d; renderDirectory(); }).catch(() => {});

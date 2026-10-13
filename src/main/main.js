@@ -4,6 +4,7 @@ import { app, BrowserWindow, protocol, session as electronSession, ipcMain, dial
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { watch, readdirSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { createSettings } from './settings.js';
 import { createRpcPool } from './rpc.js';
 import { createChain } from './chain.js';
@@ -18,8 +19,9 @@ import { createTabs, originOf, ALLOWED } from './tabs.js';
 import { isDevice } from './device.js';
 import { createLibrary } from './library.js';
 import { createContentStore } from './content-store.js';
-import { createDirectory, QUICK_CHECK_EVERY } from './directory.js';
-import { parseInput, parseHost, siteLabel, normalizePath } from './address.js';
+import { createDirectory, QUICK_CHECK_EVERY, IMAGE_MAX_BYTES } from './directory.js';
+import { createSnapshots, fitJpeg, coverRect } from './snapshots.js';
+import { parseInput, parseHost, siteLabel, siteUrl, normalizePath } from './address.js';
 import { createAnalyzer, formatUnits } from './risk.js';
 import { createPageAudit } from './page-audit.js';
 import { createBemBalances } from './bem.js';
@@ -93,6 +95,8 @@ const tapecode = createTapeCode({
 /** 给界面的网站目录：去掉屏蔽的网站，标上 TapeCode 分享 */
 const directoryList = () => directory.list().filter((s) => !isBlocked(s))
   .map((s) => (tapecode.shared(s.tokenId, s.cpu, s.area) ? { ...s, tapecode: true } : s));
+// 站长没放 logo / cover 的网站：用户打开过首页后，目录卡片用本机截的首页截图
+const snapshots = createSnapshots(join(app.getPath('userData'), 'snapshots'));
 const library = createLibrary(join(app.getPath('userData'), 'library.json'), { onChange: () => pushLibrary() });
 
 let win = null;
@@ -438,6 +442,14 @@ function registerIpc() {
       return img ? `data:${img.type};base64,${Buffer.from(img.bytes).toString('base64')}` : null;
     } catch { return null; }
   });
+  // 没有 logo / cover 的网站：本机截过的首页截图（按首页 sha256 对应，首页更新后不再显示）
+  ui('siteSnapshot', (url) => {
+    const m = /^tape:\/\/([^/]+)\/$/.exec(String(url));
+    const s = m && directory.entry(m[1]);
+    const bytes = s && snapshots.get(m[1], s.sha256);
+    return bytes ? `data:image/jpeg;base64,${Buffer.from(bytes).toString('base64')}` : null;
+  });
+  ui('makeLocalCover', () => makeLocalCover());
   ui('clearCache', () => contentStore.clear());
   ui('openLocal', () => openLocalFolder());
   // 安全体检：读当前网站的全部文件，静态分析它会对钱包做什么、有没有作恶特征
@@ -625,6 +637,60 @@ function watchLocal({ root, url }) {
 const localChecks = new Map();
 
 /** 本地预览标签的网站信息：文件夹、首页和发布预检查 */
+/** 截当前页面顶部 16:10 一块，压成不超过 50 KB 的 JPEG；截不到返回 null */
+async function captureCover(wc) {
+  const size = await wc.executeJavaScript('[innerWidth, innerHeight]', true).catch(() => null);
+  const rect = size && coverRect(size[0], size[1]);
+  if (!rect) return null;
+  const image = await wc.capturePage(rect);
+  if (image.isEmpty()) return null;
+  return fitJpeg((width, quality) => image.resize({ width, height: Math.round(width / 1.6), quality: 'good' }).toJPEG(quality), IMAGE_MAX_BYTES);
+}
+
+/**
+ * 标签加载完：如果是目录里没有 logo / cover 的网站首页，并且还没有和当前首页对应的截图，等页面稳定后截一张。
+ * 只截用户正在看的桌面版标签；等待期间换了页面、切走了标签就不截
+ */
+const snapshotting = new Set();
+function snapshotHome(wc, { device, shown }) {
+  const url = wc.getURL();
+  const m = /^tape:\/\/([^/?#]+)\/(?:index\.html)?$/i.exec(url);
+  const host = m && m[1].toLowerCase();
+  const s = host && directory.entry(host);
+  if (!s || s.logo || s.cover || device !== 'desktop' || snapshots.has(host, s.sha256) || snapshotting.has(host)) return;
+  snapshotting.add(host);
+  setTimeout(async () => {
+    try {
+      if (wc.isDestroyed() || wc.getURL() !== url || wc.isLoading() || !shown()) return;
+      const bytes = await captureCover(wc);
+      // 截图期间首页更新了，就不记到新首页名下
+      if (bytes && directory.entry(host)?.sha256 === s.sha256) {
+        snapshots.put(host, s.sha256, bytes);
+        send('snapshot', siteUrl(s.tokenId, s.cpu, '', s.area));
+      }
+    } catch { /* 截不到下次打开再试 */ } finally { snapshotting.delete(host); }
+  }, 2000);
+}
+
+/** 本地预览：用当前页面截图生成 cover.jpg 写进文件夹（文件夹里已有 logo / cover 就不写） */
+async function makeLocalCover() {
+  const t = tabs.active();
+  const root = localSites.rootOf(t?.url);
+  if (!root) return { error: { message: tr('这个本地文件夹没有在本次运行中打开，请重新选择') } };
+  const r = await localInfo(t.url);
+  if (r?.check?.card?.logo || r?.check?.card?.cover) return { error: { message: tr('文件夹里已经有 logo 或 cover 图片') } };
+  const wc = tabs.byOrigin(originOf(t.url))[0];
+  const bytes = wc && await captureCover(wc).catch(() => null);
+  if (!bytes) return { error: { message: tr('截图失败，请等页面加载完再试') } };
+  try {
+    await writeFile(join(root, 'cover.jpg'), bytes, { flag: 'wx' });
+  } catch (e) {
+    return { error: { message: e?.code === 'EEXIST' ? tr('文件夹里已经有 cover.jpg') : String(e?.message || e) } };
+  }
+  localChecks.delete(root);
+  return { ok: true, value: { path: 'cover.jpg', size: bytes.length } };
+}
+
 async function localInfo(url) {
   const root = localSites.rootOf(url);
   if (!root) return { local: true, error: tr('这个本地文件夹没有在本次运行中打开，请重新选择') };
@@ -938,6 +1004,7 @@ function createWindow() {
     onVisit: (url) => { library.visit(url); observeSite(url); },
     onNavigate: (url) => { const o = originOf(url); if (o) audit.reset(o); },
     onTitle: (url, title) => library.title(url, title),
+    onLoaded: snapshotHome,
   });
   win.on('closed', () => { tabs.closeAll(); tabs = null; win = null; uiLoaded = false; });
   uiLoaded = false;

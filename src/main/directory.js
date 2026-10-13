@@ -380,6 +380,8 @@ export function createDirectory({ chains, chain, sites, file, onChange = () => {
   return {
     refresh,
     imageFor,
+    /** 某个已收录网站的记录（键是 siteHost）；没收录返回 null */
+    entry: (host) => data.sites[host] || null,
     list: () => Object.values(data.sites).map((s) => ({ network: 'bnb', area: null, ...s, ...categoryOf(s) })),
     status,
   };

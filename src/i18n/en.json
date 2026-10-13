@@ -689,5 +689,10 @@
  "手机尺寸": "Phone size",
  "切换网页尺寸：电脑、平板、手机": "Switch page size: desktop, tablet, phone",
  "当前是手机尺寸，点击切换": "Phone size. Click to switch",
- "当前是平板尺寸，点击切换": "Tablet size. Click to switch"
+ "当前是平板尺寸，点击切换": "Tablet size. Click to switch",
+ "文件夹里已经有 logo 或 cover 图片": "The folder already has a logo or cover image",
+ "截图失败，请等页面加载完再试": "Couldn't take a screenshot. Wait for the page to finish loading and try again",
+ "文件夹里已经有 cover.jpg": "The folder already has cover.jpg",
+ "用当前页面截图生成 cover.jpg": "Make cover.jpg from a screenshot of this page",
+ "已生成 {path}（{size}），会随网站一起上传": "Created {path} ({size}). It will be uploaded with the site"
 }
