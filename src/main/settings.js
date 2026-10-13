@@ -4,6 +4,7 @@
 //   bridgePort   钱包桥接页面端口：固定下来，钱包扩展对 127.0.0.1:<端口> 的授权才能一直有效
 //   bridgeToken  桥接页面口令：只有带口令的页面才能接入
 //   permissions  已授权读取钱包地址的网站 { origin: 授权时间 }
+//   devices      每个网站选的设备尺寸 { origin: 'tablet' | 'phone' }，电脑尺寸不记
 //   signBaselines 每个网站上次同意签名时已加载的链上文件 { origin: { path: sha256 } }（page-audit.js 用）
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';

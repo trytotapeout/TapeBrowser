@@ -149,6 +149,10 @@
     $('newtab-page').style.zoom = t && !t.url && zoom !== 100 ? String(zoom / 100) : '';
     $('zoom').hidden = zoom === 100;
     $('zoom').textContent = zoom + '%';
+    const device = t && t.url ? t.device : 'desktop';
+    $('device-btn').hidden = !(t && t.url);
+    $('device-btn').classList.toggle('on', device !== 'desktop');
+    $('device-btn').title = device === 'phone' ? tr('当前是手机尺寸，点击切换') : device === 'tablet' ? tr('当前是平板尺寸，点击切换') : tr('切换网页尺寸：电脑、平板、手机');
     const marked = Boolean(t && t.url && library.bookmarks.some((b) => b.url === t.url));
     $('bookmark').disabled = !(t && t.url);
     $('bookmark').textContent = marked ? '★' : '☆';
@@ -1774,6 +1778,10 @@
   $('find-prev').addEventListener('click', () => runFind(true, false));
   $('find-close').addEventListener('click', () => setFind(false));
   $('zoom').addEventListener('click', () => tb.invoke('zoom', 0));
+  $('device-btn').addEventListener('click', () => {
+    const r = $('device-btn').getBoundingClientRect();
+    tb.invoke('deviceMenu', { x: r.left, y: r.bottom + 4 });
+  });
   $('bookmark').addEventListener('click', () => tb.invoke('toggleBookmark'));
   $('clear-history').addEventListener('click', () => tb.invoke('clearHistory'));
   $('site-btn').addEventListener('click', () => setSite(!siteOpen));

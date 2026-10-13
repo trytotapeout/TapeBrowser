@@ -15,6 +15,7 @@ import { audit as safetyAudit } from './safety.js';
 import { createBridgeServer } from './bridge-server.js';
 import { createProviderHost, providerError, homeNetwork } from './provider-host.js';
 import { createTabs, originOf, ALLOWED } from './tabs.js';
+import { isDevice } from './device.js';
 import { createLibrary } from './library.js';
 import { createContentStore } from './content-store.js';
 import { createDirectory, QUICK_CHECK_EVERY } from './directory.js';
@@ -373,6 +374,25 @@ function registerIpc() {
   ui('find', (text, opts) => tabs.find(String(text || ''), { forward: opts?.forward !== false, again: Boolean(opts?.again) }));
   ui('stopFind', () => tabs.stopFind());
   ui('zoom', (dir) => tabs.zoom(Math.sign(Number(dir) || 0)));
+  // 设备尺寸菜单：原生菜单才能盖在网页上面；at 是按钮左下角在窗口里的位置
+  ui('deviceMenu', (at) => {
+    const t = tabs.active();
+    if (!t?.url) return;
+    const pick = (device) => {
+      tabs.setDevice(device);
+      const o = originOf(t.url);
+      if (!o) return;
+      const all = { ...(settings.get('devices') || {}) };
+      if (device === 'desktop') delete all[o]; else all[o] = device;
+      settings.set('devices', all);
+    };
+    const item = (device, label) => ({ label, type: 'radio', checked: t.device === device, click: () => pick(device) });
+    Menu.buildFromTemplate([
+      item('desktop', tr('电脑尺寸')),
+      item('tablet', tr('平板尺寸')),
+      item('phone', tr('手机尺寸')),
+    ]).popup({ window: win, x: Math.round(Number(at?.x) || 0), y: Math.round(Number(at?.y) || 0) });
+  });
   ui('toggleBookmark', () => toggleBookmark());
   ui('removeBookmark', (url) => library.removeBookmark(String(url)));
   ui('removeHistory', (url) => library.removeHistory(String(url)));
@@ -914,6 +934,7 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   tabs = createTabs({
     win, session: tabSession, preload: join(SRC, 'preload/tab.cjs'), send, notify, tr: (...a) => tr(...a),
+    deviceOf: (url) => { const d = (settings.get('devices') || {})[originOf(url)]; return isDevice(d) ? d : 'desktop'; },
     onVisit: (url) => { library.visit(url); observeSite(url); },
     onNavigate: (url) => { const o = originOf(url); if (o) audit.reset(o); },
     onTitle: (url, title) => library.title(url, title),

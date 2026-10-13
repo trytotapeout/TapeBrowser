@@ -2,6 +2,7 @@
 // 空白标签（新标签页）不建 view，由外壳界面画新标签页；它的缩放记在 blankZoom，外壳界面只缩放新标签页区块。
 
 import { WebContentsView, shell, Menu, clipboard } from 'electron';
+import { deviceBounds, emulationOf, isDevice } from './device.js';
 
 export const ALLOWED = /^(https?|tape):/i;
 
@@ -20,8 +21,9 @@ const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.
 // onVisit(url)         主框架成功打开一个页面（HTTP 2xx/3xx）
 // onTitle(url, title)  页面标题更新
 // onNavigate(url)      主框架开始加载一个新页面（刷新也算）
+// deviceOf(url)       打开这个网址时用的设备尺寸（按网站记住的选择）
 // tr(text, vars) 界面文字翻译（见 i18n/i18n.cjs）
-export function createTabs({ win, session, preload, send, notify, tr = (s) => s, onVisit = () => {}, onTitle = () => {}, onNavigate = () => {} }) {
+export function createTabs({ win, session, preload, send, notify, tr = (s) => s, deviceOf = () => 'desktop', onVisit = () => {}, onTitle = () => {}, onNavigate = () => {}, onLoaded = () => {} }) {
   const tabs = new Map();
   const order = [];
   let activeId = null;
@@ -41,6 +43,7 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
     canGoBack: Boolean(t.view?.webContents.navigationHistory.canGoBack()),
     canGoForward: Boolean(t.view?.webContents.navigationHistory.canGoForward()),
     zoom: Math.round((t.view ? t.view.webContents.getZoomFactor() : t.blankZoom || 1) * 100),
+    device: t.device,
   });
 
   function push() {
@@ -52,7 +55,16 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
       if (!t.view) continue;
       const show = t.id === activeId && !overlay;
       t.view.setVisible(show);
-      if (show) t.view.setBounds(bounds);
+      if (!show) continue;
+      const b = deviceBounds(bounds, t.device);
+      t.view.setBounds(b);
+      // 尺寸或设备变了才重设仿真；跨站导航后 Chromium 会丢掉仿真，由 did-navigate 清掉 emulated 重新设
+      const key = `${t.device}:${b.width}x${b.height}`;
+      if (t.emulated === key) continue;
+      t.emulated = key;
+      const wc = t.view.webContents;
+      const em = emulationOf(t.device, b);
+      if (em) wc.enableDeviceEmulation(em); else wc.disableDeviceEmulation();
     }
   }
 
@@ -99,12 +111,19 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
     wc.on('will-navigate', guard);
     wc.on('will-redirect', guard);
     wc.on('did-start-loading', () => { t.loading = true; push(); });
-    wc.on('did-start-navigation', (e) => { if (e.isMainFrame && !e.isSameDocument) onNavigate(e.url); });
-    wc.on('did-stop-loading', () => { t.loading = false; push(); });
+    wc.on('did-start-navigation', (e) => {
+      if (!e.isMainFrame || e.isSameDocument) return;
+      onNavigate(e.url);
+      const d = deviceOf(e.url);
+      if (d !== t.device) { t.device = d; layout(); push(); }
+    });
+    wc.on('did-stop-loading', () => { t.loading = false; push(); onLoaded(wc, { device: t.device, shown: () => activeId === t.id && !overlay }); });
     wc.on('page-title-updated', (_e, title) => { t.title = title; onTitle(wc.getURL(), title); push(); });
     wc.on('page-favicon-updated', (_e, icons) => { t.favicon = icons.find((i) => /^(https?|tape|data):/.test(i)) || null; push(); });
     const onNav = (_e, url) => { t.url = url; t.favicon = t.favicon && originOf(t.favicon) === originOf(url) ? t.favicon : null; push(); };
     wc.on('did-navigate', (e, url, code) => {
+      t.emulated = null;
+      layout();
       onNav(e, url);
       // 不存在的电路、404 之类的错误页不记入历史
       if (code >= 200 && code < 400) onVisit(url);
@@ -122,7 +141,7 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
   }
 
   function open(url = null, { background = false } = {}) {
-    const t = { id: ++seq, url: null, title: '', loading: false, favicon: null, view: null };
+    const t = { id: ++seq, url: null, title: '', loading: false, favicon: null, view: null, device: 'desktop', emulated: null };
     tabs.set(t.id, t);
     // 连续在后台打开的标签按打开顺序排在当前标签后面
     const anchor = background && lastBackground && order.includes(lastBackground) ? lastBackground : activeId;
@@ -140,6 +159,7 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
     if (!t || !ALLOWED.test(url)) return;
     t.url = url;
     t.title = '';
+    t.device = deviceOf(url);
     ensureView(t).webContents.loadURL(url).catch(() => { /* 失败由 did-fail-load 提示 */ });
     layout();
     push();
@@ -205,8 +225,18 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
     push();
   }
 
+  /** 切换当前标签的设备尺寸（电脑/平板/手机） */
+  function setDevice(device) {
+    const t = active();
+    if (!t?.view || !isDevice(device)) return;
+    t.device = device;
+    layout();
+    push();
+  }
+
   return {
     open,
+    setDevice,
     navigate,
     close,
     activate,
