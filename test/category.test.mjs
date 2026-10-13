@@ -10,6 +10,9 @@ test('按标题关键词推测，标题命中带上依据', () => {
   assert.equal(classify('TapeSign · 链上公证处').category, 'tool');
   assert.equal(classify('TapeOut On-Chain Chat').category, 'social');
   assert.equal(classify('TapeNow Gateway • Base').category, 'infra');
+  assert.equal(classify('Jane · Illustration Portfolio').category, 'art');
+  assert.equal(classify('设计师作品集').category, 'art');
+  assert.equal(classify('NFT Gallery').category, 'finance', 'NFT 归金融');
   assert.deepEqual(classify('BEM 消消乐').why, ['标题「消消乐」']);
 });
 
@@ -35,6 +38,7 @@ test('认不出来归其他；结果一定在分类列表里', () => {
 
 test('declaredCategory：只认分类列表里的值，大小写和空格不敏感', () => {
   assert.equal(declaredCategory({ category: ' Game ' }), 'game');
+  assert.equal(declaredCategory({ category: 'art' }), 'art');
   assert.equal(declaredCategory({ category: 'casino' }), null);
   assert.equal(declaredCategory({ category: 3 }), null);
   assert.equal(declaredCategory(null), null);

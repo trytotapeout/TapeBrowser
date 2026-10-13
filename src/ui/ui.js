@@ -60,7 +60,7 @@
   const myAccount = () => (wallet.ready && wallet.account ? wallet.account.toLowerCase() : '');
   const isMine = (s) => Boolean(myAccount()) && (s.owner || '').toLowerCase() === myAccount();
   // 分类的显示名，顺序就是筛选按钮的顺序
-  const CATS = { game: tr('游戏'), finance: tr('金融'), tool: tr('工具'), social: tr('社交与内容'), infra: tr('生态'), other: tr('其他') };
+  const CATS = { game: tr('游戏'), finance: tr('金融'), tool: tr('工具'), social: tr('社交与内容'), art: tr('艺术'), infra: tr('生态'), other: tr('其他') };
   // DeWEB 应用、新上线的显示方式：cards | list，记在本机
   let dirView = localStorage.getItem('dirView') === 'list' ? 'list' : 'cards';
   let noticeTimer = null;

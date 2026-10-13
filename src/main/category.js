@@ -6,7 +6,7 @@
 //   3. 最高分不够（MIN_SCORE）就归「其他」，不硬猜
 // 结果带上命中的依据（why），界面上标「推测」，鼠标移上去能看到为什么
 
-export const CATEGORIES = ['game', 'finance', 'tool', 'social', 'infra', 'other'];
+export const CATEGORIES = ['game', 'finance', 'tool', 'social', 'art', 'infra', 'other'];
 const MIN_SCORE = 2;
 
 // 标题和描述里的关键词：[正则, 分数]。标题命中的分数翻倍（见 classify）
@@ -18,7 +18,7 @@ const WORDS = {
   ],
   finance: [
     [/借贷|抵押|质押|挖矿|矿机|收益|复利|理财|支付|兑换|流动性|交易所|做市|租赁|铸币|铸卡|销毁|看板|行情|利息|金库|美股|股票|对赌|发财|一路发|卡片|会员卡/, 3],
-    [/\b(defi|swap|lend|lending|borrow|stake|staking|mining|mint|yield|liquidity|liquid|vault|pay|upay|payment|wrapped|token|tax|fair[- ]launch|dex|amm|farm|card|cards|acquire|marketplace|moon)\b/i, 3],
+    [/\b(defi|swap|lend|lending|borrow|stake|staking|mining|mint|yield|liquidity|liquid|vault|pay|upay|payment|wrapped|token|tax|fair[- ]launch|dex|amm|farm|card|cards|acquire|marketplace|moon|nft|nfts)\b/i, 3],
     [/价格|余额|\b(price|apy|apr|tvl|balance)\b/i, 1],
   ],
   tool: [
@@ -26,9 +26,14 @@ const WORDS = {
     [/\b(wallet|tool|tools|calculator|generator|editor|converter|sign|notary|authenticator|encrypt|domain|domains|builder|id|control room|work)\b/i, 3],
   ],
   social: [
-    [/聊天|社区|论坛|留言|日报|博客|主页|个人|设计师|伴学|粉丝|动态|文章|日记|作品集|小镇/, 3],
-    [/\b(chat|qq|community|forum|blog|daily|news|fans|portfolio|profile|social|diary)\b/i, 3],
+    [/聊天|社区|论坛|留言|日报|博客|主页|个人|伴学|粉丝|动态|文章|日记|小镇/, 3],
+    [/\b(chat|qq|community|forum|blog|daily|news|fans|profile|social|diary)\b/i, 3],
     [/mmlink\.me|linktr|个人网站/i, 3],
+  ],
+  // NFT 多半是铸造和交易，归金融（nft 在 finance 里）；分数相同时排在前面的分类优先，金融在艺术前面
+  art: [
+    [/艺术|美术|绘画|插画|画廊|画家|设计师|作品集|摄影|展览|书法|雕塑|音乐|诗歌/, 3],
+    [/\b(art|arts|artist|artists|artwork|gallery|painting|illustration|photography|portfolio|exhibition|museum|music|poetry)\b/i, 3],
   ],
   infra: [
     [/网关|内核|容器|电路|处理器|校验|协议|节点|浏览器|官网|概览|运行时/, 2],
