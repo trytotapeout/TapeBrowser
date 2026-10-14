@@ -30,6 +30,8 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
   let seq = 0;
   let bounds = { x: 0, y: 0, width: 0, height: 0 };
   let overlay = false;
+  // 外壳画的页面（帮助、设置、发布）盖在标签上面，有自己的缩放比例，不改下面被挡住的网站
+  let overlayZoom = 1;
   let lastBackground = null;
   // 正在页内查找的标签
   let findId = null;
@@ -47,7 +49,7 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
   });
 
   function push() {
-    send('tabs', { tabs: order.map((id) => snapshot(tabs.get(id))), activeId });
+    send('tabs', { tabs: order.map((id) => snapshot(tabs.get(id))), activeId, pageZoom: Math.round(overlayZoom * 100) });
   }
 
   function layout() {
@@ -211,15 +213,24 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
     if (wc && !wc.isDestroyed()) wc.stopFindInPage('clearSelection');
   }
 
-  /** dir: 1 放大，-1 缩小，0 恢复 100% */
+  /** 从 cur 往 dir 方向走一档：1 放大，-1 缩小，0 恢复 100% */
+  function nextZoom(cur, dir) {
+    if (dir > 0) return ZOOM_STEPS.find((z) => z > cur + 0.001) ?? ZOOM_STEPS.at(-1);
+    if (dir < 0) return [...ZOOM_STEPS].reverse().find((z) => z < cur - 0.001) ?? ZOOM_STEPS[0];
+    return 1;
+  }
+
+  /** dir: 1 放大，-1 缩小，0 恢复 100%。外壳页面打开时缩放外壳页面，不缩放下面的标签 */
   function zoom(dir, id = activeId) {
+    if (overlay && id === activeId) {
+      overlayZoom = nextZoom(overlayZoom, dir);
+      push();
+      return;
+    }
     const t = tabs.get(id);
     if (!t) return;
     const wc = wcOf(id);
-    const cur = wc ? wc.getZoomFactor() : t.blankZoom || 1;
-    let f = 1;
-    if (dir > 0) f = ZOOM_STEPS.find((z) => z > cur + 0.001) ?? ZOOM_STEPS.at(-1);
-    else if (dir < 0) f = [...ZOOM_STEPS].reverse().find((z) => z < cur - 0.001) ?? ZOOM_STEPS[0];
+    const f = nextZoom(wc ? wc.getZoomFactor() : t.blankZoom || 1, dir);
     // 新标签页：只记比例，外壳界面按它缩放新标签页区块；打开网站后网站从 100% 开始
     if (wc) wc.setZoomFactor(f); else t.blankZoom = f;
     push();
@@ -263,7 +274,7 @@ export function createTabs({ win, session, preload, send, notify, tr = (s) => s,
       order.length = 0;
     },
     setBounds(b) { bounds = b; layout(); },
-    setOverlay(on) { overlay = Boolean(on); layout(); },
+    setOverlay(on) { overlay = Boolean(on); layout(); push(); },
     /** 某个 webContents 是不是我们的标签 */
     owns: (wc) => [...tabs.values()].some((t) => t.view?.webContents === wc),
     /** 当前停在某个 origin 上的所有标签的 webContents */

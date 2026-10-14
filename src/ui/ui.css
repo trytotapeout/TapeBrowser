@@ -70,6 +70,7 @@ body.mac #tabstrip { padding-left: 80px; }
 #newtab-page .hero-text { flex: 1; min-width: 0; }
 #newtab-page .hero h1 { font-size: 24px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
 #newtab-page .hero p { max-width: 760px; margin: 0; font-size: 13px; }
+#newtab-page .hero p + p { margin-top: 4px; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .hero-actions button { border: 1px solid var(--line); border-radius: 6px; background: var(--tab); color: var(--fg); padding: 6px 14px; font-size: 13px; cursor: pointer; }
 .hero-actions button:hover { border-color: var(--accent); }
@@ -288,7 +289,12 @@ progress.pub-bar::-webkit-progress-value { background: var(--accent); border-rad
 .ad .ad-tag { color: var(--muted); font-size: 11px; }
 .ad.placeholder { border-style: dashed; background: transparent; }
 /* 首页横幅：图片 4:1（建议 1200×300），文字在图片下方 */
-#ad-home { width: 480px; max-width: 45%; margin-top: 2px; }
+#ad-home { width: 360px; max-width: 36%; margin-top: 2px; }
+/* 首页横幅的文字压成两行：标题和「广告」一行，介绍只留一行，卡片不要比左边的标题区高太多 */
+#ad-home .ad-text { padding: 5px 10px 6px; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+#ad-home .ad-title { flex: 0 1 auto; min-width: 0; font-size: 12px; }
+#ad-home .ad-tag { margin-left: auto; }
+#ad-home .ad-desc { order: 1; flex-basis: 100%; -webkit-line-clamp: 1; font-size: 11px; }
 #ad-home button { flex-direction: column; }
 #ad-home img { width: 100%; aspect-ratio: 4 / 1; }
 /* 信息面板竖条：图片 4:3（建议 800×600） */
@@ -297,3 +303,16 @@ progress.pub-bar::-webkit-progress-value { background: var(--accent); border-rad
 #ad-panel img { width: 100%; aspect-ratio: 4 / 3; }
 #ad-panel .ad-desc { -webkit-line-clamp: 4; }
 @media (max-width: 900px) { #ad-home, #ad-panel { display: none; } }
+
+/* 卡片上叠按钮（分享到 X）要以卡片定位 */
+.card { position: relative; }
+/* 「分享到 X」：卡片上叠在图片区右上角，列表行里跟在行尾；都是鼠标移上去或键盘聚焦时才显示 */
+.card .share { position: absolute; top: 8px; right: 8px; z-index: 3; border: 0; border-radius: 6px; background: rgba(28, 27, 25, .72); color: #fff;
+  padding: 3px 9px; font-size: 12px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.card:hover .share, .card:focus-within .share { opacity: 1; pointer-events: auto; }
+.card .share:hover { background: rgba(28, 27, 25, .9); }
+.card .share:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.links .share { flex: none; border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 4px; font-size: 12px; opacity: 0; }
+.links li:hover .share, .links .share:focus-visible { opacity: 1; }
+.links .share:hover { background: var(--hover, var(--line)); color: var(--fg); }
+@media (prefers-reduced-motion: reduce) { .card .share { transition: none; } }

@@ -367,7 +367,8 @@
  "或": "or",
  "分享链接": "Share link",
  "要发到社交平台或聊天里，用网站信息面板里的「分享链接」：它是一个普通的 https 链接，装了 TapeBrowser 的人点开会直接打开网站，没装的会看到下载页。": "To post on social media or in chats, use the Share link in the site info panel. It's a regular https link: people with TapeBrowser go straight to the site, and everyone else sees a download page.",
- "链上的 DeWEB 应用，直接从链上读取并校验。在地址栏输入电路编号、钱包地址或网址。": "DeWEB apps that live on-chain, read and verified straight from the chain. Type a circuit number, wallet address or URL in the address bar.",
+ "DeWEB 应用存放在链上的去中心化存储里，无需服务器和域名，永不消失。打开时直接从链上读取并校验。": "DeWEB apps live in decentralized on-chain storage: no servers, no domains, and they never disappear. They are read and verified straight from the chain when you open them.",
+ "在地址栏输入电路编号、钱包地址或网址。": "Type a circuit number, wallet address or URL in the address bar.",
  "分类": "Categories",
  "全部": "All",
  "我的": "Mine",
@@ -696,5 +697,11 @@
  "截图失败，请等页面加载完再试": "Couldn't take a screenshot. Wait for the page to finish loading and try again",
  "文件夹里已经有 cover.jpg": "The folder already has cover.jpg",
  "用当前页面截图生成 cover.jpg": "Make cover.jpg from a screenshot of this page",
- "已生成 {path}（{size}），会随网站一起上传": "Created {path} ({size}). It will be uploaded with the site"
+ "已生成 {path}（{size}），会随网站一起上传": "Created {path} ({size}). It will be uploaded with the site",
+ "分享到 X": "Share on X",
+ "把 {title} 分享到 X": "Share {title} on X",
+ "「{title}」是一个链上的 DeWEB 应用。": "“{title}” is an onchain DeWEB app.",
+ "一个链上的 DeWEB 应用。": "An onchain DeWEB app.",
+ "用 TapeBrowser 打开：{link}": "Open in TapeBrowser: {link}",
+ "在浏览器里访问：{web}": "Open in your browser: {web}"
 }

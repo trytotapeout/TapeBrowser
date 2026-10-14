@@ -53,6 +53,8 @@
   let editing = false;
   let settingsOpen = false;
   let helpOpen = false;
+  // 外壳画的页面默认比网页大一点，字更好读
+  const PAGE_SCALE = 1.1;
   // 分类筛选：'' 是全部
   let dirCat = '';
   // 「我的」：持有人是当前连接的钱包的网站。各链地址相同，所以不分链比对
@@ -144,9 +146,15 @@
     $('help-page').hidden = !helpOpen;
     $('publish-page').hidden = !pub.open;
     $('quickstart').hidden = library.history.length > 0;
-    const zoom = t ? t.zoom : 100;
+    // 帮助、设置、发布页盖在标签上面，用外壳自己的缩放比例；没打开时显示当前标签的比例
+    const pageOpen = settingsOpen || helpOpen || pub.open;
+    const pageZoom = state.pageZoom || 100;
+    // 外壳画的页面（新标签页、帮助、设置、发布）默认放大到 PAGE_SCALE；
+    // 用户的缩放比例乘在它上面，所以显示的百分比和 ⌘0 仍以这个默认大小为 100%
+    for (const id of ['settings-page', 'help-page', 'publish-page']) $(id).style.zoom = String(PAGE_SCALE * pageZoom / 100);
+    const zoom = pageOpen ? pageZoom : t ? t.zoom : 100;
     // 新标签页画在外壳界面里，只缩放这一块，标签栏和地址栏不变
-    $('newtab-page').style.zoom = t && !t.url && zoom !== 100 ? String(zoom / 100) : '';
+    $('newtab-page').style.zoom = String(PAGE_SCALE * (!pageOpen && t && !t.url ? zoom : 100) / 100);
     $('zoom').hidden = zoom === 100;
     $('zoom').textContent = zoom + '%';
     const device = t && t.url ? t.device : 'desktop';
@@ -260,7 +268,13 @@
     row(tr('链'), info.network || 'BNB Chain');
     // https 分享链接：没装 TapeBrowser 的人打开会看到下载按钮，装了的直接唤起
     const share = shareUrl(info, active() && active().url);
-    if (share) row(tr('分享链接'), share, share);
+    if (share) {
+      const dd = row(tr('分享链接'), share, share);
+      const x = Object.assign(document.createElement('button'), { type: 'button', className: 'link', textContent: tr('分享到 X') });
+      const m = /^tape:\/\/[^/?#]+(\/[^?#]*)?/i.exec((active() && active().url) || '');
+      x.addEventListener('click', () => tb.invoke('shareX', info.label, (active() && active().title) || '', m && m[1] || ''));
+      dd.append(x);
+    }
     row(tr('电路'), tr('#{tokenId}，处理器 {cpu}{0}', { tokenId: info.tokenId, cpu: info.cpu, 0: info.area ? tr('（区号 {area}）', { area: info.area }) : '' }));
     row(tr('持有人'), shortHex(info.owner), info.owner);
     if (info.owner) ownerLink(info.owner);
@@ -843,22 +857,38 @@
     a.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); tb.invoke('openUrl', url, { background: true }); } });
   }
 
-  function dirCard(it, date) {
-    const li = Object.assign(document.createElement('li'), { className: 'card' });
-    const net = it.network || 'bnb';
-    const a = Object.assign(document.createElement('a'), { href: it.url, title: tr('{url}\n持有人 {owner}', { url: it.url, owner: it.owner }) });
-    const thumb = Object.assign(document.createElement('div'), { className: 'thumb' + (it.title ? '' : ' untitled') });
+  /** 网站的图片区：占位底色加首字，再按需读取 cover / logo / 本机截图 */
+  function fillThumb(thumb, it) {
+    thumb.className = 'thumb' + (it.title ? '' : ' untitled');
+    thumb.textContent = '';
     // 占位底色：按网站地址算一个固定的色相，只取很淡的一层，同一个网站每次都一样
     thumb.style.setProperty('--hue', hueOf(it.url));
     // 首字取自标题（按字符，不会切开 emoji）；没有标题显示电路编号
     const first = it.title ? Array.from(it.title.trim())[0] || '#' : '#' + it.tokenId;
     thumb.append(Object.assign(document.createElement('span'), { className: 'initial', textContent: first.toUpperCase() }));
     thumb.setAttribute('aria-hidden', 'true');
-    // 站长放了 cover（铺满）或 logo（居中）就显示；都没有就用本机截过的首页截图。滚动到附近才读取；读不到保留占位
+    // 站长放了 cover（铺满）或 logo（居中）就显示；都没有就用本机截过的首页截图。读不到保留占位
     const pic = it.cover ? ['cover', it.cover] : it.logo ? ['logo', it.logo] : ['snapshot', { sha256: it.sha256 }];
     thumb.dataset.url = it.url;
     thumb.dataset.kind = pic[0];
     thumb.dataset.sha = pic[1].sha256;
+    return thumb;
+  }
+
+  /** 「分享到 X」按钮：所有网站都有。发帖链接由主进程拼，打开系统浏览器 */
+  function shareButton(it, className) {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className, textContent: tr('分享到 X') });
+    b.setAttribute('aria-label', tr('把 {title} 分享到 X', { title: it.title || it.label }));
+    b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tb.invoke('shareX', it.label, it.title || ''); });
+    return b;
+  }
+
+  function dirCard(it, date) {
+    const li = Object.assign(document.createElement('li'), { className: 'card' });
+    const net = it.network || 'bnb';
+    const a = Object.assign(document.createElement('a'), { href: it.url, title: tr('{url}\n持有人 {owner}', { url: it.url, owner: it.owner }) });
+    // 滚动到附近才读取图片
+    const thumb = fillThumb(document.createElement('div'), it);
     thumbObserver.observe(thumb);
     const body = Object.assign(document.createElement('div'), { className: 'body' });
     const meta = Object.assign(document.createElement('div'), { className: 'meta' });
@@ -878,6 +908,8 @@
     a.append(thumb, body);
     openOnClick(a, it.url);
     li.append(a);
+    // 叠在图片区右上角
+    li.append(shareButton(it, 'share'));
     return li;
   }
 
@@ -894,6 +926,7 @@
     if (it.tapecode) a.querySelector('.net').after(tapecodeTag());
     openOnClick(a, it.url);
     li.append(a);
+    li.append(shareButton(it, 'share'));
     return li;
   }
 

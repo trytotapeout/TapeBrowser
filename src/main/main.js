@@ -30,6 +30,7 @@ import { formatBem } from './bem.js';
 import { NETWORKS, BSC, networkByArea, networkByKey, networkByChainId } from './config.js';
 import { createPublishService } from './publish-service.js';
 import { checkLatest, autoCheck } from './updates.js';
+import { shareLink, gatewayLink, shortTitle, xIntentUrl, HASHTAGS } from './share.js';
 import { createRemoteConfig, REFRESH_EVERY as CONFIG_REFRESH_EVERY } from './remote-config.js';
 import { createTapeCode, REFRESH_EVERY as TAPECODE_REFRESH_EVERY } from './tapecode.js';
 import { parseAds, adsView, adImage } from './ads.js';
@@ -464,6 +465,24 @@ function registerIpc() {
     const img = r?.check?.card?.[kind];
     const bytes = img && await localSites.bytesOf(root, img.path);
     return bytes ? `data:image/${img.type};base64,${Buffer.from(bytes).toString('base64')}` : null;
+  });
+  // 分享到 X：渲染进程只传网站地址和标题，发帖链接在这里拼，只会打开 x.com
+  ui('shareX', (label, title, path) => {
+    const link = shareLink(label, path);
+    if (!link) return;
+    const name = shortTitle(title);
+    // 正文里写两个链接：落地页（唤起 TapeBrowser 或下载）和官方网关（在浏览器里直接看）。
+    // 链接都写进正文、不用 X 的 url 参数，这样话题标签才能排在最后
+    const web = gatewayLink(label, path);
+    // 每个链接单独一行，后面不紧跟标点，免得 X 把标点也识别进链接
+    const text = [
+      name ? tr('「{title}」是一个链上的 DeWEB 应用。', { title: name }) : tr('一个链上的 DeWEB 应用。'),
+      tr('用 TapeBrowser 打开：{link}', { link }),
+      tr('在浏览器里访问：{web}', { web }),
+      '',
+      HASHTAGS,
+    ].join('\n');
+    shell.openExternal(xIntentUrl(text));
   });
   ui('openUrl', (url, opts) => {
     url = String(url || '');
