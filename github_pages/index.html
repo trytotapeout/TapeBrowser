@@ -1,132 +1,132 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TapeBrowser · 基于 TapeKit DeWEB 的应用浏览器</title>
-  <meta name="description" content="TapeBrowser 是基于 TapeKit DeWEB 的跨平台应用浏览器，但不仅仅是浏览器。直接从链上读取并校验 DeWEB 应用，支持 BNB Chain、X Layer 和 Base，桥接浏览器钱包扩展，不导入私钥。">
-  <link rel="icon" href="icon.png">
-  <link rel="stylesheet" href="style.css">
-  <!-- Google Analytics -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-LMQJ627ED4"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'G-LMQJ627ED4');
-  </script>
-  <script>
-    // 统计安装包下载：点击 Releases 里的安装包链接时发 download 事件，带上文件名
-    document.addEventListener('click', function (e) {
-      var a = e.target.closest('a[href*="/releases/download/"]');
-      if (a) gtag('event', 'download', { file_name: a.href.split('/').pop() });
-    });
-  </script>
-</head>
-<body>
-  <a class="skip" href="#main">跳到正文</a>
-  <header class="site">
-    <div class="wrap">
-      <a class="brand" href="#"><img src="icon.png" alt="">TapeBrowser</a>
-      <nav aria-label="页面导航">
-        <ul>
-          <li><a href="#features">DeWEB 特性</a></li>
-          <li><a href="#download">下载</a></li>
-          <li><a href="#changelog">更新日志</a></li>
-          <li><a href="https://github.com/trytotapeout/TapeBrowser">GitHub</a></li>
-          <li><a href="https://t.me/+vYYRSzWkbg40NDhl">Telegram</a></li>
-          <li><a href="https://discord.gg/7mAxeTWbH">Discord</a></li>
-        </ul>
-      </nav>
-    </div>
-  </header>
-
-  <main id="main">
-    <div class="hero">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TapeBrowser · 基于 TapeKit DeWEB 的应用浏览器</title>
+    <meta name="description" content="TapeBrowser 是基于 TapeKit DeWEB 的跨平台应用浏览器，但不仅仅是浏览器。直接从链上读取并校验 DeWEB 应用，支持 BNB Chain、X Layer 和 Base，桥接浏览器钱包扩展，不导入私钥。">
+    <link rel="icon" href="icon.png">
+    <link rel="stylesheet" href="style.css">
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-LMQJ627ED4"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-LMQJ627ED4');
+    </script>
+    <script>
+      // 统计安装包下载：点击 Releases 里的安装包链接时发 download 事件，带上文件名
+      document.addEventListener('click', function (e) {
+        var a = e.target.closest('a[href*="/releases/download/"]');
+        if (a) gtag('event', 'download', { file_name: a.href.split('/').pop() });
+      });
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main">跳到正文</a>
+    <header class="site">
       <div class="wrap">
-        <img src="icon.png" alt="TapeBrowser 图标">
-        <h1>TapeBrowser</h1>
-        <p>基于 TapeKit DeWEB 的应用浏览器，跨平台，但不仅仅是浏览器。</p>
-        <div class="cta">
-          <a class="btn primary" href="#download">下载 0.17.1</a>
-          <a class="btn" href="https://github.com/trytotapeout/TapeBrowser">查看源代码</a>
-        </div>
-        <p class="version">macOS · Windows · Linux｜GPL-3.0-or-later 开源</p>
-      </div>
-    </div>
-
-    <section id="features" aria-labelledby="features-title">
-      <div class="wrap">
-        <h2 id="features-title">DeWEB 特性</h2>
-        <p class="lead">普通浏览器做不到、只有去中心化网站才需要的能力。</p>
-        <div class="grid">
-          <div class="card"><h3>tape:// 直接读链</h3><p>网站文件存在 TapeKit 电路的链上容器里，TapeBrowser 直接从公共节点读取，不依赖任何网关服务器。</p></div>
-          <div class="card"><h3>按电路名访问</h3><p>输入 <code>4454.0</code>、<code>#4454@0</code>、<code>1.2.248</code>（X Layer）或 <code>8888.tape</code> 都能打开同一个网站。</p></div>
-          <div class="card"><h3>分享链接</h3><p>网站信息面板一键复制 https 分享链接，能发到 X、Telegram、微信。装了 TapeBrowser 的人点开直接打开网站，没装的看到下载页。</p></div>
-          <div class="card"><h3>数字串和钱包地址</h3><p>输入 <code>42460</code> 这样的数字串，自动尝试所有切分；输入钱包地址，打开它在三条链上持有的所有网站。</p></div>
-          <div class="card"><h3>三条链</h3><p>BNB Chain、X Layer（区号 2）、Base（区号 3）并行查询，各自的节点池，地址栏显示网站所在的链。</p></div>
-          <div class="card"><h3>哈希校验</h3><p>每个文件下载后都核对长度和链上记录的 SHA-256，节点或网络篡改了内容会直接拒绝显示。</p></div>
-          <div class="card"><h3>多节点交叉校验</h3><p>再找两个不同的节点核对容器和文件哈希，单个节点作恶伪造不了，不一致时按钮变红。</p></div>
-          <div class="card"><h3>持有人变更提醒</h3><p>网站换了持有人（被转手或卖掉）时，再次打开会提醒，书签和最近访问里也会标出来。</p></div>
-          <div class="card"><h3>安全体检</h3><p>一键读取网站的全部文件，在本机分析它会请你签什么、钱会流向哪里，以及有没有骗助记词、盗币工具包等作恶特征。</p></div>
-          <div class="card"><h3>本地预览和发布预检查</h3><p>打开本机文件夹，按 tape:// 的规则预览网站，上链前列出传不上去、打不开、目录里显示不好的问题和要发的交易笔数。</p></div>
-          <div class="card"><h3>发布到容器（实验）</h3><p>预览满意后一键发到自己电路的容器，没开通的顺带开通。钱包通常只确认 2 到 3 笔，之后临时钱包自动上传、核对，剩下的 Gas 退回。</p></div>
-          <div class="card"><h3>签名风险解读</h3><p>无限额授权、授权全部 NFT、离线签名授权、盲签等高危请求翻成一句话，默认按钮是「拒绝」。</p></div>
-          <div class="card"><h3>外部脚本和代码变更</h3><p>网站运行了不在链上的脚本时标出来；上次签名之后网站改过代码，签名时列出改了哪些文件。普通网页标「未校验」。</p></div>
-          <div class="card"><h3>钱包不导入私钥</h3><p>桥接系统浏览器里的钱包扩展（MetaMask 等），不依赖 WalletConnect 这类中心化中继，每次签名都先显示真实来源；链不对时一键切换。</p></div>
-          <div class="card"><h3>DeWEB 应用</h3><p>新标签页以卡片列出三条链上所有有首页的网站，显示站长的 logo 或封面，按游戏、金融、工具等分类筛选，也能按标题、编号、持有人搜索。</p></div>
-          <div class="card"><h3>BEM 价格和资产</h3><p>工具栏显示 BEM 价格和钱包在两条链上的 BEM 总数；网站信息面板显示容器里的原生币和 BEM。都直接从链上读。</p></div>
-          <div class="card"><h3>打赏</h3><p>喜欢的网站可以用钱包直接打赏 BEM 到网站的容器，只付网络 gas，打赏公开记录在链上。</p></div>
-          <div class="card"><h3>新上线</h3><p>新标签页列出最近 7 天第一次发布的网站，按首页上链时间排序，新网站一上线就能被看到。</p></div>
-          <div class="card"><h3>离线兜底</h3><p>文件按 SHA-256 缓存在本机，每次仍先查链上最新版本；读链失败时显示上次缓存的版本。</p></div>
-        </div>
-        <p class="note">TapeBrowser 能证明你看到的内容来自链上、没有被篡改，但判断不了网站作者本身有没有恶意。签名和交易前请自己核对。</p>
-      </div>
-    </section>
-
-    <section id="download" aria-labelledby="download-title">
-      <div class="wrap">
-        <h2 id="download-title">下载</h2>
-        <p class="lead">最新版本 0.17.1，发布于 2026-10-14。所有版本见 <a href="https://github.com/trytotapeout/TapeBrowser/releases">GitHub Releases</a>。</p>
-        <table class="downloads">
-          <thead><tr><th scope="col">平台</th><th scope="col">文件</th><th scope="col">下载</th></tr></thead>
-          <tbody>
-            <tr><td>macOS（Apple 芯片）</td><td><code>TapeBrowser-0.17.1-mac-arm64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.17.1/TapeBrowser-0.17.1-mac-arm64.dmg">下载（121 MB）</a></td></tr>
-            <tr><td>Windows（x64）</td><td><code>TapeBrowser-0.17.1-win-x64-setup.exe</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.17.1/TapeBrowser-0.17.1-win-x64-setup.exe">下载（106 MB）</a></td></tr>
-            <tr><td>Linux（x86_64）</td><td><code>TapeBrowser-0.17.1-linux-x86_64.AppImage</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.17.1/TapeBrowser-0.17.1-linux-x86_64.AppImage">下载（119 MB）</a></td></tr>
-          </tbody>
-        </table>
-        <div class="hint">
-          <p>每个文件的 SHA-256 见 <a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.17.1/SHA256SUMS.txt">SHA256SUMS.txt</a>。第一次打开时：</p>
+        <a class="brand" href="#"><img src="icon.png" alt="">TapeBrowser</a>
+        <nav aria-label="页面导航">
           <ul>
-            <li>macOS：安装包已经用 Apple 开发者证书签名并通过公证，拖进「应用程序」后双击就能打开。0.13.0 及更早的版本还要多一步，见<a href="#changelog">更新日志</a> 0.14.0</li>
-            <li>Windows：SmartScreen 提示时点「更多信息 → 仍要运行」</li>
-            <li>Linux：先 <code>chmod +x</code> 再运行 AppImage</li>
+            <li><a href="#features">DeWEB 特性</a></li>
+            <li><a href="#download">下载</a></li>
+            <li><a href="#changelog">更新日志</a></li>
+            <li><a href="https://github.com/trytotapeout/TapeBrowser">GitHub</a></li>
+            <li><a href="https://t.me/+vYYRSzWkbg40NDhl">Telegram</a></li>
+            <li><a href="https://discord.gg/7mAxeTWbH">Discord</a></li>
           </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="hero">
+        <div class="wrap">
+          <img src="icon.png" alt="TapeBrowser 图标">
+          <h1>TapeBrowser</h1>
+          <p>基于 TapeKit DeWEB 的应用浏览器，跨平台，但不仅仅是浏览器。</p>
+          <div class="cta">
+            <a class="btn primary" href="#download">下载 0.17.1</a>
+            <a class="btn" href="https://github.com/trytotapeout/TapeBrowser">查看源代码</a>
+          </div>
+          <p class="version">macOS · Windows · Linux｜GPL-3.0-or-later 开源</p>
         </div>
       </div>
-    </section>
 
-    <section id="changelog" class="log" aria-labelledby="changelog-title">
-      <div class="wrap">
-        <h2 id="changelog-title">更新日志</h2>
+      <section id="features" aria-labelledby="features-title">
+        <div class="wrap">
+          <h2 id="features-title">DeWEB 特性</h2>
+          <p class="lead">普通浏览器做不到、只有去中心化网站才需要的能力。</p>
+          <div class="grid">
+            <div class="card"><h3>tape:// 直接读链</h3><p>网站文件存在 TapeKit 电路的链上容器里，TapeBrowser 直接从公共节点读取，不依赖任何网关服务器。</p></div>
+            <div class="card"><h3>按电路名访问</h3><p>输入 <code>4454.0</code>、<code>#4454@0</code>、<code>1.2.248</code>（X Layer）或 <code>8888.tape</code> 都能打开同一个网站。</p></div>
+            <div class="card"><h3>分享链接</h3><p>网站信息面板一键复制 https 分享链接，能发到 X、Telegram、微信。装了 TapeBrowser 的人点开直接打开网站，没装的看到下载页。</p></div>
+            <div class="card"><h3>数字串和钱包地址</h3><p>输入 <code>42460</code> 这样的数字串，自动尝试所有切分；输入钱包地址，打开它在三条链上持有的所有网站。</p></div>
+            <div class="card"><h3>三条链</h3><p>BNB Chain、X Layer（区号 2）、Base（区号 3）并行查询，各自的节点池，地址栏显示网站所在的链。</p></div>
+            <div class="card"><h3>哈希校验</h3><p>每个文件下载后都核对长度和链上记录的 SHA-256，节点或网络篡改了内容会直接拒绝显示。</p></div>
+            <div class="card"><h3>多节点交叉校验</h3><p>再找两个不同的节点核对容器和文件哈希，单个节点作恶伪造不了，不一致时按钮变红。</p></div>
+            <div class="card"><h3>持有人变更提醒</h3><p>网站换了持有人（被转手或卖掉）时，再次打开会提醒，书签和最近访问里也会标出来。</p></div>
+            <div class="card"><h3>安全体检</h3><p>一键读取网站的全部文件，在本机分析它会请你签什么、钱会流向哪里，以及有没有骗助记词、盗币工具包等作恶特征。</p></div>
+            <div class="card"><h3>本地预览和发布预检查</h3><p>打开本机文件夹，按 tape:// 的规则预览网站，上链前列出传不上去、打不开、目录里显示不好的问题和要发的交易笔数。</p></div>
+            <div class="card"><h3>发布到容器（实验）</h3><p>预览满意后一键发到自己电路的容器，没开通的顺带开通。钱包通常只确认 2 到 3 笔，之后临时钱包自动上传、核对，剩下的 Gas 退回。</p></div>
+            <div class="card"><h3>签名风险解读</h3><p>无限额授权、授权全部 NFT、离线签名授权、盲签等高危请求翻成一句话，默认按钮是「拒绝」。</p></div>
+            <div class="card"><h3>外部脚本和代码变更</h3><p>网站运行了不在链上的脚本时标出来；上次签名之后网站改过代码，签名时列出改了哪些文件。普通网页标「未校验」。</p></div>
+            <div class="card"><h3>钱包不导入私钥</h3><p>桥接系统浏览器里的钱包扩展（MetaMask 等），不依赖 WalletConnect 这类中心化中继，每次签名都先显示真实来源；链不对时一键切换。</p></div>
+            <div class="card"><h3>DeWEB 应用</h3><p>新标签页以卡片列出三条链上所有有首页的网站，显示站长的 logo 或封面，按游戏、金融、工具等分类筛选，也能按标题、编号、持有人搜索。</p></div>
+            <div class="card"><h3>BEM 价格和资产</h3><p>工具栏显示 BEM 价格和钱包在两条链上的 BEM 总数；网站信息面板显示容器里的原生币和 BEM。都直接从链上读。</p></div>
+            <div class="card"><h3>打赏</h3><p>喜欢的网站可以用钱包直接打赏 BEM 到网站的容器，只付网络 gas，打赏公开记录在链上。</p></div>
+            <div class="card"><h3>新上线</h3><p>新标签页列出最近 7 天第一次发布的网站，按首页上链时间排序，新网站一上线就能被看到。</p></div>
+            <div class="card"><h3>离线兜底</h3><p>文件按 SHA-256 缓存在本机，每次仍先查链上最新版本；读链失败时显示上次缓存的版本。</p></div>
+          </div>
+          <p class="note">TapeBrowser 能证明你看到的内容来自链上、没有被篡改，但判断不了网站作者本身有没有恶意。签名和交易前请自己核对。</p>
+        </div>
+      </section>
 
-        <h3>0.17.1 <span class="date">2026-10-14</span></h3>
-        <ul>
-          <li>分享到 X：目录卡片、列表和网站信息面板里可以把网站分享到 X。推文里有落地页和 TapeKit 官方网关两个链接，最后带上 #tapeout #tapekit #bem</li>
-          <li>缩放：帮助、设置、发布页可以用 ⌘+、⌘-、⌘0 缩放，不再缩放被挡住的网站。新标签页和这些页面默认显示为 110%</li>
-          <li>新标签页：介绍 DeWEB 应用的文字放到发布按钮前面；首页的广告卡片变小</li>
-        </ul>
-        <h3>0.17.0 <span class="date">2026-10-13</span></h3>
-        <ul>
-          <li>网页尺寸：书签星标旁的按钮可以把网页切成平板或手机尺寸，居中显示并模拟对应的屏幕，适合只做了手机版的网站。每个网站记住各自的选择</li>
-          <li>快捷打赏：电路网站的刷新按钮旁边多了打赏按钮，一次打赏 0.01 BEM 给当前网站，确认金额后再到钱包确认</li>
-          <li>打开文件夹预览：刷新按钮旁边和新标签页都能直接打开本地文件夹预览；新标签页也加了「上传发布应用」按钮，「发布到容器」改名为「上传发布应用」</li>
-          <li>DeWEB 应用目录：连上钱包后可以用「我的」只看自己持有的网站；新增「艺术」分类（<code>deweb.json</code> 里写 <code>art</code>），NFT 网站算金融</li>
-          <li>卡片封面：没有 logo 和 cover 的网站，打开过首页后用本机截图当卡片封面（截图只存在本机）。本地预览的预检查面板可以用页面截图生成 <code>cover.jpg</code>，随网站一起上传</li>
-        </ul>
-        <details class="older-mac">
-          <summary>0.13.0 及更早的版本怎么打开</summary>
+      <section id="download" aria-labelledby="download-title">
+        <div class="wrap">
+          <h2 id="download-title">下载</h2>
+          <p class="lead">最新版本 0.17.1，发布于 2026-10-14。所有版本见 <a href="https://github.com/trytotapeout/TapeBrowser/releases">GitHub Releases</a>。</p>
+          <table class="downloads">
+            <thead><tr><th scope="col">平台</th><th scope="col">文件</th><th scope="col">下载</th></tr></thead>
+            <tbody>
+              <tr><td>macOS（Apple 芯片）</td><td><code>TapeBrowser-0.17.1-mac-arm64.dmg</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.17.1/TapeBrowser-0.17.1-mac-arm64.dmg">下载（121 MB）</a></td></tr>
+              <tr><td>Windows（x64）</td><td><code>TapeBrowser-0.17.1-win-x64-setup.exe</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.17.1/TapeBrowser-0.17.1-win-x64-setup.exe">下载（106 MB）</a></td></tr>
+              <tr><td>Linux（x86_64）</td><td><code>TapeBrowser-0.17.1-linux-x86_64.AppImage</code></td><td><a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.17.1/TapeBrowser-0.17.1-linux-x86_64.AppImage">下载（119 MB）</a></td></tr>
+            </tbody>
+          </table>
+          <div class="hint">
+            <p>每个文件的 SHA-256 见 <a href="https://github.com/trytotapeout/TapeBrowser/releases/download/v0.17.1/SHA256SUMS.txt">SHA256SUMS.txt</a>。第一次打开时：</p>
+            <ul>
+              <li>macOS：安装包已经用 Apple 开发者证书签名并通过公证，拖进「应用程序」后双击就能打开。0.13.0 及更早的版本还要多一步，见<a href="#changelog">更新日志</a> 0.14.0</li>
+              <li>Windows：SmartScreen 提示时点「更多信息 → 仍要运行」</li>
+              <li>Linux：先 <code>chmod +x</code> 再运行 AppImage</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="changelog" class="log" aria-labelledby="changelog-title">
+        <div class="wrap">
+          <h2 id="changelog-title">更新日志</h2>
+
+          <h3>0.17.1 <span class="date">2026-10-14</span></h3>
+          <ul>
+            <li>分享到 X：目录卡片、列表和网站信息面板里可以把网站分享到 X。推文里有落地页和 TapeKit 官方网关两个链接，最后带上 #tapeout #tapekit #bem</li>
+            <li>缩放：帮助、设置、发布页可以用 ⌘+、⌘-、⌘0 缩放，不再缩放被挡住的网站。新标签页和这些页面默认显示为 110%</li>
+            <li>新标签页：介绍 DeWEB 应用的文字放到发布按钮前面；首页的广告卡片变小</li>
+          </ul>
+          <h3>0.17.0 <span class="date">2026-10-13</span></h3>
+          <ul>
+            <li>网页尺寸：书签星标旁的按钮可以把网页切成平板或手机尺寸，居中显示并模拟对应的屏幕，适合只做了手机版的网站。每个网站记住各自的选择</li>
+            <li>快捷打赏：电路网站的刷新按钮旁边多了打赏按钮，一次打赏 0.01 BEM 给当前网站，确认金额后再到钱包确认</li>
+            <li>打开文件夹预览：刷新按钮旁边和新标签页都能直接打开本地文件夹预览；新标签页也加了「上传发布应用」按钮，「发布到容器」改名为「上传发布应用」</li>
+            <li>DeWEB 应用目录：连上钱包后可以用「我的」只看自己持有的网站；新增「艺术」分类（<code>deweb.json</code> 里写 <code>art</code>），NFT 网站算金融</li>
+            <li>卡片封面：没有 logo 和 cover 的网站，打开过首页后用本机截图当卡片封面（截图只存在本机）。本地预览的预检查面板可以用页面截图生成 <code>cover.jpg</code>，随网站一起上传</li>
+          </ul>
+          <details class="older-mac">
+            <summary>0.13.0 及更早的版本怎么打开</summary>
             <p>0.13.0 及更早的版本第一次打开时：</p>
             <ol class="steps">
               <li>
@@ -139,146 +139,146 @@
               </li>
             </ol>
             <p class="hint">如果提示的是「已损坏，无法打开」（0.9.0 及更早的版本会这样），在终端运行 <code>xattr -dr com.apple.quarantine /Applications/TapeBrowser.app</code> 后再打开。</p>
-        </details>
+          </details>
 
-        <details class="older">
-          <summary>更早的版本</summary>
+          <details class="older">
+            <summary>更早的版本</summary>
 
-        <h3>0.16.2 <span class="date">2026-10-12</span></h3>
-        <ul>
-          <li>小改进和问题修复</li>
-        </ul>
-        <h3>0.16.1 <span class="date">2026-10-11</span></h3>
-        <ul>
-          <li>修复：点红色的钱包按钮把钱包切到网站所在的链后，有的钱包按钮还一直是红色。现在钱包确认切换成功，按钮就会变回正常</li>
-        </ul>
-        <h3>0.16.0 <span class="date">2026-10-11</span></h3>
-        <ul>
-          <li>Shared by TapeCode：DeWEB 应用里，开发者在 TapeCode 的 TapeTape 里分享过的网站会标上「Shared by TapeCode」。这个标记的数据来自 tapecode.ai 的公开接口，不是链上信息，只说明有人分享过这个网站，不代表网站是用 TapeCode 做的；读不到时沿用上次的结果，不影响其他功能</li>
-        </ul>
-        <h3>0.15.0 <span class="date">2026-10-10</span></h3>
-        <ul>
-          <li>检查更新：启动时检查有没有新版本（一天最多一次），有新版本时弹窗提示，点「去下载」打开 GitHub 发布页，也可以跳过这个版本。只提示、不自动下载安装。菜单里的「检查更新…」可以随时手动检查</li>
-        </ul>
-        <h3>0.14.0 <span class="date">2026-10-10</span></h3>
-        <ul>
-          <li>macOS 安装包用 Apple 开发者证书（Developer ID）签名，并通过 Apple 公证，下载后双击就能打开，不用再去系统设置里点「仍要打开」</li>
-          <li>不再提供 macOS Intel 版本，只提供 Apple 芯片版本。Intel 芯片的 Mac 可以继续使用 <a href="https://github.com/trytotapeout/TapeBrowser/releases/tag/v0.13.0">0.13.0</a></li>
-          <li>发布到容器（实验功能）：本地预览的预检查面板里点「发布到容器…」，选链（BNB Chain / X Layer）和自己的电路，先看发布计划和预估花费，再一键上传。没开通容器的电路可以顺带开通。钱包通常只需确认 2 到 3 笔交易（开通、授权临时钱包 6 小时、充值 Gas），之后由临时钱包自动上传，发完核对链上内容并退回剩下的 Gas</li>
-          <li>发布可以暂停、中断后接着发；链上已经有的相同文件直接复用，不重复上传。临时钱包的私钥用系统钥匙串加密保存在本机，不能导出</li>
-          <li>链上文件只增不改：内容变了的文件要换文件名，只有首页 index.html 可以在最后整个替换。预检查会提示首页超过一块（24000 字节）时替换要分几笔、替换期间网站会暂时打不开</li>
-          <li>发布功能还没有在真实网络上完整测试过，开通费和 Gas 是真实花费，建议先用一个小网站在 X Layer 上试一次</li>
-        </ul>
-        <h3>0.13.0 <span class="date">2026-10-09</span></h3>
-        <ul>
-          <li>安全体检：网站信息面板里点「开始体检」，读取网站的全部文件在本机分析：会请你签哪些操作（授权、无限额授权、Permit、Seaport 挂单、盲签）、代码里写死的地址是合约还是普通钱包，以及骗助记词、盗币工具包、回传数据、劫持钱包、远程加载代码等作恶特征。规则用目录里全部 85 个网站校准过</li>
-          <li>本地预览和发布预检查：菜单「文件 → 打开本地文件夹预览」（⌘O），上链前按 tape:// 的规则预览网站，文件改了自动刷新；预检查列出传不上去、上链后打不开、目录里显示不好的问题，以及要发多少笔交易</li>
-          <li>不在链上的网站标「未校验」：普通网页的地址栏左边显示灰色的「未校验」，连接钱包、签名时也会提醒内容不在链上</li>
-          <li>站长声明分类的文件改名为 deweb.json</li>
-          <li>新标签页、产品网站和分享落地页换成更朴素的样式：暖白底、白色卡片、细边框，去掉渐变和阴影</li>
-        </ul>
+            <h3>0.16.2 <span class="date">2026-10-12</span></h3>
+            <ul>
+              <li>小改进和问题修复</li>
+            </ul>
+            <h3>0.16.1 <span class="date">2026-10-11</span></h3>
+            <ul>
+              <li>修复：点红色的钱包按钮把钱包切到网站所在的链后，有的钱包按钮还一直是红色。现在钱包确认切换成功，按钮就会变回正常</li>
+            </ul>
+            <h3>0.16.0 <span class="date">2026-10-11</span></h3>
+            <ul>
+              <li>Shared by TapeCode：DeWEB 应用里，开发者在 TapeCode 的 TapeTape 里分享过的网站会标上「Shared by TapeCode」。这个标记的数据来自 tapecode.ai 的公开接口，不是链上信息，只说明有人分享过这个网站，不代表网站是用 TapeCode 做的；读不到时沿用上次的结果，不影响其他功能</li>
+            </ul>
+            <h3>0.15.0 <span class="date">2026-10-10</span></h3>
+            <ul>
+              <li>检查更新：启动时检查有没有新版本（一天最多一次），有新版本时弹窗提示，点「去下载」打开 GitHub 发布页，也可以跳过这个版本。只提示、不自动下载安装。菜单里的「检查更新…」可以随时手动检查</li>
+            </ul>
+            <h3>0.14.0 <span class="date">2026-10-10</span></h3>
+            <ul>
+              <li>macOS 安装包用 Apple 开发者证书（Developer ID）签名，并通过 Apple 公证，下载后双击就能打开，不用再去系统设置里点「仍要打开」</li>
+              <li>不再提供 macOS Intel 版本，只提供 Apple 芯片版本。Intel 芯片的 Mac 可以继续使用 <a href="https://github.com/trytotapeout/TapeBrowser/releases/tag/v0.13.0">0.13.0</a></li>
+              <li>发布到容器（实验功能）：本地预览的预检查面板里点「发布到容器…」，选链（BNB Chain / X Layer）和自己的电路，先看发布计划和预估花费，再一键上传。没开通容器的电路可以顺带开通。钱包通常只需确认 2 到 3 笔交易（开通、授权临时钱包 6 小时、充值 Gas），之后由临时钱包自动上传，发完核对链上内容并退回剩下的 Gas</li>
+              <li>发布可以暂停、中断后接着发；链上已经有的相同文件直接复用，不重复上传。临时钱包的私钥用系统钥匙串加密保存在本机，不能导出</li>
+              <li>链上文件只增不改：内容变了的文件要换文件名，只有首页 index.html 可以在最后整个替换。预检查会提示首页超过一块（24000 字节）时替换要分几笔、替换期间网站会暂时打不开</li>
+              <li>发布功能还没有在真实网络上完整测试过，开通费和 Gas 是真实花费，建议先用一个小网站在 X Layer 上试一次</li>
+            </ul>
+            <h3>0.13.0 <span class="date">2026-10-09</span></h3>
+            <ul>
+              <li>安全体检：网站信息面板里点「开始体检」，读取网站的全部文件在本机分析：会请你签哪些操作（授权、无限额授权、Permit、Seaport 挂单、盲签）、代码里写死的地址是合约还是普通钱包，以及骗助记词、盗币工具包、回传数据、劫持钱包、远程加载代码等作恶特征。规则用目录里全部 85 个网站校准过</li>
+              <li>本地预览和发布预检查：菜单「文件 → 打开本地文件夹预览」（⌘O），上链前按 tape:// 的规则预览网站，文件改了自动刷新；预检查列出传不上去、上链后打不开、目录里显示不好的问题，以及要发多少笔交易</li>
+              <li>不在链上的网站标「未校验」：普通网页的地址栏左边显示灰色的「未校验」，连接钱包、签名时也会提醒内容不在链上</li>
+              <li>站长声明分类的文件改名为 deweb.json</li>
+              <li>新标签页、产品网站和分享落地页换成更朴素的样式：暖白底、白色卡片、细边框，去掉渐变和阴影</li>
+            </ul>
 
-        <h3>0.12.0 <span class="date">2026-10-08</span></h3>
-        <ul>
-          <li>DeWEB 应用：新标签页第一个分栏，默认打开，以卡片显示全部网站，可以切回列表</li>
-          <li>卡片显示站长放在网站根目录的 logo.png / logo.jpg（256×256）或 cover.png / cover.jpg（640×400），每张不超过 50 KB；没有图片时显示标题首字</li>
-          <li>分类：游戏、金融、工具、社交与内容、生态、其他，可以按分类筛选。默认在本机按标题和页面内容推测，站长在根目录放 deweb.json 写上 category 就以它为准</li>
-          <li>分享链接：网站信息面板里可以复制一个 https 链接，能发到 X、Telegram、微信；装了 TapeBrowser 的人点开直接打开网站，没装的看到下载页</li>
-          <li>去掉电路身份，打赏改为从钱包直接转 BEM 到网站的容器，只付网络 gas</li>
-          <li>使用帮助单独成页（菜单「帮助 → 使用帮助」），新标签页更简洁；窗口启动时最大化</li>
-          <li>修复：有的钱包切链后不通知，钱包按钮一直显示红色</li>
-        </ul>
+            <h3>0.12.0 <span class="date">2026-10-08</span></h3>
+            <ul>
+              <li>DeWEB 应用：新标签页第一个分栏，默认打开，以卡片显示全部网站，可以切回列表</li>
+              <li>卡片显示站长放在网站根目录的 logo.png / logo.jpg（256×256）或 cover.png / cover.jpg（640×400），每张不超过 50 KB；没有图片时显示标题首字</li>
+              <li>分类：游戏、金融、工具、社交与内容、生态、其他，可以按分类筛选。默认在本机按标题和页面内容推测，站长在根目录放 deweb.json 写上 category 就以它为准</li>
+              <li>分享链接：网站信息面板里可以复制一个 https 链接，能发到 X、Telegram、微信；装了 TapeBrowser 的人点开直接打开网站，没装的看到下载页</li>
+              <li>去掉电路身份，打赏改为从钱包直接转 BEM 到网站的容器，只付网络 gas</li>
+              <li>使用帮助单独成页（菜单「帮助 → 使用帮助」），新标签页更简洁；窗口启动时最大化</li>
+              <li>修复：有的钱包切链后不通知，钱包按钮一直显示红色</li>
+            </ul>
 
-        <h3>0.11.0 <span class="date">2026-10-07</span></h3>
-        <ul>
-          <li>浏览器身份：用一枚 TapeBrowser 电路（BSC 第 1196 号、X Layer 第 281 号处理器）登录，一枚电路就是一个身份；工具栏显示身份和它容器里的 BEM，电路转走或换了钱包会自动退出</li>
-          <li>打赏：在网站信息面板里，从身份的容器把 BEM 打赏给网站的容器。打赏前先在链上模拟，容器合约的手续费会写在确认框里</li>
-          <li>新上线：新标签页列出最近 7 天第一次发布首页的网站</li>
-          <li>新标签页放宽，网站列表显示得更完整；链的简称改成 BSC</li>
-          <li>身份容器没开通时，可以直接在新标签里打开 TapeOut 官网去开通</li>
-        </ul>
+            <h3>0.11.0 <span class="date">2026-10-07</span></h3>
+            <ul>
+              <li>浏览器身份：用一枚 TapeBrowser 电路（BSC 第 1196 号、X Layer 第 281 号处理器）登录，一枚电路就是一个身份；工具栏显示身份和它容器里的 BEM，电路转走或换了钱包会自动退出</li>
+              <li>打赏：在网站信息面板里，从身份的容器把 BEM 打赏给网站的容器。打赏前先在链上模拟，容器合约的手续费会写在确认框里</li>
+              <li>新上线：新标签页列出最近 7 天第一次发布首页的网站</li>
+              <li>新标签页放宽，网站列表显示得更完整；链的简称改成 BSC</li>
+              <li>身份容器没开通时，可以直接在新标签里打开 TapeOut 官网去开通</li>
+            </ul>
 
-        <h3>0.10.1 <span class="date">2026-10-06</span></h3>
-        <ul>
-          <li>钱包和当前网站不在同一条链上时，点红色的钱包按钮就会请钱包切到网站所在的链，不用再去钱包里手动切换</li>
-        </ul>
+            <h3>0.10.1 <span class="date">2026-10-06</span></h3>
+            <ul>
+              <li>钱包和当前网站不在同一条链上时，点红色的钱包按钮就会请钱包切到网站所在的链，不用再去钱包里手动切换</li>
+            </ul>
 
-        <h3>0.10.0 <span class="date">2026-10-05</span></h3>
-        <ul>
-          <li>钱包按钮旁显示 BEM 价格（直接读 PancakeSwap BEM/USDT 池的成交价），连上钱包后显示 BNB Chain 和 X Layer 上的 BEM 总数和折合美元</li>
-          <li>网站信息面板显示容器里的原生币（BNB / OKB / ETH）和 BEM</li>
-        </ul>
+            <h3>0.10.0 <span class="date">2026-10-05</span></h3>
+            <ul>
+              <li>钱包按钮旁显示 BEM 价格（直接读 PancakeSwap BEM/USDT 池的成交价），连上钱包后显示 BNB Chain 和 X Layer 上的 BEM 总数和折合美元</li>
+              <li>网站信息面板显示容器里的原生币（BNB / OKB / ETH）和 BEM</li>
+            </ul>
 
-        <h3>0.9.1 <span class="date">2026-10-05</span></h3>
-        <ul>
-          <li>修复：从网上下载的 macOS 安装包在 Apple 芯片的 Mac 上提示「已损坏，无法打开」。现在整个应用都做了完整的临时签名，系统只会提示无法验证开发者</li>
-          <li>更新了 macOS 第一次打开的方法说明</li>
-        </ul>
+            <h3>0.9.1 <span class="date">2026-10-05</span></h3>
+            <ul>
+              <li>修复：从网上下载的 macOS 安装包在 Apple 芯片的 Mac 上提示「已损坏，无法打开」。现在整个应用都做了完整的临时签名，系统只会提示无法验证开发者</li>
+              <li>更新了 macOS 第一次打开的方法说明</li>
+            </ul>
 
-        <h3>0.9.0 <span class="date">2026-10-04</span></h3>
-        <ul>
-          <li>签名风险解读：无限额授权、授权全部 NFT、Permit / Permit2 离线授权、Seaport 挂单、<code>eth_sign</code> 盲签标为高危，默认按钮改为「拒绝」</li>
-          <li>代币名称和精度直接从链上读；金额单位跟着链显示 BNB / OKB / ETH（以前总是显示 BNB）</li>
-          <li>网站运行了不在链上的脚本或接口时，按钮显示「含外部脚本」，面板列出地址</li>
-          <li>上次同意签名之后网站改过文件，签名时列出改了哪些文件</li>
-          <li>按 GPL-3.0-or-later 开源，欢迎提 PR</li>
-        </ul>
+            <h3>0.9.0 <span class="date">2026-10-04</span></h3>
+            <ul>
+              <li>签名风险解读：无限额授权、授权全部 NFT、Permit / Permit2 离线授权、Seaport 挂单、<code>eth_sign</code> 盲签标为高危，默认按钮改为「拒绝」</li>
+              <li>代币名称和精度直接从链上读；金额单位跟着链显示 BNB / OKB / ETH（以前总是显示 BNB）</li>
+              <li>网站运行了不在链上的脚本或接口时，按钮显示「含外部脚本」，面板列出地址</li>
+              <li>上次同意签名之后网站改过文件，签名时列出改了哪些文件</li>
+              <li>按 GPL-3.0-or-later 开源，欢迎提 PR</li>
+            </ul>
 
-        <h3>0.8.2 <span class="date">2026-10-03</span></h3>
-        <ul>
-          <li>新增 macOS Intel（x64）安装包</li>
-          <li>安装包统一命名为 <code>TapeBrowser-版本-平台-架构</code></li>
-        </ul>
+            <h3>0.8.2 <span class="date">2026-10-03</span></h3>
+            <ul>
+              <li>新增 macOS Intel（x64）安装包</li>
+              <li>安装包统一命名为 <code>TapeBrowser-版本-平台-架构</code></li>
+            </ul>
 
-        <h3>0.8.1 <span class="date">2026-10-02</span></h3>
-        <ul>
-          <li>第一个公开发布的版本，提供 macOS、Windows、Linux 安装包</li>
-          <li>「关于」里显示 GitHub 仓库地址</li>
-        </ul>
+            <h3>0.8.1 <span class="date">2026-10-02</span></h3>
+            <ul>
+              <li>第一个公开发布的版本，提供 macOS、Windows、Linux 安装包</li>
+              <li>「关于」里显示 GitHub 仓库地址</li>
+            </ul>
 
-        <h3>0.8.0</h3>
-        <ul><li>中英文界面，默认跟随系统语言，可以在设置里切换</li></ul>
+            <h3>0.8.0</h3>
+            <ul><li>中英文界面，默认跟随系统语言，可以在设置里切换</li></ul>
 
-        <h3>0.7</h3>
-        <ul>
-          <li>多节点交叉校验</li>
-          <li>持有人变更提醒；最近访问和书签里标「有更新」「持有人已变」</li>
-          <li>「持有的全部网站」：列出某个持有人的所有网站</li>
-        </ul>
+            <h3>0.7</h3>
+            <ul>
+              <li>多节点交叉校验</li>
+              <li>持有人变更提醒；最近访问和书签里标「有更新」「持有人已变」</li>
+              <li>「持有的全部网站」：列出某个持有人的所有网站</li>
+            </ul>
 
-        <h3>0.6</h3>
-        <ul>
-          <li>目录改为每小时增量检查、每周完整扫描</li>
-          <li>新标签页支持缩放</li>
-        </ul>
+            <h3>0.6</h3>
+            <ul>
+              <li>目录改为每小时增量检查、每周完整扫描</li>
+              <li>新标签页支持缩放</li>
+            </ul>
 
-        <h3>0.5</h3>
-        <ul>
-          <li>支持 X Layer（区号 2）和 Base（区号 3），每条链各自的节点，连接时自动切换钱包的链</li>
-          <li>地址栏显示网站所在链的彩色标签</li>
-          <li>Windows 和 Linux 打包</li>
-        </ul>
+            <h3>0.5</h3>
+            <ul>
+              <li>支持 X Layer（区号 2）和 Base（区号 3），每条链各自的节点，连接时自动切换钱包的链</li>
+              <li>地址栏显示网站所在链的彩色标签</li>
+              <li>Windows 和 Linux 打包</li>
+            </ul>
 
-        <h3>0.4</h3>
-        <ul><li>全站目录：自动扫描链上所有有首页的网站</li></ul>
+            <h3>0.4</h3>
+            <ul><li>全站目录：自动扫描链上所有有首页的网站</li></ul>
 
-        <h3>0.1 – 0.3 <span class="date">2026-10-01</span></h3>
-        <ul>
-          <li><code>tape://</code> 浏览、数字串枚举、钱包地址扫描、桥接浏览器钱包扩展</li>
-          <li>页内查找、缩放、历史记录和书签</li>
-          <li>网站信息面板；本机内容缓存，读链失败时用缓存兜底</li>
-        </ul>
-        </details>
+            <h3>0.1 – 0.3 <span class="date">2026-10-01</span></h3>
+            <ul>
+              <li><code>tape://</code> 浏览、数字串枚举、钱包地址扫描、桥接浏览器钱包扩展</li>
+              <li>页内查找、缩放、历史记录和书签</li>
+              <li>网站信息面板；本机内容缓存，读链失败时用缓存兜底</li>
+            </ul>
+          </details>
+        </div>
+      </section>
+
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <span>TapeBrowser · <a href="https://github.com/trytotapeout/TapeBrowser/blob/main/LICENSE">GPL-3.0-or-later</a> · 作者 <a href="https://x.com/boostbob">x.com/boostbob</a> · <a href="https://discord.gg/2wqemv96r">Discord</a></span>
+        <span><a href="https://github.com/trytotapeout/TapeBrowser/blob/main/CONTRIBUTING.md">参与贡献</a> · <a href="https://github.com/trytotapeout/TapeBrowser/issues">反馈问题</a> · <a href="https://t.me/+vYYRSzWkbg40NDhl">加入 Telegram</a> · <a href="https://discord.gg/2wqemv96r">加入 Discord</a></span>
       </div>
-    </section>
-
-  </main>
-
-  <footer>
-    <div class="wrap">
-      <span>TapeBrowser · <a href="https://github.com/trytotapeout/TapeBrowser/blob/main/LICENSE">GPL-3.0-or-later</a> · 作者 <a href="https://x.com/boostbob">x.com/boostbob</a></span>
-      <span><a href="https://github.com/trytotapeout/TapeBrowser/blob/main/CONTRIBUTING.md">参与贡献</a> · <a href="https://github.com/trytotapeout/TapeBrowser/issues">反馈问题</a> · <a href="https://t.me/+vYYRSzWkbg40NDhl">加入 Telegram</a> · <a href="https://discord.gg/7mAxeTWbH">加入 Discord</a></span>
-    </div>
-  </footer>
-</body>
+    </footer>
+  </body>
 </html>
